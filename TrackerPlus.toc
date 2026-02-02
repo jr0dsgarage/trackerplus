@@ -1,0 +1,13 @@
+## Interface: 120000
+## Title: Tracker|cff00ff00Plus|r
+## Notes: Advanced quest and objective tracker replacement with categorization and customization
+## Author: jr0dsgarage
+## Version: 1.0.0
+## SavedVariables: TrackerPlusDB
+## IconTexture: Interface\Icons\INV_Misc_Map_01
+
+Database.lua
+DebugFrame.lua
+Core.lua
+TrackerFrame.lua
+Settings.lua
