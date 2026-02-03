@@ -143,20 +143,6 @@ Access the full settings panel via:
 - **TrackerFrame.lua** - UI rendering, scrolling, button pooling
 - **Settings.lua** - Modern WoW settings panel with full customization
 
-## Future Enhancements
-
-Planned features for future releases:
-- Quest history and statistics
-- Custom quest filters
-- Import/export profiles
-- Waypoint integration
-- Quest sharing alerts
-- Completion notifications
-- Custom sound alerts
-- Quest rewards preview
-- Time tracking per quest
-- Quest completion rate statistics
-
 ## Compatibility
 
 - **WoW Version**: 12.0.0.0+ (The War Within and beyond)
@@ -176,4 +162,3 @@ All rights reserved. For personal use only.
 ---
 
 **Enjoy enhanced quest tracking with TrackerPlus!** 🎯
-# trackerplus
