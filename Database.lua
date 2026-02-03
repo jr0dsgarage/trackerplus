@@ -20,6 +20,7 @@ local DEFAULTS = {
     borderEnabled = false,
     borderColor = {r = 1, g = 1, b = 1, a = 1},
     borderSize = 1,
+    headerIconStyle = "standard", -- "standard", "square", "text_brackets", "text_arrows"
     
     -- Font Settings
     fontSize = 12,
@@ -62,6 +63,7 @@ local DEFAULTS = {
     showScenarios = true,
     showDungeonObjectives = true,
     showMonthlyActivities = true,
+    showEndeavors = true,
     
     -- Advanced Features
     autoTrackQuests = false,
@@ -89,6 +91,18 @@ local DEFAULTS = {
     
     -- Performance
     updateInterval = 0.1,
+    
+    -- Spacing & Layout
+    spacingMajorHeaderIndent = 0,      -- Indent for major category headers (Quests, Achievements, etc.)
+    spacingMinorHeaderIndent = 5,      -- Indent for minor zone headers
+    spacingTrackableIndent = 10,       -- Indent for quest/achievement items
+    spacingPOIButton = 16,             -- Left padding when POI button is present
+    spacingItemButton = 20,            -- Additional padding when item button exists
+    spacingObjectiveIndent = 0,        -- Additional indent for objectives (relative to parent)
+    spacingItemVertical = 4,           -- Vertical spacing between trackable items
+    spacingMajorHeaderAfter = 26,      -- Vertical space after major headers
+    spacingMinorHeaderAfter = 22,      -- Vertical space after minor headers
+    spacingProgressBarInset = 20,      -- Horizontal inset for progress bars from edges
 }
 
 -- Deep copy helper

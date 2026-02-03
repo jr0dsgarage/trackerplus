@@ -119,6 +119,57 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
     return yOffset - 50 -- Sliders need more vertical space
 end
 
+-- Helper: Create Cycle Button (Simpler than Dropdown for limited options)
+local function CreateCycleButton(parent, text, dbKey, options, tooltip, yOffset)
+    local button = CreateFrame("Button", addonName .. dbKey .. "Cycle", parent, "UIPanelButtonTemplate")
+    button:SetSize(140, 24)
+    button:SetPoint("TOPLEFT", 150, yOffset + 5) -- Offset to right of label
+    
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", 16, yOffset)
+    label:SetText(text)
+    
+    local function UpdateText()
+        local val = addon.db[dbKey]
+        local display = "Unknown"
+        for _, opt in ipairs(options) do
+            if opt.value == val then display = opt.text break end
+        end
+        button:SetText(display)
+    end
+    
+    button:SetScript("OnClick", function()
+        -- Find current index
+        local currentIdx = 1
+        for i, opt in ipairs(options) do
+            if opt.value == addon.db[dbKey] then currentIdx = i break end
+        end
+        
+        -- Cycle
+        local nextIdx = currentIdx + 1
+        if nextIdx > #options then nextIdx = 1 end
+        
+        addon:SetSetting(dbKey, options[nextIdx].value)
+        UpdateText()
+        
+        if dbKey == "headerIconStyle" then addon:RefreshDisplay() end
+    end)
+    
+    if tooltip then
+        button:SetScript("OnEnter", function(self)
+             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+             GameTooltip:SetText(text, 1, 1, 1)
+             GameTooltip:AddLine(tooltip, nil, nil, nil, true)
+             GameTooltip:Show()
+        end)
+        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    
+    UpdateText()
+    
+    return yOffset - 30
+end
+
 -- Helper: Create Color Picker
 local function CreateColorPicker(parent, text, dbKey, callback, yOffset)
     local container = CreateFrame("Button", nil, parent)
@@ -237,7 +288,7 @@ local function InitUI()
     end
     
     local function CreateTabs(parent)
-        local tabNames = {"General", "Appearance", "Tracking"}
+        local tabNames = {"General", "Appearance", "Layout", "Tracking"}
         local prevTab
         
         for i, name in ipairs(tabNames) do
@@ -308,6 +359,13 @@ local function InitUI()
     y = CreateSlider(p2, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", y)
     y = CreateCheckbox(p2, "Show Border", "borderEnabled", "Show a border around the tracker", y)
     
+    y = CreateCycleButton(p2, "Expand/Collapse Icon", "headerIconStyle", {
+        {text = "Standard (Gold)", value = "standard"},
+        {text = "Square (Check)", value = "square"},
+        {text = "Text [+/-]", value = "text_brackets"},
+        {text = "Text >/v", value = "text_arrows"}
+    }, "Style of the expand/collapse header icons", y)
+    
     y = CreateHeader(p2, "Font Settings", y)
     y = CreateSlider(p2, "Font Size", "fontSize", 8, 24, 1, "Size of the quest text", y)
     y = CreateSlider(p2, "Header Size", "headerFontSize", 10, 28, 1, "Size of the headers", y)
@@ -325,25 +383,59 @@ local function InitUI()
     y = CreateColorPicker(p2, "Failed Color", "failedColor", updateDisplay, y)
     p2.finalHeight = math.abs(y) + 20
     
-    -- Page 3: Tracking
+    -- Page 3: Layout & Spacing
     local p3 = CreatePage()
     y = -16
-    y = CreateHeader(p3, "Display Options", y)
-    y = CreateCheckbox(p3, "Show Quest Level", "showQuestLevel", "Show the level of the quest", y)
-    y = CreateCheckbox(p3, "Show Quest Type", "showQuestType", "Show type (Daily, Elite, etc.)", y)
-    y = CreateCheckbox(p3, "Show Distance", "showDistance", "Show distance to objective in yards", y)
-    y = CreateCheckbox(p3, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", y)
-    y = CreateCheckbox(p3, "Group by Zone", "groupByZone", "Sort quests into zone groups", y)
+    y = CreateHeader(p3, "Horizontal Spacing", y)
+    y = CreateSlider(p3, "Major Header Indent", "spacingMajorHeaderIndent", 0, 50, 1, "Left indent for major category headers (Quests, Achievements)", y)
+    y = CreateSlider(p3, "Minor Header Indent", "spacingMinorHeaderIndent", 0, 50, 1, "Left indent for zone/subgroup headers", y)
+    y = CreateSlider(p3, "Quest/Item Indent", "spacingTrackableIndent", 0, 50, 1, "Left indent for individual quests and trackables", y)
+    y = CreateSlider(p3, "POI Button Padding", "spacingPOIButton", 0, 50, 1, "Left padding for text when POI button is shown", y)
+    y = CreateSlider(p3, "Item Button Spacing", "spacingItemButton", 0, 50, 1, "Additional space when item/action button exists", y)
+    y = CreateSlider(p3, "Objective Indent", "spacingObjectiveIndent", 0, 50, 1, "Extra indent for objective lines (relative to quest)", y)
+    y = CreateSlider(p3, "Progress Bar Inset", "spacingProgressBarInset", 0, 50, 1, "Horizontal margin for progress bars from edges", y)
     
-    y = CreateHeader(p3, "Trackable Types", y)
-    y = CreateCheckbox(p3, "Quests", "showQuests", "Track regular quests", y)
-    y = CreateCheckbox(p3, "World Quests", "showWorldQuests", "Track world quests", y)
-    y = CreateCheckbox(p3, "Achievements", "showAchievements", "Track achievements", y)
-    y = CreateCheckbox(p3, "Bonus Objectives", "showBonusObjectives", "Track bonus objectives", y)
-    y = CreateCheckbox(p3, "Scenarios", "showScenarios", "Track scenarios and dungeons", y)
-    y = CreateCheckbox(p3, "Professions", "showProfessions", "Track profession recipes/quests", y)
-    y = CreateCheckbox(p3, "Monthly Activities", "showMonthlyActivities", "Track Trading Post / Traveler's Log activities", y)
+    y = CreateHeader(p3, "Vertical Spacing", y)
+    y = CreateSlider(p3, "Item Spacing", "spacingItemVertical", 0, 20, 1, "Vertical gap between trackable items", y)
+    y = CreateSlider(p3, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers", y)
+    y = CreateSlider(p3, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers", y)
+    
+    -- Add refresh button
+    y = y - 10
+    local refreshLayoutBtn = CreateFrame("Button", nil, p3, "UIPanelButtonTemplate")
+    refreshLayoutBtn:SetSize(150, 25)
+    refreshLayoutBtn:SetPoint("TOPLEFT", 16, y)
+    refreshLayoutBtn:SetText("Apply Layout Changes")
+    refreshLayoutBtn:SetScript("OnClick", function()
+        addon:RefreshDisplay()
+    end)
+    y = y - 40
+    
     p3.finalHeight = math.abs(y) + 20
+    
+    -- Page 4: Tracking
+    local p4 = CreatePage()
+    y = -16
+    -- Page 4: Tracking
+    local p4 = CreatePage()
+    y = -16
+    y = CreateHeader(p4, "Display Options", y)
+    y = CreateCheckbox(p4, "Show Quest Level", "showQuestLevel", "Show the level of the quest", y)
+    y = CreateCheckbox(p4, "Show Quest Type", "showQuestType", "Show type (Daily, Elite, etc.)", y)
+    y = CreateCheckbox(p4, "Show Distance", "showDistance", "Show distance to objective in yards", y)
+    y = CreateCheckbox(p4, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", y)
+    y = CreateCheckbox(p4, "Group by Zone", "groupByZone", "Sort quests into zone groups", y)
+    
+    y = CreateHeader(p4, "Trackable Types", y)
+    y = CreateCheckbox(p4, "Quests", "showQuests", "Track regular quests", y)
+    y = CreateCheckbox(p4, "World Quests", "showWorldQuests", "Track world quests", y)
+    y = CreateCheckbox(p4, "Achievements", "showAchievements", "Track achievements", y)
+    y = CreateCheckbox(p4, "Bonus Objectives", "showBonusObjectives", "Track bonus objectives", y)
+    y = CreateCheckbox(p4, "Scenarios", "showScenarios", "Track scenarios and dungeons", y)
+    y = CreateCheckbox(p4, "Professions", "showProfessions", "Track profession recipes/quests", y)
+    y = CreateCheckbox(p4, "Monthly Activities", "showMonthlyActivities", "Track Trading Post / Traveler's Log activities", y)
+    y = CreateCheckbox(p4, "Endeavors", "showEndeavors", "Track housing endeavors", y)
+    p4.finalHeight = math.abs(y) + 20
 
     SelectTab(1)
 end

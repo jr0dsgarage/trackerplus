@@ -298,6 +298,15 @@ function addon:UpdateTrackerDisplay(trackables)
         header.text:SetText("Scenario / Dungeon")
         header.text:SetJustifyH("LEFT")
         
+        -- Hide the expand/collapse button for scenarios
+        if header.expandBtn then
+             header.expandBtn:Hide()
+        end
+        -- Reset text position since there is no icon
+        header.text:ClearAllPoints()
+        header.text:SetPoint("LEFT", 5, 0)
+        header.text:SetPoint("RIGHT", -5, 0)
+        
         header.bg:SetColorTexture(0, 0, 0, 0.4)
         header:SetHeight(24)
         header:Show()
@@ -462,7 +471,13 @@ function addon:UpdateTrackerDisplay(trackables)
                              objText = "  - " .. obj.text
                         elseif obj.numRequired and obj.numRequired > 0 then
                             -- Standard X/Y objective, but maybe use a bar for visuals?
-                            objText = string.format("  - %s: %d/%d", obj.text, obj.numFulfilled or 0, obj.numRequired)
+                            if obj.text and not string.find(obj.text, "/") then
+                                -- If text doesn't already contain "0/3", append it
+                                objText = string.format("  - %s: %d/%d", obj.text, obj.numFulfilled or 0, obj.numRequired)
+                            else
+                                objText = "  - " .. obj.text
+                            end
+                            
                             -- Don't force bar unless we want to styling-wise. 
                             -- But if user sees 67/160 and wants 67%, they probably have a bar in default UI.
                             -- Let's stick to flags for now to be safe.
@@ -472,6 +487,9 @@ function addon:UpdateTrackerDisplay(trackables)
                                 progressMax = obj.numRequired
                                 progressText = string.format("%d%%", math.floor((progressValue/progressMax)*100))
                             end
+                        elseif obj.quantityString and obj.quantityString ~= "" then
+                             -- Fallback if numRequired is 0 but we have a quantity string (common in some scenarios)
+                             objText = string.format("  - %s: %s", obj.text, obj.quantityString)
                         end
                          
                         if not button.objectives then button.objectives = {} end
@@ -588,8 +606,7 @@ function addon:UpdateTrackerDisplay(trackables)
             local isMajor = item.headerType == "major"
             
             -- Padding/Indentation
-            local xOffset = 0
-            if not isMajor then xOffset = 5 end
+            local xOffset = isMajor and db.spacingMajorHeaderIndent or db.spacingMinorHeaderIndent
             
             header:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", xOffset, -yOffset)
             header:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", 0, -yOffset)
@@ -616,15 +633,85 @@ function addon:UpdateTrackerDisplay(trackables)
                 header.text:SetTextColor(db.headerColor.r * 0.9, db.headerColor.g * 0.9, db.headerColor.b * 0.9, db.headerColor.a)
             end
             
-            -- Collapse/Expand Indicator [+/-]
-            local prefix = item.collapsed and "[+] " or "[-] "
-            header.text:SetText(prefix .. item.title)
+            -- Collapse/Expand Icon
+            if not header.expandBtn then
+                header.expandBtn = CreateFrame("Button", nil, header)
+                header.expandBtn:SetPoint("LEFT", 4, 0)
+            end
+            
+            -- Reset Styles
+            header.expandBtn:SetNormalTexture("")
+            header.expandBtn:SetPushedTexture("")
+            header.expandBtn:SetHighlightTexture("")
+            header.expandBtn:SetText("")
+            
+            local iconStyle = db.headerIconStyle or "standard"
+            local isCollapsed = item.collapsed
+            
+            if iconStyle == "standard" then
+                header.expandBtn:SetSize(16, 16)
+                header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+                header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
+                header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
+            elseif iconStyle == "square" then
+                -- Classic UI Square Buttons (Plus/Minus usually represented by Expand/Collapse textures)
+                header.expandBtn:SetSize(16, 16)
+                -- Note: ExpandButton-Up shows a Plus. CollapseButton-Up shows a Minus.
+                header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
+                header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
+                -- header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight") -- Often doesn't exact match, skip or find better
+            elseif iconStyle == "text_brackets" then
+                header.expandBtn:SetSize(24, 16)
+                header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
+                
+                local fontString = header.expandBtn:GetFontString()
+                if fontString then
+                    fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
+                    fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
+                    fontString:SetJustifyH("LEFT")
+                end
+            elseif iconStyle == "text_arrows" then
+                header.expandBtn:SetSize(16, 16)
+                header.expandBtn:SetText(isCollapsed and ">" or "v")
+                 
+                local fontString = header.expandBtn:GetFontString()
+                if fontString then
+                    fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
+                    fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
+                    fontString:SetJustifyH("CENTER")
+                end
+            end
+            
+            header.expandBtn:Show()
+            
+            -- Icon Tooltip & Click (Exclusive)
+            header.expandBtn:SetScript("OnClick", function(self)
+                 -- Trigger parental click logic or direct
+                 addon:ToggleHeader(item.key, IsShiftKeyDown())
+            end)
+            
+            header.expandBtn:SetScript("OnEnter", function(self)
+                 if isMajor or true then -- Show on all? or just Major? User said "Over the +"
+                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                     if item.collapsed then
+                         GameTooltip:SetText("Hold SHIFT to Expand All", 1, 1, 1)
+                     else
+                         GameTooltip:SetText("Hold SHIFT to Minimize All", 1, 1, 1)
+                     end
+                     GameTooltip:Show()
+                 end
+            end)
+            header.expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            
+            -- Title Text
+            header.text:SetText(item.title)
             header.text:SetJustifyH("LEFT")
             
             -- RESET TEXT POINT for recycled headers to remove old indentation
             -- Ensure text is properly left-aligned regardless of prior usage
             header.text:ClearAllPoints()
-            header.text:SetPoint("LEFT", 5, 0)
+            header.text:SetPoint("LEFT", 22, 0) -- Indent passed the icon
             header.text:SetPoint("RIGHT", -5, 0)
             
             header.bg:SetColorTexture(0, 0, 0, isMajor and 0.4 or 0.2)
@@ -642,11 +729,11 @@ function addon:UpdateTrackerDisplay(trackables)
             -- Clear other scripts that might conflict
             header:SetScript("OnMouseUp", nil)
             
-            -- Clear item-specific handlers
+            -- Removed Tooltip from main header bar area per user request
             header:SetScript("OnEnter", nil)
             header:SetScript("OnLeave", nil)
             
-            yOffset = yOffset + (isMajor and 26 or 22)
+            yOffset = yOffset + (isMajor and db.spacingMajorHeaderAfter or db.spacingMinorHeaderAfter)
             
             -- Cleanup extra elements if reused
             if header.objectives then
@@ -665,11 +752,11 @@ function addon:UpdateTrackerDisplay(trackables)
         else
             -- Trackable item (quest, achievement, etc.)
             local button = self:GetOrCreateButton(contentFrame)
+            if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
             button:Show()
             
             -- Padding/Indentation for button text
-            -- 0 (MainHeader) -> 5 (SubHeader) -> 10 (QuestContainer)
-            local indent = 10
+            local indent = db.spacingTrackableIndent
             
             -- Reset button point completely to avoid previous anchor persistence
             button:ClearAllPoints()
@@ -677,7 +764,7 @@ function addon:UpdateTrackerDisplay(trackables)
             button:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", -5, -yOffset)
             
             -- POI Button logic
-            local leftPadding = 16  -- Internal padding within the button for the icon check
+            local leftPadding = db.spacingPOIButton  -- Internal padding within the button for the icon check
 
             
              -- POI Button (Using Blizzard Template for authenticity)
@@ -712,11 +799,11 @@ function addon:UpdateTrackerDisplay(trackables)
                 button.itemButton = secureBtn
                 
                 -- Update padding since we have an item button now
-                leftPadding = 16 + 20
+                leftPadding = db.spacingPOIButton + db.spacingItemButton
             else
                 if button.itemButton then button.itemButton:Hide() end
                 -- Reset padding
-                leftPadding = 16
+                leftPadding = db.spacingPOIButton
             end
 
             -- Configure POI Button Appearance using Standard Utils
@@ -759,7 +846,7 @@ function addon:UpdateTrackerDisplay(trackables)
                 end
                 
                 -- Ensure padding allows for the button
-                 if leftPadding < 20 then leftPadding = 20 end
+                 if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
 
             else
                 -- Achievements / Professions -> No standard POI button
@@ -767,17 +854,17 @@ function addon:UpdateTrackerDisplay(trackables)
                 if button.icon then button.icon:Hide() end -- Or show generic icon
                 
                 -- Reduce padding since there is no icon
-                leftPadding = 5
+                leftPadding = db.spacingMinorHeaderIndent
             end
 
             -- Update Layout based on dynamic padding (re-apply padding changes)
             if item.item then
-                 leftPadding = 16 + 20
+                 leftPadding = db.spacingPOIButton + db.spacingItemButton
             elseif not isQuest then
-                 leftPadding = 5
+                 leftPadding = db.spacingMinorHeaderIndent
             else
                  -- Quest, no item
-                 leftPadding = 16
+                 leftPadding = db.spacingPOIButton
             end
             
             -- RESET TEXT POINT for recycled buttons
@@ -863,11 +950,11 @@ function addon:UpdateTrackerDisplay(trackables)
                     
                     -- Indent objectives to match title text
                     -- Explicit width constraint for objectives to also wrap relative to parent
-                    objLine:SetWidth(button:GetWidth() - leftPadding - 5)
+                    objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - 5)
                     objLine:SetWordWrap(true)
                     
                     objLine:ClearAllPoints()
-                    objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding, currentY)
+                    objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
                     objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
                     
                     local objColor = obj.finished and db.completeColor or db.objectiveColor
@@ -910,9 +997,8 @@ function addon:UpdateTrackerDisplay(trackables)
                         end
                         
                         -- Layout Bar
-                        -- bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding, currentY) -- Match text indent
-                        bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding, currentY)
-                        bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -20, currentY)
+                        bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+                        bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY)
                         
                         bar:SetMinMaxValues(0, progressMax)
                         bar:SetValue(progressValue)
@@ -996,7 +1082,7 @@ function addon:UpdateTrackerDisplay(trackables)
                 end)
             end
             
-            yOffset = yOffset + height + 4
+            yOffset = yOffset + height + db.spacingItemVertical
         end
     end
     
@@ -1068,6 +1154,7 @@ function addon:OrganizeTrackables(trackables)
         achievement = {},
         profession = {},
         monthly = {},
+        endeavor = {},
     }
     
     -- Bucketing
@@ -1267,6 +1354,13 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 C_TradeSkillUI.SetRecipeTracked(trackable.id, false, trackable.isRecraft)
             elseif trackable.type == "monthly" then
                 C_PerksProgram.RemoveTrackedPerksActivity(trackable.id)
+            elseif trackable.type == "endeavor" then
+                if C_ContentTracking and C_ContentTracking.StopTracking then
+                    -- Assuming Endeavors use ContentTrackingType 4 which might be new, or we find it
+                    -- For now, generic StopTracking if we knew the type ID, but likely user cant shift-click remove without correct API
+                    -- Fallback: Let them use the housing UI
+                    print("Shift-click to remove Endeavors not yet supported.")
+                end
             end
             self:RequestUpdate()
         else
