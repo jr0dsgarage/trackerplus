@@ -237,6 +237,42 @@ function addon:UpdateTrackerLock()
     end
 end
 
+-- Helper to create 1px border lines
+local function CreateBorderLines(bar)
+    if bar.border then return end
+    
+    -- Border (Using textures for 1px thickness)
+    bar.border = CreateFrame("Frame", nil, bar)
+    bar.border:SetPoint("TOPLEFT", -1, 1)
+    bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
+    
+    local function CreateLine(p) 
+        local t = p:CreateTexture(nil, "BORDER") 
+        t:SetColorTexture(1, 1, 1, 1) 
+        return t 
+    end
+    
+    bar.border.top = CreateLine(bar.border)
+    bar.border.top:SetPoint("TOPLEFT")
+    bar.border.top:SetPoint("TOPRIGHT")
+    bar.border.top:SetHeight(1)
+    
+    bar.border.bottom = CreateLine(bar.border)
+    bar.border.bottom:SetPoint("BOTTOMLEFT")
+    bar.border.bottom:SetPoint("BOTTOMRIGHT")
+    bar.border.bottom:SetHeight(1)
+    
+    bar.border.left = CreateLine(bar.border)
+    bar.border.left:SetPoint("TOPLEFT")
+    bar.border.left:SetPoint("BOTTOMLEFT")
+    bar.border.left:SetWidth(1)
+    
+    bar.border.right = CreateLine(bar.border)
+    bar.border.right:SetPoint("TOPRIGHT")
+    bar.border.right:SetPoint("BOTTOMRIGHT")
+    bar.border.right:SetWidth(1)
+end
+
 -- Update tracker display with trackables
 function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local db = self.db
@@ -278,7 +314,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- Quest Item Button
     if item.item then
         local secureBtn = self:GetOrCreateSecureButton(button)
-        secureBtn:SetPoint("TOPLEFT", button, "TOPLEFT", 18, 0) -- Adjusted for tighter layout
+        secureBtn:ClearAllPoints()
+        secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
         secureBtn:SetSize(18, 18) -- Slightly smaller
         secureBtn:SetAttribute("type", "item")
         secureBtn:SetAttribute("item", item.item.link)
@@ -286,12 +323,33 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         secureBtn:Show()
         button.itemButton = secureBtn
         
-        -- Update padding since we have an item button now
-        leftPadding = db.spacingPOIButton + db.spacingItemButton
+        -- Update Cooldown
+        if secureBtn.cooldown then
+            local start, duration, enable
+            -- Try specific quest log cooldown first
+            local logIndex = item.logIndex or C_QuestLog.GetLogIndexForQuestID(item.id)
+            if logIndex then
+                start, duration, enable = GetQuestLogSpecialItemCooldown(logIndex)
+            end
+            
+            -- Fallback to standard item cooldown if needed
+            if not start and item.item.link then
+                local itemID = GetItemInfoInstant(item.item.link)
+                if itemID then
+                     start, duration, enable = C_Container.GetItemCooldown(itemID)
+                end
+            end
+            
+            if start and duration and (enable == 1 or enable == true) then
+                secureBtn.cooldown:SetCooldown(start, duration)
+            else
+                secureBtn.cooldown:Hide()
+            end
+        end
+        
+        -- leftPadding is handled separately now as item is on the right
     else
         if button.itemButton then button.itemButton:Hide() end
-        -- Reset padding
-        leftPadding = db.spacingPOIButton
     end
 
     -- Configure POI Button Appearance
@@ -322,9 +380,20 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             button.poiButton:UpdateButtonStyle()
         end
         
-        local isSelected = (item.id == superTrackedQuestID)
+        -- Force selection if this is the Active Quest item, or if IDs match
+        local isSelected = (item.id == superTrackedQuestID) or (item.type == "supertrack")
+        
         if button.poiButton.SetSelected then
             button.poiButton:SetSelected(isSelected)
+        end
+
+        -- Ensure visual consistency for active state, forcing the glow if the template allows
+        if button.poiButton.SelectionGlow then
+            if isSelected then
+                button.poiButton.SelectionGlow:Show()
+            else
+                button.poiButton.SelectionGlow:Hide()
+            end
         end
         
          if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
@@ -335,17 +404,20 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         leftPadding = db.spacingMinorHeaderIndent
     end
     
-    if item.item then
-         leftPadding = db.spacingPOIButton + db.spacingItemButton
-    elseif not isQuest then
+    if not isQuest then
          leftPadding = db.spacingMinorHeaderIndent
     else
          leftPadding = db.spacingPOIButton
     end
     
+    local rightPadding = -2
+    if item.item then
+        rightPadding = -22 -- Make room for item button
+    end
+
     button.text:ClearAllPoints()
     button.text:SetPoint("TOPLEFT", leftPadding, -2) 
-    button.text:SetPoint("TOPRIGHT", -2, -2)
+    button.text:SetPoint("TOPRIGHT", rightPadding, -2)
 
     local titleText = item.title
     if db.showQuestLevel and item.level and item.level > 0 then
@@ -426,21 +498,22 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 local bar = button.progressBars[objIndex]
                 if not bar then
                     bar = CreateFrame("StatusBar", nil, button)
-                    bar:SetSize(1, 10)
+                    bar:SetSize(1, 15)
                     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
                     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                     bar.bg:SetAllPoints()
                     bar.bg:SetColorTexture(0, 0, 0, 0.5)
-                    local border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-                    border:SetPoint("TOPLEFT", -1, 1)
-                    border:SetPoint("BOTTOMRIGHT", 1, -1)
-                    border:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-                    border:SetBackdropBorderColor(0, 0, 0, 1)
+                    
+                    CreateBorderLines(bar)
+
                     bar.value = bar:CreateFontString(nil, "OVERLAY") 
                     bar.value:SetFont(db.fontFace, 9, "OUTLINE")
                     bar.value:SetPoint("CENTER")
                     button.progressBars[objIndex] = bar
                 end
+                
+                bar:SetHeight(15) -- Ensure height update
+                -- Border color is set on creation (white)
                 
                 bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
                 bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY)
@@ -450,7 +523,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 if bar.value then bar.value:SetText(progressValue .. "%") end
                 bar:Show()
                 
-                local barH = 14
+                local barH = 19
                 currentY = currentY - barH
                 height = height + barH
             elseif button.progressBars and button.progressBars[objIndex] then
@@ -657,6 +730,12 @@ function addon:UpdateTrackerDisplay(trackables)
                         if obj.quantityString and string.find(obj.quantityString, "%%") then
                              hasProgressBarFlag = true
                         end
+                        
+                        -- Do not show progress bars if quest or objective is complete
+                        local isObjComplete = obj.finished or (obj.numRequired and obj.numRequired > 0 and obj.numFulfilled and obj.numFulfilled >= obj.numRequired)
+                        if item.isComplete or isObjComplete then
+                             hasProgressBarFlag = false
+                        end
 
                         if hasProgressBarFlag then
                              isProgressBar = true
@@ -701,6 +780,11 @@ function addon:UpdateTrackerDisplay(trackables)
                              -- 3. Clamp and Display
                              if percent > 100 then percent = 100 end
                              if percent < 0 then percent = 0 end
+                             
+                             -- If calculated percent is 100% (or more), treat as complete and hide bar
+                             if percent >= 100 then
+                                isProgressBar = false
+                             end
                              
                              progressValue = percent
                              progressMax = 100
@@ -751,7 +835,7 @@ function addon:UpdateTrackerDisplay(trackables)
                             -- Don't force bar unless we want to styling-wise. 
                             -- But if user sees 67/160 and wants 67%, they probably have a bar in default UI.
                             -- Let's stick to flags for now to be safe.
-                            if obj.numRequired > 20 then -- Arbitrary threshold for "big numbers" that look good as bars
+                            if obj.numRequired > 20 and not item.isComplete and not obj.finished then -- Arbitrary threshold for "big numbers" that look good as bars
                                 isProgressBar = true
                                 progressValue = obj.numFulfilled or 0
                                 progressMax = obj.numRequired
@@ -789,7 +873,7 @@ function addon:UpdateTrackerDisplay(trackables)
                             local bar = button.progressBars[objIndex]
                             if not bar then
                                 bar = CreateFrame("StatusBar", nil, button)
-                                bar:SetSize(1, 14) -- width dynamic
+                                bar:SetSize(1, 21) -- width dynamic
                                 bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
                                 bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                                 bar.bg:SetAllPoints()
@@ -799,18 +883,38 @@ function addon:UpdateTrackerDisplay(trackables)
                                 bar.value:SetFont(db.fontFace, 10, "OUTLINE")
                                 bar.value:SetPoint("CENTER")
                                 
-                                -- Border
-                                local border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-                                border:SetPoint("TOPLEFT", -1, 1)
-                                border:SetPoint("BOTTOMRIGHT", 1, -1)
-                                border:SetBackdrop({
-                                    edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1,
-                                })
-                                border:SetBackdropBorderColor(0, 0, 0, 1)
+                                -- Border (Using textures for 1px thickness)
+                                bar.border = CreateFrame("Frame", nil, bar)
+                                bar.border:SetPoint("TOPLEFT", -1, 1)
+                                bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
+                                
+                                local function CreateLine(p) local t = p:CreateTexture(nil, "BORDER") t:SetColorTexture(1, 1, 1, 1) return t end
+                                bar.border.top = CreateLine(bar.border)
+                                bar.border.top:SetPoint("TOPLEFT")
+                                bar.border.top:SetPoint("TOPRIGHT")
+                                bar.border.top:SetHeight(1)
+                                
+                                bar.border.bottom = CreateLine(bar.border)
+                                bar.border.bottom:SetPoint("BOTTOMLEFT")
+                                bar.border.bottom:SetPoint("BOTTOMRIGHT")
+                                bar.border.bottom:SetHeight(1)
+                                
+                                bar.border.left = CreateLine(bar.border)
+                                bar.border.left:SetPoint("TOPLEFT")
+                                bar.border.left:SetPoint("BOTTOMLEFT")
+                                bar.border.left:SetWidth(1)
+                                
+                                bar.border.right = CreateLine(bar.border)
+                                bar.border.right:SetPoint("TOPRIGHT")
+                                bar.border.right:SetPoint("BOTTOMRIGHT")
+                                bar.border.right:SetWidth(1)
                                 
                                 button.progressBars[objIndex] = bar
                             end
                             
+                            bar:SetHeight(21)
+                            -- Border color is set on creation (white)
+
                             bar:SetPoint("TOPLEFT", 20, -height)
                             bar:SetPoint("TOPRIGHT", -20, -height)
                             bar:SetMinMaxValues(0, progressMax)
@@ -820,7 +924,7 @@ function addon:UpdateTrackerDisplay(trackables)
                             bar.value:SetText(progressText)
                             
                             bar:Show()
-                            height = height + 18
+                            height = height + 25
                         elseif button.progressBars and button.progressBars[objIndex] then
                              button.progressBars[objIndex]:Hide()
                         end
@@ -1124,337 +1228,7 @@ function addon:UpdateTrackerDisplay(trackables)
 
         else
             -- Trackable item (quest, achievement, etc.)
-            local button = self:GetOrCreateButton(contentFrame)
-            if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
-            button:Show()
-            
-            -- Padding/Indentation for button text
-            local indent = db.spacingTrackableIndent
-            
-            -- Reset button point completely to avoid previous anchor persistence
-            button:ClearAllPoints()
-            button:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", indent, -yOffset)
-            button:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", -5, -yOffset)
-            
-            -- POI Button logic
-            local leftPadding = db.spacingPOIButton  -- Internal padding within the button for the icon check
-
-            
-             -- POI Button (Using Blizzard Template for authenticity)
-            if not button.poiButton then
-                -- Use POIButtonTemplate to get exact Blizzard look/behavior
-                button.poiButton = CreateFrame("Button", nil, button, "POIButtonTemplate")
-                button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, 0) -- Nudged left
-                button.poiButton:SetScale(0.75) -- Slightly smaller
-                
-                -- Override click handling to our logic
-                button.poiButton:SetScript("OnClick", function(self)
-                     if self.questID then
-                         -- Function C_SuperTrack.SetSuperTrackedQuestID(questID)
-                         C_SuperTrack.SetSuperTrackedQuestID(self.questID)
-                         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-                     end
-                end)
-                
-                -- Ensure it doesn't consume mouse events incorrectly (though Button usually does)
-                button.poiButton:RegisterForClicks("LeftButtonUp")
-            end
-            
-            -- Quest Item Button
-            if item.item then
-                local secureBtn = self:GetOrCreateSecureButton(button)
-                secureBtn:SetPoint("TOPLEFT", button, "TOPLEFT", 18, 0) -- Adjusted for tighter layout
-                secureBtn:SetSize(18, 18) -- Slightly smaller
-                secureBtn:SetAttribute("type", "item")
-                secureBtn:SetAttribute("item", item.item.link)
-                secureBtn.icon:SetTexture(item.item.texture)
-                secureBtn:Show()
-                button.itemButton = secureBtn
-                
-                -- Update padding since we have an item button now
-                leftPadding = db.spacingPOIButton + db.spacingItemButton
-            else
-                if button.itemButton then button.itemButton:Hide() end
-                -- Reset padding
-                leftPadding = db.spacingPOIButton
-            end
-
-            -- Configure POI Button Appearance using Standard Utils
-            local isQuest = (item.type == "quest" or item.isWorldQuest)
-            local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
-            
-            -- Only attempt to use POIButtonUtil if it exists globally
-            if isQuest and POIButtonUtil then
-                button.poiButton:Show()
-                if button.icon then button.icon:Hide() end
-                
-                -- Update internal state
-                button.poiButton.questID = item.id
-                -- Check if SetQuestID exists on the button (from template)
-                if button.poiButton.SetQuestID then
-                    button.poiButton:SetQuestID(item.id)
-                end
-                
-                -- Determine Style
-                local style = POIButtonUtil.Style.QuestInProgress
-                
-                if item.isComplete then
-                    style = POIButtonUtil.Style.QuestComplete
-                elseif item.isWorldQuest then
-                    style = POIButtonUtil.Style.WorldQuest
-                end
-
-                if button.poiButton.SetStyle then
-                    button.poiButton:SetStyle(style)
-                end
-                
-                if button.poiButton.UpdateButtonStyle then
-                    button.poiButton:UpdateButtonStyle()
-                end
-                
-                -- Selection State
-                local isSelected = (item.id == superTrackedQuestID)
-                if button.poiButton.SetSelected then
-                    button.poiButton:SetSelected(isSelected)
-                end
-                
-                -- Ensure padding allows for the button
-                 if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
-
-            else
-                -- Achievements / Professions -> No standard POI button
-                button.poiButton:Hide()
-                if button.icon then button.icon:Hide() end -- Or show generic icon
-                
-                -- Reduce padding since there is no icon
-                leftPadding = db.spacingMinorHeaderIndent
-            end
-
-            -- Update Layout based on dynamic padding (re-apply padding changes)
-            if item.item then
-                 leftPadding = db.spacingPOIButton + db.spacingItemButton
-            elseif not isQuest then
-                 leftPadding = db.spacingMinorHeaderIndent
-            else
-                 -- Quest, no item
-                 leftPadding = db.spacingPOIButton
-            end
-            
-            -- RESET TEXT POINT for recycled buttons
-            button.text:ClearAllPoints()
-            -- Force text indentation so recycled buttons don't keep strange offsets
-            button.text:SetPoint("TOPLEFT", leftPadding, -2) 
-            button.text:SetPoint("TOPRIGHT", -2, -2)
-
-            -- Title with level/type
-            local titleText = item.title
-            if db.showQuestLevel and item.level then
-                titleText = string.format("[%d] %s", item.level, titleText)
-            end
-            if db.showQuestType and item.questType then
-                titleText = titleText .. " (" .. item.questType .. ")"
-            end
-            
-            button.text:SetFont(db.fontFace, db.fontSize, db.fontOutline)
-            local color = item.color or db.questColor
-            if isSelected then
-               color = {r=1, g=0.82, b=0, a=1} -- Yellow for selected
-            end
-            button.text:SetTextColor(color.r, color.g, color.b, color.a)
-            button.text:SetText(titleText)
-            button.text:SetPoint("TOPLEFT", leftPadding, -2) -- Adjusted padding
-            button.text:SetJustifyH("LEFT")
-            
-            button.bg:SetColorTexture(0, 0, 0, 0)
-            
-            -- Calculate height based on content
-            -- Use exact measurements for wrapped text
-            local textHeight = button.text:GetStringHeight()
-            local height = math.max(db.fontSize + 4, textHeight + 4)
-            
-            -- Add objectives
-            if item.objectives and #item.objectives > 0 then
-                local currentY = -(textHeight + 2) -- Start below title
-                
-                for objIndex, obj in ipairs(item.objectives) do
-                    local objText = "  - " .. obj.text
-                    local isProgressBar = false
-                    local progressValue = 0
-                    local progressMax = 100
-                    
-                    -- Check for Progress Bar Requirement (% in text)
-                    if obj.text and string.find(obj.text, "%%") then
-                         isProgressBar = true
-                         -- Parse percentage from text (e.g. "Energy: 50%")
-                         local val = string.match(obj.text, "(%d+)%%")
-                         if val then
-                             progressValue = tonumber(val)
-                             progressMax = 100
-                         end
-                         
-                         -- Clean text: remove percentages like "(50%)" or "50%"
-                         local cleanText = obj.text
-                         cleanText = cleanText:gsub("%s*%(%d+%%%)", "") -- Remove (50%)
-                         cleanText = cleanText:gsub("%s*%d+%%", "")     -- Remove 50%
-                         cleanText = cleanText:gsub(":%s*$", "")         -- Remove trailing colon
-                         cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "") -- Trim
-                         
-                         if cleanText == "" then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end -- Fallback if we emptied it too much
-                         
-                         objText = "  - " .. cleanText
-                    elseif obj.numRequired and obj.numRequired > 0 then
-                        -- Clean text if it already starts with numbers to avoid duplication
-                        -- e.g. "18/26 Slay Orcs" -> "Slay Orcs"
-                        local cleanText = obj.text:gsub("^%d+/%d+%s*", "")
-                        cleanText = cleanText:gsub("^%s+", "") -- trim leading space
-                        objText = string.format("  - %d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
-                    end
-                    
-                    -- Create objective line
-                    if not button.objectives then
-                        button.objectives = {}
-                    end
-                    
-                    local objLine = button.objectives[objIndex]
-                    if not objLine then
-                        objLine = button:CreateFontString(nil, "OVERLAY")
-                        button.objectives[objIndex] = objLine
-                    end
-                    
-                    -- Indent objectives to match title text
-                    -- Explicit width constraint for objectives to also wrap relative to parent
-                    objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - 5)
-                    objLine:SetWordWrap(true)
-                    
-                    objLine:ClearAllPoints()
-                    objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
-                    objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
-                    
-                    local objColor = obj.finished and db.completeColor or db.objectiveColor
-                    objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
-                    objLine:SetText(objText)
-                    objLine:SetJustifyH("LEFT")
-                    objLine:Show()
-                    
-                    local lineH = objLine:GetStringHeight()
-                    currentY = currentY - (lineH + 2)
-                    height = height + (lineH + 2)
-
-                    -- Render Progress Bar if needed
-                    if isProgressBar then
-                        if not button.progressBars then button.progressBars = {} end
-                        local bar = button.progressBars[objIndex]
-                        if not bar then
-                            bar = CreateFrame("StatusBar", nil, button)
-                            bar:SetSize(1, 10) -- width dynamic, height thinner than scenarios
-                            bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-                            bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-                            bar.bg:SetAllPoints()
-                            bar.bg:SetColorTexture(0, 0, 0, 0.5)
-                            
-                            -- Border
-                            local border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-                            border:SetPoint("TOPLEFT", -1, 1)
-                            border:SetPoint("BOTTOMRIGHT", 1, -1)
-                            border:SetBackdrop({
-                                edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1,
-                            })
-                            border:SetBackdropBorderColor(0, 0, 0, 1)
-                            
-                            -- Text Label
-                            bar.value = bar:CreateFontString(nil, "OVERLAY") 
-                            bar.value:SetFont(db.fontFace, 9, "OUTLINE")
-                            bar.value:SetPoint("CENTER")
-                            
-                            button.progressBars[objIndex] = bar
-                        end
-                        
-                        -- Layout Bar
-                        bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
-                        bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY)
-                        
-                        bar:SetMinMaxValues(0, progressMax)
-                        bar:SetValue(progressValue)
-                        bar:SetStatusBarColor(0, 0.5, 1, 1) -- Blueish
-                        
-                        if bar.value then
-                             bar.value:SetText(progressValue .. "%")
-                        end
-                        
-                        bar:Show()
-                        
-                        lastHeight = 14 -- Bar height + padding
-                        currentY = currentY - lastHeight
-                        height = height + lastHeight
-                    elseif button.progressBars and button.progressBars[objIndex] then
-                         button.progressBars[objIndex]:Hide()
-                    end
-                end
-                
-                -- Hide unused objective lines & bars
-                if button.objectives then
-                    for i = #item.objectives + 1, #button.objectives do
-                        button.objectives[i]:Hide()
-                    end
-                end
-                if button.progressBars then
-                    for i = #item.objectives + 1, #button.progressBars do
-                        button.progressBars[i]:Hide()
-                    end
-                end
-            else
-                -- Hide all objectives if none
-                if button.objectives then
-                    for _, objLine in ipairs(button.objectives) do
-                        objLine:Hide()
-                    end
-                end
-                if button.progressBars then
-                    for _, bar in ipairs(button.progressBars) do
-                        bar:Hide()
-                    end
-                end
-            end
-            
-            -- Add distance if enabled
-            if db.showDistance and item.distance and item.distance < 999999 then
-                if not button.distance then
-                    button.distance = button:CreateFontString(nil, "OVERLAY")
-                end
-                button.distance:SetPoint("TOPRIGHT", button, "TOPRIGHT", -5, -2)
-                button.distance:SetFont(db.fontFace, db.fontSize - 2, db.fontOutline)
-                button.distance:SetTextColor(0.7, 0.7, 0.7, 1)
-                button.distance:SetText(string.format("%.0f yds", item.distance))
-                button.distance:Show()
-            else
-                if button.distance then
-                    button.distance:Hide()
-                end
-            end
-            
-            button:SetHeight(height)
-            button:Show()
-            
-            -- Store trackable data on button
-            button.trackableData = item
-            
-            -- Click handling
-            button:SetScript("OnClick", function(self, mouseButton)
-                addon:OnTrackableClick(self.trackableData, mouseButton)
-            end)
-            -- Clear potential conflicts
-            button:SetScript("OnMouseUp", nil)
-            
-            -- Tooltip
-            if db.showTooltips then
-                button:SetScript("OnEnter", function(self)
-                    addon:ShowTrackableTooltip(self, self.trackableData)
-                end)
-                button:SetScript("OnLeave", function()
-                    GameTooltip:Hide()
-                end)
-            end
-            
+            local height = self:RenderTrackableItem(contentFrame, item, yOffset, db.spacingTrackableIndent)
             yOffset = yOffset + height + db.spacingItemVertical
         end
     end
@@ -1688,8 +1462,10 @@ function addon:GetOrCreateSecureButton(parent)
         button.icon = button:CreateTexture(nil, "ARTWORK")
         button.icon:SetAllPoints()
         
-        -- Cooldown (Optional)
-        -- button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        -- Cooldown
+        button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        button.cooldown:SetAllPoints()
+        button.cooldown:SetHideCountdownNumbers(false)
         
         -- Hover
         button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
@@ -1700,11 +1476,8 @@ function addon:GetOrCreateSecureButton(parent)
         table.insert(secureButtons, button)
     end
     
-    -- Re-parenting secure frames in combat is restricted, but we can usually SetParent if not restricted environment?
-    -- Safest is just to place it visually.
-    if not InCombatLockdown() then
-        button:SetParent(parent)
-    end
+    -- Re-parenting secure frames in combat is restricted, so we ensure this is only called out of combat.
+    button:SetParent(parent)
     
     return button
 end
@@ -1781,6 +1554,10 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 -- EncounterJournal_DisplayMonthlyActivities() is standard if available
                 if EncounterJournal_DisplayMonthlyActivities then
                     EncounterJournal_DisplayMonthlyActivities()
+                end
+            elseif trackable.type == "endeavor" then
+                if HousingFramesUtil and HousingFramesUtil.OpenFrameToTaskID then
+                    HousingFramesUtil.OpenFrameToTaskID(trackable.id)
                 end
             end
         end

@@ -6,6 +6,7 @@ local frame = CreateFrame("Frame")
 
 local updateTimer = 0
 local requestedUpdate = false
+local pendingUpdate = false
 
 -- Print helper
 local function Print(...)
@@ -69,7 +70,6 @@ end
 
 -- Event registration
 function addon:RegisterEvents()
-    frame:RegisterEvent("PLAYER_LOGIN")
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     
     -- Quest events
@@ -114,6 +114,21 @@ function addon:RegisterEvents()
         pcall(function() frame:RegisterEvent("PERKS_PROGRAM_DATA_REFRESH") end)
     end
     
+    -- Endeavors (Housing)
+    if C_NeighborhoodInitiative then
+        -- Register accurate events for Endeavors
+        pcall(function() frame:RegisterEvent("INITIATIVE_TASKS_TRACKED_UPDATED") end)
+        pcall(function() frame:RegisterEvent("INITIATIVE_TASKS_TRACKED_LIST_CHANGED") end)
+        -- Keep these just in case older/internal names are used
+        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_TASKS_UPDATE") end)
+        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_TRACKING_UPDATE") end)
+        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_UPDATE") end)
+    end
+    
+    -- General Content Tracking (Modern API)
+    pcall(function() frame:RegisterEvent("CONTENT_TRACKING_UPDATE") end)
+    pcall(function() frame:RegisterEvent("TRACKABLE_INFO_UPDATE") end)
+
     frame:SetScript("OnEvent", function(_, event, ...)
         addon:OnEvent(event, ...)
     end)
@@ -125,12 +140,7 @@ end
 
 -- Event handler
 function addon:OnEvent(event, ...)
-    if event == "PLAYER_LOGIN" then
-        -- Delayed initialization
-        C_Timer.After(1, function()
-            self:Initialize()
-        end)
-    elseif event == "PLAYER_ENTERING_WORLD" then
+    if event == "PLAYER_ENTERING_WORLD" then
         if self.RestorePosition then self.RestorePosition() end
         self:RequestUpdate()
     elseif event == "PLAYER_REGEN_DISABLED" then
@@ -142,6 +152,12 @@ function addon:OnEvent(event, ...)
         -- Leaving combat
         if self:GetSetting("hideInCombat") then
             self:SetTrackerVisible(true)
+        end
+        
+        -- Process pending updates
+        if pendingUpdate then
+            pendingUpdate = false
+            self:RequestUpdate()
         end
     else
         -- All other events request an update
@@ -172,6 +188,12 @@ end
 
 -- Main update function
 function addon:UpdateTracker()
+    -- Defer updates if in combat to prevent taint issues with SecureFrames
+    if InCombatLockdown() then
+        pendingUpdate = true
+        return
+    end
+
     if not self.trackerFrame then
         return
     end
@@ -261,6 +283,90 @@ function addon:CollectTrackables()
     return trackables
 end
 
+-- Helper to gather quest data
+function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
+    local info = C_QuestLog.GetInfo(logIndex)
+    if not info then return nil end
+    
+    local questID = info.questID
+    
+    -- Classification
+    local questClassification
+    if C_QuestLog.GetQuestClassification then
+        questClassification = C_QuestLog.GetQuestClassification(questID)
+    elseif GetQuestClassification then
+        questClassification = GetQuestClassification(questID)
+    end
+
+    local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
+    local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
+    
+    local questInfo = {
+        type = typeOverride or "quest",
+        id = questID,
+        logIndex = logIndex,
+        title = info.title,
+        level = info.level,
+        questType = self:GetQuestTypeName(questID),
+        isComplete = C_QuestLog.IsComplete(questID),
+        isFailed = info.isFailed,
+        isWorldQuest = C_QuestLog.IsWorldQuest(questID),
+        isDaily = info.frequency == Enum.QuestFrequency.Daily,
+        frequency = info.frequency,
+        isCampaign = isCampaign,
+        isLegendary = isLegendary,
+        zone = zoneOverride or GetRealZoneText() or "Unknown Zone",
+        distance = self:GetQuestDistance(questID),
+        objectives = {},
+        color = self:GetQuestColor(info),
+    }
+
+    -- Get Quest Item Info
+    local itemLink, itemTexture, _, itemStack = GetQuestLogSpecialItemInfo(logIndex)
+    if itemLink then
+        questInfo.item = {
+            link = itemLink,
+            texture = itemTexture,
+            stack = itemStack
+        }
+    end
+    
+    -- Get objectives
+    local objectives = C_QuestLog.GetQuestObjectives(questID)
+    local hasObjectives = false
+    
+    if objectives then
+        for _, obj in ipairs(objectives) do
+            hasObjectives = true
+            table.insert(questInfo.objectives, {
+                text = obj.text,
+                type = obj.type,
+                finished = obj.finished,
+                numFulfilled = obj.numFulfilled,
+                numRequired = obj.numRequired,
+            })
+        end
+    end
+    
+    if not hasObjectives then
+        local numLeaderBoards = GetNumQuestLeaderBoards(logIndex)
+        for j=1, numLeaderBoards do
+             local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
+             if text then
+                 table.insert(questInfo.objectives, {
+                     text = text,
+                     type = type,
+                     finished = finished,
+                     numFulfilled = 0,
+                     numRequired = 0,
+                 })
+             end
+        end
+    end
+    
+    return questInfo
+end
+
 -- Collect tracked quests
 function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
@@ -273,87 +379,12 @@ function addon:CollectQuests(trackables)
             if info.isHeader then
                 currentZone = info.title
             elseif not info.isHidden and C_QuestLog.GetQuestWatchType(info.questID) ~= nil then
-                local questClassification
-                if C_QuestLog.GetQuestClassification then
-                    questClassification = C_QuestLog.GetQuestClassification(info.questID)
-                elseif GetQuestClassification then
-                    questClassification = GetQuestClassification(info.questID)
-                end
-
-                local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
-                local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
-                
-                local questInfo = {
-                    type = "quest",
-                    id = info.questID,
-                    title = info.title,
-                    level = info.level,
-                    questType = self:GetQuestTypeName(info.questID),
-                    isComplete = C_QuestLog.IsComplete(info.questID),
-                    isFailed = info.isFailed,
-                    isWorldQuest = C_QuestLog.IsWorldQuest(info.questID),
-                    isDaily = info.frequency == Enum.QuestFrequency.Daily,
-                    frequency = info.frequency,
-                    isCampaign = isCampaign,
-                    isLegendary = isLegendary,
-                    zone = currentZone,
-                    distance = self:GetQuestDistance(info.questID),
-                    objectives = {},
-                    color = self:GetQuestColor(info),
-                }
-
-                -- Get Quest Item Info
-                -- Note: GetQuestLogSpecialItemInfo requires a log index, not quest ID.
-                -- We have 'i' which is the index from GetNumQuestLogEntries() loop? 
-                -- Wait, GetNumQuestLogEntries returns total entries including headers.
-                -- GetInfo(i) uses that index. So 'i' is valid for GetQuestLogSpecialItemInfo.
-                local itemLink, itemTexture, _, itemStack = GetQuestLogSpecialItemInfo(i)
-                if itemLink then
-                    questInfo.item = {
-                        link = itemLink,
-                        texture = itemTexture,
-                        stack = itemStack
-                    }
-                end
-                
-                -- Get objectives
-            local objectives = C_QuestLog.GetQuestObjectives(info.questID)
-            local hasObjectives = false
-            
-            if objectives then
-                for _, obj in ipairs(objectives) do
-                    hasObjectives = true
-                    table.insert(questInfo.objectives, {
-                        text = obj.text,
-                        type = obj.type,
-                        finished = obj.finished,
-                        numFulfilled = obj.numFulfilled,
-                        numRequired = obj.numRequired,
-                    })
+                local questInfo = self:GetQuestData(i, nil, currentZone)
+                if questInfo then
+                    table.insert(trackables, questInfo)
                 end
             end
-            
-            if not hasObjectives then
-                -- Fallback for quests where C_QuestLog returns nothing (rare)
-                -- Using 'i' which is the log index
-                local numLeaderBoards = GetNumQuestLeaderBoards(i)
-                for j=1, numLeaderBoards do
-                     local text, type, finished = GetQuestLogLeaderBoard(j, i)
-                     if text then
-                         table.insert(questInfo.objectives, {
-                             text = text,
-                             type = type,
-                             finished = finished,
-                             numFulfilled = 0,
-                             numRequired = 0,
-                         })
-                     end
-                end
-            end
-            
-            table.insert(trackables, questInfo)
         end
-    end
     end
 end
 
@@ -755,87 +786,26 @@ end
 -- Collect super tracked quest
 function addon:CollectSuperTrackedQuest(trackables)
     local superTrackedQuestID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()
-    if not superTrackedQuestID then return end
+    if not superTrackedQuestID or superTrackedQuestID == 0 then return end
 
-    -- Check if it's a world quest
-    if C_QuestLog.IsWorldQuest(superTrackedQuestID) then
-        -- Logic for world quest (simplified for now, mimicking CollectQuests structure if it was a WQ)
-        -- World Quests are usually handled by GetInfo if they are in the log? 
-        -- Actually WQs are not always in the numerical log unless tracked?
-        -- For simplicity, let's try to find it in the log first.
-    end
-
+    -- Check if it's a world quest logic here if needed...
+    -- But assuming it's in the log for now:
     local logIndex = C_QuestLog.GetLogIndexForQuestID(superTrackedQuestID)
     if not logIndex then return end
 
-    local info = C_QuestLog.GetInfo(logIndex)
-    if not info then return end
-
-    local questClassification
-    if C_QuestLog.GetQuestClassification then
-        questClassification = C_QuestLog.GetQuestClassification(info.questID)
-    elseif GetQuestClassification then
-        questClassification = GetQuestClassification(info.questID)
+    local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
+    if questInfo then
+         -- Override distance/zone for pinned
+         questInfo.distance = 0
+         
+         -- Ensure no duplicates if it's already in the list?
+         -- CollectQuests runs first. We might want to remove it from there or mark it.
+         -- But technically, Tracked Quests vs Super Tracked Quest:
+         -- A quest can be tracked AND super tracked.
+         -- If we want it only at the top, we should filter it out in CollectQuests.
+         -- For now, let's just add it.
+         table.insert(trackables, questInfo)
     end
-
-    local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
-    local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
-    
-    local questInfo = {
-        type = "supertrack", -- Special type for sorting/display
-        id = info.questID,
-        title = info.title,
-        level = info.level,
-        questType = self:GetQuestTypeName(info.questID),
-        isComplete = C_QuestLog.IsComplete(info.questID),
-        isFailed = info.isFailed,
-        isWorldQuest = C_QuestLog.IsWorldQuest(info.questID),
-        isDaily = info.frequency == Enum.QuestFrequency.Daily,
-        frequency = info.frequency,
-        isCampaign = isCampaign,
-        isLegendary = isLegendary,
-        zone = "Pinned", -- Override zone for display groups if grouped by zone
-        distance = 0, -- Pinned is always "closest" if we sorted by distance, but we force sort by type anyway
-        objectives = {},
-        color = self:GetQuestColor(info),
-    }
-
-    -- Get Objectives (Copied from CollectQuests logic)
-    local objectives = C_QuestLog.GetQuestObjectives(info.questID)
-    local hasObjectives = false
-            
-    if objectives then
-        for _, objective in ipairs(objectives) do
-            if objective.text and objective.text ~= "" then
-                hasObjectives = true
-                table.insert(questInfo.objectives, {
-                    text = objective.text,
-                    type = objective.type,
-                    finished = objective.finished,
-                    numFulfilled = objective.numFulfilled,
-                    numRequired = objective.numRequired,
-                })
-            end
-        end
-    end
-    
-    if not hasObjectives then
-        local numLeaderBoards = GetNumQuestLeaderBoards(logIndex)
-        for j=1, numLeaderBoards do
-             local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
-             if text then
-                 table.insert(questInfo.objectives, {
-                     text = text,
-                     type = type,
-                     finished = finished,
-                     numFulfilled = 0,
-                     numRequired = 0,
-                 })
-             end
-        end
-    end
-    
-    table.insert(trackables, questInfo)
 end
 
 -- Set tracker visibility
