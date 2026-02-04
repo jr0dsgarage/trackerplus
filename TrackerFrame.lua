@@ -640,9 +640,9 @@ function addon:UpdateTrackerDisplay(trackables)
             end
             
             -- Reset Styles
-            header.expandBtn:SetNormalTexture("")
-            header.expandBtn:SetPushedTexture("")
-            header.expandBtn:SetHighlightTexture("")
+            header.expandBtn:SetNormalTexture(0)
+            header.expandBtn:SetPushedTexture(0)
+            header.expandBtn:SetHighlightTexture(0)
             header.expandBtn:SetText("")
             
             local iconStyle = db.headerIconStyle or "standard"
@@ -1234,6 +1234,7 @@ function addon:OrganizeTrackables(trackables)
     AddBucket("achievement", "Achievements")
     AddBucket("profession", "Professions")
     AddBucket("monthly", "Monthly Activities")
+    AddBucket("endeavor", "Endeavors")
     
     -- Leftovers (if any new types added later)
     -- ...
@@ -1355,11 +1356,10 @@ function addon:OnTrackableClick(trackable, mouseButton)
             elseif trackable.type == "monthly" then
                 C_PerksProgram.RemoveTrackedPerksActivity(trackable.id)
             elseif trackable.type == "endeavor" then
-                if C_ContentTracking and C_ContentTracking.StopTracking then
-                    -- Assuming Endeavors use ContentTrackingType 4 which might be new, or we find it
-                    -- For now, generic StopTracking if we knew the type ID, but likely user cant shift-click remove without correct API
-                    -- Fallback: Let them use the housing UI
-                    print("Shift-click to remove Endeavors not yet supported.")
+                if C_NeighborhoodInitiative and C_NeighborhoodInitiative.RemoveTrackedInitiativeTask then
+                     C_NeighborhoodInitiative.RemoveTrackedInitiativeTask(trackable.id)
+                else
+                    print("Shift-click to remove Endeavors not supported.")
                 end
             end
             self:RequestUpdate()

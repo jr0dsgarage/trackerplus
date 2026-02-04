@@ -650,79 +650,48 @@ end
 
 -- Collect Endeavors (Housing)
 function addon:CollectEndeavors(trackables)
-     local trackingType = nil
-     -- Check multiple possible Enum names based on fstack (InitiativeTasks)
-     if Enum and Enum.ContentTrackingType then
-        if Enum.ContentTrackingType.Initiative then
-            trackingType = Enum.ContentTrackingType.Initiative
-        elseif Enum.ContentTrackingType.InitiativeTask then
-             trackingType = Enum.ContentTrackingType.InitiativeTask
-        elseif Enum.ContentTrackingType.Endeavor then
-            trackingType = Enum.ContentTrackingType.Endeavor
-        end
-     end
-     
-     if not C_ContentTracking then return end
-     
-     local trackedIDs = {}
-     
-     -- Strategy 1: C_ContentTracking
-     if trackingType and C_ContentTracking.GetTrackedIDs then
-          local ids = C_ContentTracking.GetTrackedIDs(trackingType)
-          if ids then
-              for _, id in ipairs(ids) do
-                  table.insert(trackedIDs, {id=id, source="content"})
+     -- C_NeighborhoodInitiative (Housing API)
+     if C_NeighborhoodInitiative and C_NeighborhoodInitiative.GetTrackedInitiativeTasks then
+          local trackerData = C_NeighborhoodInitiative.GetTrackedInitiativeTasks()
+          if trackerData and trackerData.trackedIDs then
+              for _, id in ipairs(trackerData.trackedIDs) do
+                  local info = C_NeighborhoodInitiative.GetInitiativeTaskInfo(id)
+                  
+                  if info and not info.completed then
+                      local objectives = {}
+                      
+                      if info.requirementsList then
+                          for _, req in ipairs(info.requirementsList) do
+                              local text = req.requirementText
+                              if text then
+                                  -- Clean up text formatting
+                                  -- Remove leading dashes to prevent double dashes in tracker
+                                  text = text:gsub("^%s*-%s*", "")
+                                  text = string.gsub(text, " / ", "/") 
+                                  
+                                  local isFinished = req.completed
+                                  if not isFinished then
+                                      table.insert(objectives, {
+                                          text = text,
+                                          finished = isFinished
+                                      })
+                                  end
+                              end
+                          end
+                      end
+                      
+                      table.insert(trackables, {
+                           type = "endeavor",
+                           id = info.ID or id,
+                           title = info.taskName or ("Endeavor " .. id),
+                           level = 0, 
+                           zone = "Housing",
+                           objectives = objectives,
+                           color = {r=1, g=0.4, b=0.8, a=1} -- Warm Pink
+                      })
+                  end
               end
           end
-     end
-     
-     -- Strategy 2: C_InitiativeTasks (if separate API)
-     if #trackedIDs == 0 and C_InitiativeTasks and C_InitiativeTasks.GetTrackedTasks then
-        -- Assuming simple list of IDs or structs
-        local tasks = C_InitiativeTasks.GetTrackedTasks()
-        if tasks then
-            for _, task in ipairs(tasks) do
-                -- Handle if task is ID or table
-                local id = type(task) == "table" and task.id or task
-                table.insert(trackedIDs, {id=id, source="initiative"})
-            end
-        end
-     end
-
-     for _, data in ipairs(trackedIDs) do
-           local id = data.id
-           local title = "Endeavor " .. id
-           local objectives = {}
-
-           if data.source == "content" and trackingType then
-               if C_ContentTracking.GetTitle then
-                    title = C_ContentTracking.GetTitle(trackingType, id) or title
-               end
-               if C_ContentTracking.GetObjectiveText then
-                   local text = C_ContentTracking.GetObjectiveText(trackingType, id)
-                   if text then
-                       table.insert(objectives, { text = text })
-                   end
-               end
-           elseif data.source == "initiative" and C_InitiativeTasks then
-               if C_InitiativeTasks.GetTaskInfo then
-                    local info = C_InitiativeTasks.GetTaskInfo(id)
-                    if info then
-                        title = info.name or title
-                        -- if info.description?
-                    end
-               end
-           end
-           
-           table.insert(trackables, {
-               type = "endeavor",
-               id = id,
-               title = title,
-               level = 0,
-               zone = "Housing",
-               objectives = objectives,
-               color = {r=1, g=0.4, b=0.8, a=1} -- Warm Pink
-           })
      end
 end
 
