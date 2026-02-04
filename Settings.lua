@@ -43,7 +43,7 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             addon:UpdateTrackerLock()
         elseif dbKey == "borderEnabled" then
             addon:UpdateTrackerAppearance()
-        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") then
+        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "headerIconPosition" then
             addon:RefreshDisplay()
         elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
             addon:RequestUpdate()
@@ -101,7 +101,7 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
         -- Immediate updates
         if dbKey == "frameWidth" or dbKey == "frameHeight" or dbKey == "frameScale" then
             addon:UpdateTrackerAppearance()
-        elseif dbKey == "fontSize" or dbKey == "headerFontSize" then
+        elseif dbKey == "fontSize" or dbKey == "headerFontSize" or dbKey:find("^spacing") then
             addon:RefreshDisplay()
         end
     end)
@@ -121,71 +121,55 @@ end
 
 -- Helper: Create Dropdown
 local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
-    local button = CreateFrame("Button", addonName .. dbKey .. "Dropdown", parent, "UIPanelButtonTemplate")
-    button:SetSize(160, 24)
-    button:SetPoint("TOPLEFT", 150, yOffset + 5) -- Offset to right of label
-    
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    label:SetPoint("TOPLEFT", 16, yOffset)
+    label:SetPoint("TOPLEFT", 16, yOffset - 5)
     label:SetText(text)
     
-    -- Down arrow texture to indicate dropdown
-    local arrow = button:CreateTexture(nil, "ARTWORK")
-    arrow:SetPoint("RIGHT", -8, 0)
-    arrow:SetSize(12, 12)
-    -- Use a standard arrow texture
-    arrow:SetTexture("Interface\\Buttons\\UI-AutoCastableOverlay") 
-    arrow:SetTexCoord(0.619, 0.760, 0.612, 0.762) -- Approximate down arrow part, or just use ChatFrameExpandArrow
-    arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
+    local dropdown = CreateFrame("Frame", addonName .. dbKey .. "Dropdown", parent, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("TOPLEFT", 140, yOffset) -- Use fixed offset to align with others
+    UIDropDownMenu_SetWidth(dropdown, 140)
     
-    local function UpdateText()
-        local val = addon.db[dbKey]
-        local display = "Unknown"
+    local function init(self, level)
+        local info = UIDropDownMenu_CreateInfo()
         for _, opt in ipairs(options) do
-            if opt.value == val then display = opt.text break end
+            info.text = opt.text
+            info.value = opt.value
+            info.func = function(self)
+                addon:SetSetting(dbKey, self.value)
+                UIDropDownMenu_SetSelectedValue(dropdown, self.value)
+                
+                -- Trigger updates
+                if dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then 
+                    addon:RefreshDisplay() 
+                end
+            end
+            info.checked = (addon.db[dbKey] == opt.value)
+            UIDropDownMenu_AddButton(info, level)
         end
-        button:SetText(display)
     end
     
-    button:SetScript("OnClick", function(self)
-        if MenuUtil then
-            MenuUtil.CreateContextMenu(self, function(owner, rootDescription)
-                rootDescription:CreateTitle(text)
-                for _, opt in ipairs(options) do
-                    rootDescription:CreateButton(opt.text, function()
-                        addon:SetSetting(dbKey, opt.value)
-                        UpdateText()
-                        if dbKey == "headerIconStyle" then addon:RefreshDisplay() end
-                    end)
-                end
-            end)
-        else
-            -- Fallback to cycling if MenuUtil missing
-            local currentIdx = 1
-            for i, opt in ipairs(options) do
-                if opt.value == addon.db[dbKey] then currentIdx = i break end
-            end
-            local nextIdx = currentIdx + 1
-            if nextIdx > #options then nextIdx = 1 end
-            addon:SetSetting(dbKey, options[nextIdx].value)
-            UpdateText()
-            if dbKey == "headerIconStyle" then addon:RefreshDisplay() end
-        end
-    end)
+    UIDropDownMenu_Initialize(dropdown, init)
+    
+    -- Set Initial Selection
+    UIDropDownMenu_SetSelectedValue(dropdown, addon.db[dbKey])
+    -- Force text update explicitly just in case
+    local currentText = "Unknown"
+    for _, opt in ipairs(options) do
+        if opt.value == addon.db[dbKey] then currentText = opt.text break end
+    end
+    UIDropDownMenu_SetText(dropdown, currentText)
     
     if tooltip then
-        button:SetScript("OnEnter", function(self)
+        dropdown:SetScript("OnEnter", function(self)
              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
              GameTooltip:SetText(text, 1, 1, 1)
              GameTooltip:AddLine(tooltip, nil, nil, nil, true)
              GameTooltip:Show()
         end)
-        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        dropdown:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     
-    UpdateText()
-    
-    return yOffset - 30
+    return yOffset - 35
 end
 
 -- Helper: Create Color Picker
@@ -426,19 +410,32 @@ local function InitUI()
     y = -5
     
     s, sy = StartSection(p2, "Dimensions", y)
-    sy = CreateSlider(s, "Frame Width", "frameWidth", 150, 500, 10, "Width of the tracker frame", sy)
-    sy = CreateSlider(s, "Frame Height", "frameHeight", 200, 800, 10, "Height of the tracker frame", sy)
+    sy = CreateSlider(s, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", sy)
+    sy = CreateSlider(s, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", sy)
     sy = CreateSlider(s, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", sy)
     y = y - EndSection(s, sy)
     
     s, sy = StartSection(p2, "Styling", y)
     sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker", sy)
     sy = CreateDropdown(s, "Expand/Collapse Icon", "headerIconStyle", {
+        {text = "None", value = "none"},
         {text = "Standard (Gold)", value = "standard"},
         {text = "Square (Check)", value = "square"},
         {text = "Text [+/-]", value = "text_brackets"},
-        {text = "Text >/v", value = "text_arrows"}
+        {text = "Quest Log (+/-)", value = "questlog"}
     }, "Style of the expand/collapse header icons", sy)
+    
+    sy = CreateDropdown(s, "Icon Position", "headerIconPosition", {
+        {text = "Left (Start)", value = "left"},
+        {text = "Right (End)", value = "right"}
+    }, "Position of the expand/collapse icon on the header", sy)
+
+    sy = CreateDropdown(s, "Header Background", "headerBackgroundStyle", {
+        {text = "None", value = "none"},
+        {text = "Quest Log Background", value = "questlog"},
+        {text = "Tracker Background (Custom)", value = "tracker"}
+    }, "Style of the header background", sy)
+
     y = y - EndSection(s, sy)
     
     s, sy = StartSection(p2, "Fonts", y)
@@ -478,16 +475,6 @@ local function InitUI()
     sy = CreateSlider(s, "Item Spacing", "spacingItemVertical", 0, 20, 1, "Vertical gap between trackable items", sy)
     sy = CreateSlider(s, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers", sy)
     sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers", sy)
-    y = y - EndSection(s, sy)
-    
-    -- Add refresh button section
-    s, sy = StartSection(p3, "Actions", y)
-    local refreshLayoutBtn = CreateFrame("Button", nil, s, "UIPanelButtonTemplate")
-    refreshLayoutBtn:SetSize(150, 25)
-    refreshLayoutBtn:SetPoint("TOPLEFT", 16, sy)
-    refreshLayoutBtn:SetText("Apply Layout Changes")
-    refreshLayoutBtn:SetScript("OnClick", function() addon:RefreshDisplay() end)
-    sy = sy - 35
     y = y - EndSection(s, sy)
     
     p3.finalHeight = math.abs(y) + 20

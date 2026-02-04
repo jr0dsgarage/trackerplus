@@ -20,7 +20,9 @@ local DEFAULTS = {
     borderEnabled = false,
     borderColor = {r = 1, g = 1, b = 1, a = 1},
     borderSize = 1,
-    headerIconStyle = "standard", -- "standard", "square", "text_brackets", "text_arrows"
+    headerIconStyle = "standard", -- "none", "standard", "square", "text_brackets", "questlog"
+    headerIconPosition = "left", -- "left", "right"
+    headerBackgroundStyle = "tracker", -- "none", "questlog", "tracker"
     
     -- Font Settings
     fontSize = 12,

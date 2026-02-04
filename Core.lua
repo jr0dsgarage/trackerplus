@@ -79,6 +79,7 @@ function addon:RegisterEvents()
     frame:RegisterEvent("QUEST_LOG_UPDATE")
     frame:RegisterEvent("QUEST_TURNED_IN")
     frame:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
+    frame:RegisterEvent("SUPER_TRACKING_CHANGED")
     
     -- World quest events
     frame:RegisterEvent("QUEST_WATCH_UPDATE")
@@ -235,6 +236,9 @@ function addon:CollectTrackables()
     if db.showScenarios or db.showDungeonObjectives then
         self:CollectScenarioObjectives(trackables)
     end
+
+    -- Super Tracked (Pinned)
+    self:CollectSuperTrackedQuest(trackables)
     
     -- Professions
     if db.showProfessions then
@@ -713,19 +717,125 @@ end
 function addon:SortTrackables(trackables)
     local sortMethod = self:GetSetting("sortMethod")
     
-    if sortMethod == "distance" then
-        table.sort(trackables, function(a, b)
-            return (a.distance or 999999) < (b.distance or 999999)
-        end)
-    elseif sortMethod == "level" then
-        table.sort(trackables, function(a, b)
-            return (a.level or 0) > (b.level or 0)
-        end)
-    elseif sortMethod == "name" then
-        table.sort(trackables, function(a, b)
-            return (a.title or "") < (b.title or "")
-        end)
+    local function GetPriority(trackable)
+        -- Priority 1: Scenarios/Dungeons (always on top)
+        if trackable.type == "scenario" then
+            return 1
+        end
+        
+        -- Priority 2: Super Tracked Quest (Pinned)
+        if trackable.type == "supertrack" then
+            return 2
+        end
+        
+        -- Priority 3: Everything else
+        return 3
     end
+    
+    table.sort(trackables, function(a, b)
+        local prioA = GetPriority(a)
+        local prioB = GetPriority(b)
+        
+        if prioA ~= prioB then
+            return prioA < prioB
+        end
+    
+        if sortMethod == "distance" then
+            return (a.distance or 999999) < (b.distance or 999999)
+        elseif sortMethod == "level" then
+            return (a.level or 0) > (b.level or 0)
+        elseif sortMethod == "name" then
+            return (a.title or "") < (b.title or "")
+        end
+        
+        return false
+    end)
+end
+
+-- Collect super tracked quest
+function addon:CollectSuperTrackedQuest(trackables)
+    local superTrackedQuestID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()
+    if not superTrackedQuestID then return end
+
+    -- Check if it's a world quest
+    if C_QuestLog.IsWorldQuest(superTrackedQuestID) then
+        -- Logic for world quest (simplified for now, mimicking CollectQuests structure if it was a WQ)
+        -- World Quests are usually handled by GetInfo if they are in the log? 
+        -- Actually WQs are not always in the numerical log unless tracked?
+        -- For simplicity, let's try to find it in the log first.
+    end
+
+    local logIndex = C_QuestLog.GetLogIndexForQuestID(superTrackedQuestID)
+    if not logIndex then return end
+
+    local info = C_QuestLog.GetInfo(logIndex)
+    if not info then return end
+
+    local questClassification
+    if C_QuestLog.GetQuestClassification then
+        questClassification = C_QuestLog.GetQuestClassification(info.questID)
+    elseif GetQuestClassification then
+        questClassification = GetQuestClassification(info.questID)
+    end
+
+    local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
+    local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
+    
+    local questInfo = {
+        type = "supertrack", -- Special type for sorting/display
+        id = info.questID,
+        title = info.title,
+        level = info.level,
+        questType = self:GetQuestTypeName(info.questID),
+        isComplete = C_QuestLog.IsComplete(info.questID),
+        isFailed = info.isFailed,
+        isWorldQuest = C_QuestLog.IsWorldQuest(info.questID),
+        isDaily = info.frequency == Enum.QuestFrequency.Daily,
+        frequency = info.frequency,
+        isCampaign = isCampaign,
+        isLegendary = isLegendary,
+        zone = "Pinned", -- Override zone for display groups if grouped by zone
+        distance = 0, -- Pinned is always "closest" if we sorted by distance, but we force sort by type anyway
+        objectives = {},
+        color = self:GetQuestColor(info),
+    }
+
+    -- Get Objectives (Copied from CollectQuests logic)
+    local objectives = C_QuestLog.GetQuestObjectives(info.questID)
+    local hasObjectives = false
+            
+    if objectives then
+        for _, objective in ipairs(objectives) do
+            if objective.text and objective.text ~= "" then
+                hasObjectives = true
+                table.insert(questInfo.objectives, {
+                    text = objective.text,
+                    type = objective.type,
+                    finished = objective.finished,
+                    numFulfilled = objective.numFulfilled,
+                    numRequired = objective.numRequired,
+                })
+            end
+        end
+    end
+    
+    if not hasObjectives then
+        local numLeaderBoards = GetNumQuestLeaderBoards(logIndex)
+        for j=1, numLeaderBoards do
+             local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
+             if text then
+                 table.insert(questInfo.objectives, {
+                     text = text,
+                     type = type,
+                     finished = finished,
+                     numFulfilled = 0,
+                     numRequired = 0,
+                 })
+             end
+        end
+    end
+    
+    table.insert(trackables, questInfo)
 end
 
 -- Set tracker visibility

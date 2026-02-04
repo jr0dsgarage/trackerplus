@@ -163,9 +163,15 @@ function addon:CreateTrackerFrame()
     contentFrame:SetSize(self.db.frameWidth - 2, 100) -- Reduce width for scrollbar/padding logic
     scrollFrame:SetScrollChild(contentFrame)
     
+    -- Main Header Background (Behind Title/Settings)
+    trackerFrame.headerBg = trackerFrame:CreateTexture(nil, "BACKGROUND")
+    trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
+    trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
+    trackerFrame.headerBg:SetHeight(24) -- Standard header height
+
     -- Title Header (Left aligned)
     trackerFrame.title = trackerFrame:CreateFontString(nil, "OVERLAY")
-    trackerFrame.title:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 8, -6)
+    trackerFrame.title:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 8, 0)
     local titleFont = self.db.headerFontFace or "Fonts\\FRIZQT__.TTF"
     local titleSize = self.db.headerFontSize or 14
     trackerFrame.title:SetFont(titleFont, titleSize, self.db.headerFontOutline)
@@ -232,6 +238,267 @@ function addon:UpdateTrackerLock()
 end
 
 -- Update tracker display with trackables
+function addon:RenderTrackableItem(parent, item, yOffset, indent)
+    local db = self.db
+    local button = self:GetOrCreateButton(parent)
+    if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
+    button:Show()
+    
+    -- Reset button point completely to avoid previous anchor persistence
+    button:ClearAllPoints()
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", indent, -yOffset)
+    button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -5, -yOffset)
+    
+    -- POI Button logic
+    local leftPadding = db.spacingPOIButton  -- Internal padding within the button for the icon check
+
+     -- POI Button (Using Blizzard Template for authenticity)
+    if not button.poiButton then
+        -- Use POIButtonTemplate to get exact Blizzard look/behavior
+        button.poiButton = CreateFrame("Button", nil, button, "POIButtonTemplate")
+        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, 0) -- Nudged left
+        button.poiButton:SetScale(0.75) -- Slightly smaller
+        
+        -- Override click handling to our logic
+        button.poiButton:SetScript("OnClick", function(self)
+             if self.questID then
+                 -- Toggle super tracking
+                 if C_SuperTrack.GetSuperTrackedQuestID() == self.questID then
+                     C_SuperTrack.SetSuperTrackedQuestID(0)
+                 else
+                     C_SuperTrack.SetSuperTrackedQuestID(self.questID)
+                 end
+                 PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+             end
+        end)
+        
+        button.poiButton:RegisterForClicks("LeftButtonUp")
+    end
+    
+    -- Quest Item Button
+    if item.item then
+        local secureBtn = self:GetOrCreateSecureButton(button)
+        secureBtn:SetPoint("TOPLEFT", button, "TOPLEFT", 18, 0) -- Adjusted for tighter layout
+        secureBtn:SetSize(18, 18) -- Slightly smaller
+        secureBtn:SetAttribute("type", "item")
+        secureBtn:SetAttribute("item", item.item.link)
+        secureBtn.icon:SetTexture(item.item.texture)
+        secureBtn:Show()
+        button.itemButton = secureBtn
+        
+        -- Update padding since we have an item button now
+        leftPadding = db.spacingPOIButton + db.spacingItemButton
+    else
+        if button.itemButton then button.itemButton:Hide() end
+        -- Reset padding
+        leftPadding = db.spacingPOIButton
+    end
+
+    -- Configure POI Button Appearance
+    local isQuest = (item.type == "quest" or item.isWorldQuest or item.type == "supertrack")
+    local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
+    
+    if isQuest and POIButtonUtil then
+        button.poiButton:Show()
+        if button.icon then button.icon:Hide() end
+        
+        button.poiButton.questID = item.id
+        if button.poiButton.SetQuestID then
+            button.poiButton:SetQuestID(item.id)
+        end
+        
+        local style = POIButtonUtil.Style.QuestInProgress
+        if item.isComplete then
+            style = POIButtonUtil.Style.QuestComplete
+        elseif item.isWorldQuest then
+            style = POIButtonUtil.Style.WorldQuest
+        end
+
+        if button.poiButton.SetStyle then
+            button.poiButton:SetStyle(style)
+        end
+        
+        if button.poiButton.UpdateButtonStyle then
+            button.poiButton:UpdateButtonStyle()
+        end
+        
+        local isSelected = (item.id == superTrackedQuestID)
+        if button.poiButton.SetSelected then
+            button.poiButton:SetSelected(isSelected)
+        end
+        
+         if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
+
+    else
+        button.poiButton:Hide()
+        if button.icon then button.icon:Hide() end
+        leftPadding = db.spacingMinorHeaderIndent
+    end
+    
+    if item.item then
+         leftPadding = db.spacingPOIButton + db.spacingItemButton
+    elseif not isQuest then
+         leftPadding = db.spacingMinorHeaderIndent
+    else
+         leftPadding = db.spacingPOIButton
+    end
+    
+    button.text:ClearAllPoints()
+    button.text:SetPoint("TOPLEFT", leftPadding, -2) 
+    button.text:SetPoint("TOPRIGHT", -2, -2)
+
+    local titleText = item.title
+    if db.showQuestLevel and item.level and item.level > 0 then
+        titleText = string.format("[%d] %s", item.level, titleText)
+    end
+    if db.showQuestType and item.questType then
+        titleText = titleText .. " (" .. item.questType .. ")"
+    end
+    
+    button.text:SetFont(db.fontFace, db.fontSize, db.fontOutline)
+    local color = item.color or db.questColor
+    if item.id == superTrackedQuestID then
+       color = {r=1, g=0.82, b=0, a=1} -- Yellow for selected
+    end
+    button.text:SetTextColor(color.r, color.g, color.b, color.a)
+    button.text:SetText(titleText)
+    button.text:SetJustifyH("LEFT")
+    
+    button.bg:SetColorTexture(0, 0, 0, 0)
+    
+    local textHeight = button.text:GetStringHeight()
+    local height = math.max(db.fontSize + 4, textHeight + 4)
+    
+    -- Objectives
+    if item.objectives and #item.objectives > 0 then
+        local currentY = -(textHeight + 2)
+        
+        for objIndex, obj in ipairs(item.objectives) do
+            local objText = "  - " .. obj.text
+            local isProgressBar = false
+            local progressValue = 0
+            local progressMax = 100
+            
+            if obj.text and string.find(obj.text, "%%") then
+                 isProgressBar = true
+                 local val = string.match(obj.text, "(%d+)%%")
+                 if val then
+                     progressValue = tonumber(val)
+                     progressMax = 100
+                 end
+                 local cleanText = obj.text
+                 cleanText = cleanText:gsub("%s*%(%d+%%%)", "")
+                 cleanText = cleanText:gsub("%s*%d+%%", "")
+                 cleanText = cleanText:gsub(":%s*$", "")
+                 cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
+                 if cleanText == "" then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
+                 objText = "  - " .. cleanText
+            elseif obj.numRequired and obj.numRequired > 0 then
+                local cleanText = obj.text:gsub("^%d+/%d+%s*", "")
+                cleanText = cleanText:gsub("^%s+", "")
+                objText = string.format("  - %d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
+            end
+            
+            if not button.objectives then button.objectives = {} end
+            local objLine = button.objectives[objIndex]
+            if not objLine then
+                objLine = button:CreateFontString(nil, "OVERLAY")
+                button.objectives[objIndex] = objLine
+            end
+            
+            objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - 5)
+            objLine:SetWordWrap(true)
+            objLine:ClearAllPoints()
+            objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+            objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+            local objColor = obj.finished and db.completeColor or db.objectiveColor
+            objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
+            objLine:SetText(objText)
+            objLine:SetJustifyH("LEFT")
+            objLine:Show()
+            
+            local lineH = objLine:GetStringHeight()
+            currentY = currentY - (lineH + 2)
+            height = height + (lineH + 2)
+
+            if isProgressBar then
+                if not button.progressBars then button.progressBars = {} end
+                local bar = button.progressBars[objIndex]
+                if not bar then
+                    bar = CreateFrame("StatusBar", nil, button)
+                    bar:SetSize(1, 10)
+                    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
+                    bar.bg:SetAllPoints()
+                    bar.bg:SetColorTexture(0, 0, 0, 0.5)
+                    local border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
+                    border:SetPoint("TOPLEFT", -1, 1)
+                    border:SetPoint("BOTTOMRIGHT", 1, -1)
+                    border:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+                    border:SetBackdropBorderColor(0, 0, 0, 1)
+                    bar.value = bar:CreateFontString(nil, "OVERLAY") 
+                    bar.value:SetFont(db.fontFace, 9, "OUTLINE")
+                    bar.value:SetPoint("CENTER")
+                    button.progressBars[objIndex] = bar
+                end
+                
+                bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+                bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY)
+                bar:SetMinMaxValues(0, progressMax)
+                bar:SetValue(progressValue)
+                bar:SetStatusBarColor(0, 0.5, 1, 1)
+                if bar.value then bar.value:SetText(progressValue .. "%") end
+                bar:Show()
+                
+                local barH = 14
+                currentY = currentY - barH
+                height = height + barH
+            elseif button.progressBars and button.progressBars[objIndex] then
+                 button.progressBars[objIndex]:Hide()
+            end
+        end
+        
+        if button.objectives then
+            for i = #item.objectives + 1, #button.objectives do button.objectives[i]:Hide() end
+        end
+        if button.progressBars then
+             for i = #item.objectives + 1, #button.progressBars do button.progressBars[i]:Hide() end
+        end
+    else
+        if button.objectives then for _, objLine in ipairs(button.objectives) do objLine:Hide() end end
+        if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
+    end
+    
+    if db.showDistance and item.distance and item.distance < 999999 then
+        if not button.distance then button.distance = button:CreateFontString(nil, "OVERLAY") end
+        button.distance:SetPoint("TOPRIGHT", button, "TOPRIGHT", -5, -2)
+        button.distance:SetFont(db.fontFace, db.fontSize - 2, db.fontOutline)
+        button.distance:SetTextColor(0.7, 0.7, 0.7, 1)
+        button.distance:SetText(string.format("%.0f yds", item.distance))
+        button.distance:Show()
+    else
+        if button.distance then button.distance:Hide() end
+    end
+    
+    button:SetHeight(height)
+    button:Show()
+    button.trackableData = item
+    
+    button:SetScript("OnClick", function(self, mouseButton)
+        addon:OnTrackableClick(self.trackableData, mouseButton)
+    end)
+    button:SetScript("OnMouseUp", nil)
+    
+    if db.showTooltips then
+        button:SetScript("OnEnter", function(self)
+            addon:ShowTrackableTooltip(self, self.trackableData)
+        end)
+        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    
+    return height
+end
+
 function addon:UpdateTrackerDisplay(trackables)
     if not trackerFrame or not contentFrame then
         return
@@ -257,13 +524,16 @@ function addon:UpdateTrackerDisplay(trackables)
     
     local db = self.db
     
-    -- Extract Scenarios first (Always separate)
+    -- Extract Scenarios and Super Tracked items first
     local scenarios = {}
+    local superTrackedItems = {}
     local remainingTrackables = {}
     
     for _, item in ipairs(trackables) do
         if item.type == "scenario" then
             table.insert(scenarios, item)
+        elseif item.type == "supertrack" then
+            table.insert(superTrackedItems, item)
         else
             table.insert(remainingTrackables, item)
         end
@@ -570,6 +840,46 @@ function addon:UpdateTrackerDisplay(trackables)
         end
     end
     
+    -- Render Super Tracked Items (Pinned)
+    if #superTrackedItems > 0 then
+         -- Add Header if scenarios exist or just to separate
+         if scenarioYOffset > 0 then
+              scenarioYOffset = scenarioYOffset + 10
+         end
+
+         local header = self:GetOrCreateButton(self.scenarioFrame)
+         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
+         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
+         
+         header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
+         header.text:SetTextColor(1, 0.82, 0, 1) -- Gold
+         header.text:SetText("Active Quest")
+         header.text:SetJustifyH("LEFT")
+         
+         if header.expandBtn then header.expandBtn:Hide() end
+         header.text:ClearAllPoints()
+         header.text:SetPoint("LEFT", 5, 0)
+         header.text:SetPoint("RIGHT", -5, 0)
+         
+         header.bg:SetColorTexture(0, 0, 0, 0.4)
+         header:SetHeight(24)
+         header:Show()
+         
+         -- Cleanup header parts
+         if header.poiButton then header.poiButton:Hide() end
+         if header.itemButton then header.itemButton:Hide() end
+         if header.icon then header.icon:Hide() end
+         if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+         if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+
+         scenarioYOffset = scenarioYOffset + 26
+
+         for _, item in ipairs(superTrackedItems) do
+            local height = self:RenderTrackableItem(self.scenarioFrame, item, scenarioYOffset, db.spacingMinorHeaderIndent)
+            scenarioYOffset = scenarioYOffset + height + db.spacingItemVertical
+         end
+    end
+
     -- Update Scenario Frame Height & ScrollFrame Anchor
     self.scrollFrame:ClearAllPoints()
     if scenarioYOffset > 0 then
@@ -639,50 +949,67 @@ function addon:UpdateTrackerDisplay(trackables)
                 header.expandBtn:SetPoint("LEFT", 4, 0)
             end
             
-            -- Reset Styles
-            header.expandBtn:SetNormalTexture(0)
-            header.expandBtn:SetPushedTexture(0)
-            header.expandBtn:SetHighlightTexture(0)
-            header.expandBtn:SetText("")
             
             local iconStyle = db.headerIconStyle or "standard"
+            local iconPos = db.headerIconPosition or "left"
             local isCollapsed = item.collapsed
             
-            if iconStyle == "standard" then
-                header.expandBtn:SetSize(16, 16)
-                header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
-                header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
-                header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
-            elseif iconStyle == "square" then
-                -- Classic UI Square Buttons (Plus/Minus usually represented by Expand/Collapse textures)
-                header.expandBtn:SetSize(16, 16)
-                -- Note: ExpandButton-Up shows a Plus. CollapseButton-Up shows a Minus.
-                header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
-                header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
-                -- header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight") -- Often doesn't exact match, skip or find better
-            elseif iconStyle == "text_brackets" then
-                header.expandBtn:SetSize(24, 16)
-                header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
-                
-                local fontString = header.expandBtn:GetFontString()
-                if fontString then
-                    fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
-                    fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
-                    fontString:SetJustifyH("LEFT")
-                end
-            elseif iconStyle == "text_arrows" then
-                header.expandBtn:SetSize(16, 16)
-                header.expandBtn:SetText(isCollapsed and ">" or "v")
-                 
-                local fontString = header.expandBtn:GetFontString()
-                if fontString then
-                    fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
-                    fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
-                    fontString:SetJustifyH("CENTER")
-                end
+            -- Position Button (Left or Right)
+            header.expandBtn:ClearAllPoints()
+            if iconPos == "right" then
+                header.expandBtn:SetPoint("RIGHT", -4, 0)
+            else
+                header.expandBtn:SetPoint("LEFT", 4, 0)
             end
             
-            header.expandBtn:Show()
+            if iconStyle == "none" then
+                header.expandBtn:Hide()
+            else
+                header.expandBtn:Show()
+                if iconStyle == "standard" then
+                    header.expandBtn:SetSize(16, 16)
+                    header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+                    header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
+                    header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
+                elseif iconStyle == "square" then
+                    -- Classic UI Square Buttons (Plus/Minus usually represented by Expand/Collapse textures)
+                    header.expandBtn:SetSize(16, 16)
+                    -- Note: ExpandButton-Up shows a Plus. CollapseButton-Up shows a Minus.
+                    header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
+                    header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
+                    -- header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight") -- Often doesn't exact match, skip or find better
+                elseif iconStyle == "text_brackets" then
+                    header.expandBtn:SetSize(24, 16)
+                    header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
+                    
+                    local fontString = header.expandBtn:GetFontString()
+                    if fontString then
+                        fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
+                        fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
+                        if iconPos == "right" then
+                            fontString:SetJustifyH("RIGHT")
+                        else
+                            fontString:SetJustifyH("LEFT")
+                        end
+                    end
+                elseif iconStyle == "questlog" then
+                    header.expandBtn:SetSize(16, 16)
+                    if header.expandBtn.SetAtlas then
+                         -- Use specific QuestLog atlases as identified by FrameInspect 
+                         -- Note: "Expand" means "Show More" (currently collapsed), "Shrink" means "Show Less" (currently expanded)
+                         local atlas = isCollapsed and "QuestLog-icon-expand" or "QuestLog-icon-shrink"
+                         
+                         header.expandBtn:SetNormalAtlas(atlas)
+                         header.expandBtn:SetPushedAtlas(atlas)
+                         -- Highlight matches the normal state usually, or there might be a highlit version. 
+                         -- Assuming same for now as no highlight atlas was provided.
+                         header.expandBtn:SetHighlightAtlas(atlas) 
+                    else
+                        -- Fallback
+                        header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+                    end
+                end
+            end
             
             -- Icon Tooltip & Click (Exclusive)
             header.expandBtn:SetScript("OnClick", function(self)
@@ -706,15 +1033,61 @@ function addon:UpdateTrackerDisplay(trackables)
             
             -- Title Text
             header.text:SetText(item.title)
-            header.text:SetJustifyH("LEFT")
             
-            -- RESET TEXT POINT for recycled headers to remove old indentation
-            -- Ensure text is properly left-aligned regardless of prior usage
+            -- RESET TEXT POINT for recycled headers
             header.text:ClearAllPoints()
-            header.text:SetPoint("LEFT", 22, 0) -- Indent passed the icon
-            header.text:SetPoint("RIGHT", -5, 0)
             
-            header.bg:SetColorTexture(0, 0, 0, isMajor and 0.4 or 0.2)
+            if iconStyle == "none" then
+                 -- No icon: Text fills full width with small padding
+                header.text:SetPoint("LEFT", 5, 0)
+                header.text:SetPoint("RIGHT", -5, 0)
+                header.text:SetJustifyH("LEFT")
+            elseif iconPos == "right" then
+                -- Icon on Right: Text starts Left, ends before icon
+                header.text:SetPoint("LEFT", 5, 0)
+                header.text:SetPoint("RIGHT", -22, 0)
+                header.text:SetJustifyH("LEFT")
+            else
+                -- Icon on Left (Default): Text starts after icon
+                header.text:SetPoint("LEFT", 22, 0)
+                header.text:SetPoint("RIGHT", -5, 0)
+                header.text:SetJustifyH("LEFT") 
+            end
+            
+            local bgStyle = db.headerBackgroundStyle or "tracker"
+            
+            header.bg:ClearAllPoints()
+            
+            if bgStyle == "none" then
+                header.bg:SetAllPoints(header)
+                header.bg:SetColorTexture(0, 0, 0, 0)
+            elseif bgStyle == "questlog" then
+                 -- Shrink by 2px on each side
+                 header.bg:SetPoint("TOPLEFT", header, "TOPLEFT", 2, 0)
+                 header.bg:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -2, 0)
+                 
+                 -- Use the texture identified from the Quest Log frame
+                 if header.bg.SetAtlas then
+                     header.bg:SetAtlas("QuestLog-tab")
+                     header.bg:SetVertexColor(1, 1, 1, 1)
+                 else
+                     -- Fallback (though SetAtlas should exist in Retail)
+                     header.bg:SetTexture("Interface\\QuestFrame\\QuestLog-tab")
+                     header.bg:SetTexCoord(0, 1, 0, 1) 
+                 end
+                 header.bg:SetVertexColor(1, 1, 1, 1)
+            else
+                header.bg:SetAllPoints(header)
+                -- Tracker Default (Blizzard Style)
+                if header.bg.SetAtlas then
+                    -- Use Secondary for category headers (Quests, Achievements, etc.)
+                    header.bg:SetAtlas("UI-QuestTracker-Secondary-Objective-Header")
+                else
+                    header.bg:SetColorTexture(0, 0, 0, isMajor and 0.4 or 0.2)
+                end
+                header.bg:SetVertexColor(1, 1, 1, 1)
+            end
+            
             header:SetHeight(isMajor and 24 or 20)
             header:Show()
             
@@ -1535,6 +1908,45 @@ function addon:UpdateTrackerAppearance()
     if trackerFrame.title then
         trackerFrame.title:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
         trackerFrame.title:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
+    end
+    
+    -- Update Main Header Background
+    if trackerFrame.headerBg then
+        local bgStyle = db.headerBackgroundStyle or "tracker"
+        
+        trackerFrame.headerBg:ClearAllPoints()
+        
+        if bgStyle == "none" then
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
+            trackerFrame.headerBg:SetColorTexture(0, 0, 0, 0)
+        elseif bgStyle == "questlog" then
+            -- Initial Quest Log style adjustments (shrink width by 4px total)
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 2, 0)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", -2, 0)
+            
+            if trackerFrame.headerBg.SetAtlas then
+                trackerFrame.headerBg:SetAtlas("QuestLog-tab")
+                trackerFrame.headerBg:SetVertexColor(1, 1, 1, 1)
+            else
+                trackerFrame.headerBg:SetTexture("Interface\\QuestFrame\\QuestLog-tab")
+                trackerFrame.headerBg:SetTexCoord(0, 1, 0, 1)
+                trackerFrame.headerBg:SetVertexColor(1, 1, 1, 1)
+            end
+        else
+            -- Tracker Default
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
+            
+            if trackerFrame.headerBg.SetAtlas then
+                 -- Using Primary for the Main Header as it is the "Main" header
+                trackerFrame.headerBg:SetAtlas("UI-QuestTracker-Primary-Objective-Header")
+            else
+                trackerFrame.headerBg:SetColorTexture(0, 0, 0, 0.4)
+            end
+            trackerFrame.headerBg:SetVertexColor(1, 1, 1, 1)
+        end
+        trackerFrame.headerBg:SetHeight(24)
     end
 end
 
