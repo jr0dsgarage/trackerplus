@@ -637,6 +637,7 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Extract Scenarios and Super Tracked items first
     local scenarios = {}
+    local autoQuests = {}
     local superTrackedItems = {}
     local bonusObjectives = {}
     local remainingTrackables = {}
@@ -644,6 +645,8 @@ function addon:UpdateTrackerDisplay(trackables)
     for _, item in ipairs(trackables) do
         if item.type == "scenario" then
             table.insert(scenarios, item)
+        elseif item.type == "autoquest" then
+            table.insert(autoQuests, item)
         elseif item.type == "supertrack" then
             table.insert(superTrackedItems, item)
         elseif item.type == "bonus" then
@@ -984,6 +987,110 @@ function addon:UpdateTrackerDisplay(trackables)
                scenarioYOffset = scenarioYOffset + height + 8
         end
     end
+    
+    -- Render Auto Quests
+    if #autoQuests > 0 then
+         if scenarioYOffset > 0 then
+              scenarioYOffset = scenarioYOffset + 10
+         end
+
+         for _, item in ipairs(autoQuests) do
+              -- Use a dedicated rendering style for PopUps
+              local button = self:GetOrCreateButton(self.scenarioFrame)
+              
+               -- Reset points and ensure visibility
+              button:ClearAllPoints()
+              button:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioYOffset)
+              button:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -5, -scenarioYOffset)
+              button:Show()
+
+              -- 1. Styled Backdrop (Gold/Yellow Border)
+              if not button.popupBackdrop then
+                   button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
+                   button.popupBackdrop:SetBackdrop({
+                        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+                        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                        tile = true, tileSize = 16, edgeSize = 16,
+                        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+                   })
+                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+                   button.popupBackdrop:SetBackdropBorderColor(1, 0.8, 0, 1) -- Gold Border
+                   button.popupBackdrop:SetPoint("TOPLEFT", 0, 0)
+                   button.popupBackdrop:SetPoint("BOTTOMRIGHT", 0, 0)
+                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()) 
+              end
+              button.popupBackdrop:Show()
+              button.bg:SetColorTexture(0, 0, 0, 0)
+              
+              -- 3. Icon (Large, Left)
+              if not button.largeIcon then
+                   button.largeIcon = button:CreateTexture(nil, "ARTWORK")
+                   button.largeIcon:SetSize(32, 32)
+                   button.largeIcon:SetPoint("LEFT", 10, 0)
+              end
+              button.largeIcon:Show()
+              
+              if item.popUpType == "COMPLETE" then
+                   if button.largeIcon.SetAtlas then 
+                        button.largeIcon:SetAtlas("Quest-AutoQuest-Complete", true) 
+                   else
+                        button.largeIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                   end
+              else
+                   if button.largeIcon.SetAtlas then
+                        button.largeIcon:SetAtlas("Quest-AutoQuest-Offer", true)
+                   else
+                        button.largeIcon:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon") -- Yellow Exclamation
+                   end
+              end
+              -- Adjust size if Atlas wasn't used or reset it
+              button.largeIcon:SetSize(32, 32)
+
+              -- 4. Text (Two lines)
+              -- "Click to complete quest" (Top, Yellow/Gold)
+              button.text:ClearAllPoints()
+              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -5)
+              button.text:SetPoint("TOPRIGHT", -5, -5)
+              button.text:SetFont(db.fontFace, db.fontSize + 1, db.fontOutline)
+              button.text:SetTextColor(1, 0.82, 0, 1) -- Gold
+              
+              local topText = (item.popUpType == "COMPLETE") and "Click to complete quest" or "New Quest Available"
+              button.text:SetText(topText)
+              button.text:SetJustifyH("LEFT")
+              
+              -- Title (Bottom, White)
+              if not button.subText then
+                   button.subText = button:CreateFontString(nil, "OVERLAY")
+              end
+              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline) -- Title slightly larger
+              button.subText:SetTextColor(1, 1, 1, 1) -- White
+              button.subText:SetPoint("TOPLEFT", button.text, "BOTTOMLEFT", 0, -2)
+              button.subText:SetPoint("TOPRIGHT", button.text, "BOTTOMRIGHT", 0, -2)
+              button.subText:SetText(item.title)
+              button.subText:SetJustifyH("LEFT")
+              button.subText:Show()
+              
+              -- Hide unused standard elements
+              if button.poiButton then button.poiButton:Hide() end
+              if button.itemButton then button.itemButton:Hide() end
+              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
+              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
+              if button.expandBtn then button.expandBtn:Hide() end
+              if button.stageBox then button.stageBox:Hide() end
+              
+              -- Set Height
+              button:SetHeight(48)
+              button:Show()
+              
+              button.trackableData = item
+              button:SetScript("OnClick", function(self, mouseButton)
+                  addon:OnTrackableClick(self.trackableData, mouseButton)
+              end)
+              
+              scenarioYOffset = scenarioYOffset + 48 + db.spacingItemVertical
+         end
+    end
+
     
     -- Render Super Tracked Items (Pinned)
     if #superTrackedItems > 0 then
@@ -1681,7 +1788,13 @@ function addon:OnTrackableClick(trackable, mouseButton)
             self:RequestUpdate()
         else
             -- Left click: Focus/navigate to quest
-            if trackable.type == "quest" then
+            if trackable.type == "autoquest" then
+                if trackable.popUpType == "COMPLETE" then
+                     if ShowQuestComplete then ShowQuestComplete(trackable.questID) end
+                elseif trackable.popUpType == "OFFER" then
+                     if ShowQuestOffer then ShowQuestOffer(trackable.questID) end
+                end
+            elseif trackable.type == "quest" then
                 local questID = trackable.id
                 if questID then
                     -- Show on map

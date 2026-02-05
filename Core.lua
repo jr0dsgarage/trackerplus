@@ -80,6 +80,7 @@ function addon:RegisterEvents()
     frame:RegisterEvent("QUEST_TURNED_IN")
     frame:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
     frame:RegisterEvent("SUPER_TRACKING_CHANGED")
+    frame:RegisterEvent("QUEST_AUTOCOMPLETE")
     
     -- World quest events
     frame:RegisterEvent("QUEST_WATCH_UPDATE")
@@ -260,6 +261,9 @@ function addon:CollectTrackables()
     if db.showScenarios or db.showDungeonObjectives then
         self:CollectScenarioObjectives(trackables)
     end
+
+    -- Auto Quests (Popups)
+    self:CollectAutoQuests(trackables)
 
     -- Super Tracked (Pinned)
     self:CollectSuperTrackedQuest(trackables)
@@ -545,6 +549,34 @@ end
 function addon:CollectBonusObjectives(trackables)
     -- Bonus objectives are typically tracked as quests
     -- Additional handling if needed
+end
+
+-- Collect Auto Quest PopUps
+function addon:CollectAutoQuests(trackables)
+    if not GetNumAutoQuestPopUps then return end
+    
+    for i = 1, GetNumAutoQuestPopUps() do
+        local questID, popUpType = GetAutoQuestPopUp(i)
+        if questID then
+             -- Only check if we have a title
+             local title = C_QuestLog.GetTitleForQuestID(questID)
+             if title then
+                 table.insert(trackables, {
+                     type = "autoquest",
+                     questID = questID, -- Needed for interactions
+                     title = title,
+                     popUpType = popUpType, -- "OFFER", "COMPLETE"
+                     isComplete = (popUpType == "COMPLETE"),
+                     color = {r=1, g=0.8, b=0, a=1}, -- Orange/Goldish title
+                     -- Use a specific structure for objectives to show the message
+                     objectives = {{
+                         text = (popUpType == "COMPLETE" and "Click to Complete" or "New Quest Available"), 
+                         finished = false
+                     }}
+                 })
+             end
+        end
+    end
 end
 
 -- Collect scenario objectives
