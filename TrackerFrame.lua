@@ -150,11 +150,20 @@ function addon:CreateTrackerFrame()
     scenarioFrame:SetPoint("TOPLEFT", 5, -25)
     scenarioFrame:SetPoint("TOPRIGHT", -5, -25)
     scenarioFrame:SetHeight(1) -- Will be dynamic
+    self.scenarioFrame = scenarioFrame
+
+    -- Bonus Objective Frame (Pinned to bottom)
+    local bonusFrame = CreateFrame("Frame", nil, trackerFrame)
+    bonusFrame:SetPoint("BOTTOMLEFT", 5, 5)
+    bonusFrame:SetPoint("BOTTOMRIGHT", -5, 5)
+    bonusFrame:SetHeight(1) 
+    bonusFrame:Hide()
+    self.bonusFrame = bonusFrame
     
-    -- Create scroll frame (Below scenario frame)
+    -- Create scroll frame (Between Scenario and Bonus)
     scrollFrame = CreateFrame("ScrollFrame", nil, trackerFrame)
     scrollFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0) -- Attach to bottom of scenario frame
-    scrollFrame:SetPoint("BOTTOMRIGHT", -5, 5)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -5, 5) -- Default bottom, will be adjusted dynamically
     scrollFrame:EnableMouse(false)
     scrollFrame:EnableMouseWheel(false)
     
@@ -600,6 +609,7 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Extract Scenarios and Super Tracked items first
     local scenarios = {}
     local superTrackedItems = {}
+    local bonusObjectives = {}
     local remainingTrackables = {}
     
     for _, item in ipairs(trackables) do
@@ -607,12 +617,14 @@ function addon:UpdateTrackerDisplay(trackables)
             table.insert(scenarios, item)
         elseif item.type == "supertrack" then
             table.insert(superTrackedItems, item)
+        elseif item.type == "bonus" then
+            table.insert(bonusObjectives, item)
         else
             table.insert(remainingTrackables, item)
         end
     end
     
-    if addon.Log then addon:Log("Scenarios: %d | Remaining: %d", #scenarios, #remainingTrackables) end
+    if addon.Log then addon:Log("Scenarios: %d | Bonus: %d | Remaining: %d", #scenarios, #bonusObjectives, #remainingTrackables) end
     
     self.currentScenarios = scenarios
     trackables = remainingTrackables
@@ -965,8 +977,41 @@ function addon:UpdateTrackerDisplay(trackables)
          header.text:SetPoint("LEFT", 5, 0)
          header.text:SetPoint("RIGHT", -5, 0)
          
-         header.bg:SetColorTexture(0, 0, 0, 0.4)
-         header:SetHeight(24)
+         -- Create or show styled backdrop (Scenario Stage Box style)
+         if not header.styledBackdrop then
+             header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
+             -- Note: Anchors are set below to accommodate dynamic content height
+             
+             -- Ensure backdrop is behind the text (which is a region of header)
+             -- We need header to be at least level 2 to safely put this at level - 1 relative to it?
+             -- Actually, simple SetFrameStrata("BACKGROUND") might be safer if header is LOW/MEDIUM
+             if header:GetFrameLevel() > 1 then
+                 header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
+             else
+                 header.styledBackdrop:SetFrameLevel(1)
+                 header:SetFrameLevel(2)
+             end
+             
+             header.styledBackdrop:SetBackdrop({
+                bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 }
+             })
+             header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
+             header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+         end
+         
+         -- Configure Backdrop Anchors (covering Header + Items)
+         header.styledBackdrop:ClearAllPoints()
+         header.styledBackdrop:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
+         header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
+         -- Bottom/Height will be set after item loop
+         
+         header.styledBackdrop:Show()
+         header.bg:SetColorTexture(0, 0, 0, 0) -- Hide default flat bg
+         
+         header:SetHeight(30)
          header:Show()
          
          -- Cleanup header parts
@@ -976,12 +1021,101 @@ function addon:UpdateTrackerDisplay(trackables)
          if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
          if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
 
-         scenarioYOffset = scenarioYOffset + 26
+         -- Capture start Y for backdrop calculation (This is the top of the header)
+         local activeQuestStartY = scenarioYOffset
+         scenarioYOffset = scenarioYOffset + 30 -- Advance past header height
 
          for _, item in ipairs(superTrackedItems) do
-            local height = self:RenderTrackableItem(self.scenarioFrame, item, scenarioYOffset, db.spacingMinorHeaderIndent)
+            local height = self:RenderTrackableItem(self.scenarioFrame, item, scenarioYOffset, db.spacingMinorHeaderIndent + 10)
             scenarioYOffset = scenarioYOffset + height + db.spacingItemVertical
          end
+
+         -- Update backdrop height to cover items
+         -- Total height is current cursor - startY
+         local totalHeight = scenarioYOffset - activeQuestStartY
+         -- Add a bit of padding at the bottom for aesthetics
+         if totalHeight < 30 then totalHeight = 30 end -- Minimum height
+         header.styledBackdrop:SetHeight(totalHeight + 5)
+    end
+    
+    --------------------------------------------------------------------------
+    -- 1.5 Render Bonus Objectives (Pinned to Bottom)
+    --------------------------------------------------------------------------
+    local bonusYOffset = 0
+    if db.showBonusObjectives and #bonusObjectives > 0 then
+         -- Render Header (Bonus Objective)
+         local header = self:GetOrCreateButton(self.bonusFrame)
+         header:SetPoint("TOPLEFT", self.bonusFrame, "TOPLEFT", 0, -bonusYOffset)
+         header:SetPoint("TOPRIGHT", self.bonusFrame, "TOPRIGHT", 0, -bonusYOffset)
+         
+         header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
+         -- Use header color or specific bonus color
+         local bonusColor = db.bonusColor or {r=1,g=1,b=1,a=1}
+         header.text:SetTextColor(bonusColor.r, bonusColor.g, bonusColor.b, bonusColor.a)
+         header.text:SetText("Bonus Objective")
+         header.text:SetJustifyH("LEFT")
+         
+         if header.expandBtn then header.expandBtn:Hide() end
+         header.text:ClearAllPoints()
+         header.text:SetPoint("LEFT", 5, 0)
+         header.text:SetPoint("RIGHT", -5, 0)
+
+         -- Reuse Styling Logic from Active Quest (Backdrop)
+         if not header.styledBackdrop then
+             header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
+             -- Ensure backdrop is behind the text
+             if header:GetFrameLevel() > 1 then
+                 header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
+             else
+                 header.styledBackdrop:SetFrameLevel(1)
+                 header:SetFrameLevel(2)
+             end
+             
+             header.styledBackdrop:SetBackdrop({
+                bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 }
+             })
+             header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
+             header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+         end
+         
+         header.styledBackdrop:ClearAllPoints()
+         header.styledBackdrop:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
+         header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
+         
+         header.styledBackdrop:Show()
+         header.bg:SetColorTexture(0, 0, 0, 0) 
+         header:SetHeight(30)
+         header:Show()
+         
+         -- Cleanup 
+         if header.poiButton then header.poiButton:Hide() end
+         if header.itemButton then header.itemButton:Hide() end
+         if header.icon then header.icon:Hide() end
+         if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+         if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+
+         local bonusStartY = bonusYOffset
+         bonusYOffset = bonusYOffset + 30 
+         
+         for _, item in ipairs(bonusObjectives) do
+            local height = self:RenderTrackableItem(self.bonusFrame, item, bonusYOffset, db.spacingMinorHeaderIndent + 10)
+            bonusYOffset = bonusYOffset + height + db.spacingItemVertical
+         end
+
+         local totalHeight = bonusYOffset - bonusStartY
+         if totalHeight < 30 then totalHeight = 30 end
+         header.styledBackdrop:SetHeight(totalHeight + 5)
+    end
+    
+    -- Update Bonus Frame Height
+    if bonusYOffset > 0 then
+        self.bonusFrame:SetHeight(bonusYOffset)
+        self.bonusFrame:Show()
+    else
+        self.bonusFrame:Hide()
     end
 
     -- Update Scenario Frame Height & ScrollFrame Anchor
@@ -994,7 +1128,12 @@ function addon:UpdateTrackerDisplay(trackables)
         self.scenarioFrame:Hide()
         self.scrollFrame:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -25)
     end
-    self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
+    
+    if bonusYOffset > 0 then
+         self.scrollFrame:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+    else
+         self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
+    end
 
     if addon.Log then 
         addon:Log("ScenarioFrame Height: %d | YOffset: %d", scenarioYOffset, scenarioYOffset)
@@ -1442,6 +1581,8 @@ function addon:GetOrCreateButton(parent)
     end
     if btn.distance then btn.distance:Hide() end
     if btn.stageBox then btn.stageBox:Hide() end
+    if btn.styledBackdrop then btn.styledBackdrop:Hide() end
+    if btn.SetBackdrop then btn:SetBackdrop(nil) end
     
     return btn
 end
@@ -1604,7 +1745,8 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 rootDescription:CreateButton("Abandon Quest", function()
                     C_QuestLog.SetSelectedQuest(trackable.id)
                     C_QuestLog.SetAbandonQuest()
-                    StaticPopup_Show("ABANDON_QUEST", GetAbandonQuestName())
+                    local title = C_QuestLog.GetTitleForQuestID(trackable.id)
+                    StaticPopup_Show("ABANDON_QUEST", title)
                 end)
             end)
         end

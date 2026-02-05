@@ -41,6 +41,14 @@ local DEFAULTS = {
     completeColor = {r = 0, g = 1, b = 0, a = 1},    -- Green
     failedColor = {r = 1, g = 0, b = 0, a = 1},      -- Red
     
+    -- Trackable Type Colors
+    achievementColor = {r = 1, g = 0.82, b = 0, a = 1},     -- Gold/Yellow
+    scenarioColor = {r = 1, g = 1, b = 1, a = 1},           -- White
+    bonusColor = {r = 1, g = 1, b = 1, a = 1},              -- White
+    professionColor = {r = 0.5, g = 1, b = 0.5, a = 1},     -- Greenish
+    monthlyColor = {r = 0.4, g = 0.6, b = 1, a = 1},        -- Blue
+    endeavorColor = {r = 1, g = 0.4, b = 0.8, a = 1},       -- Pink
+    
     -- Display Options
     showQuestLevel = true,
     showQuestType = true,

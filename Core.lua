@@ -107,6 +107,8 @@ function addon:RegisterEvents()
     -- Profession events
     frame:RegisterEvent("SKILL_LINES_CHANGED")
     frame:RegisterEvent("TRADE_SKILL_SHOW")
+    frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
+    frame:RegisterEvent("TRACKED_RECIPE_UPDATE")
 
     -- Monthly Activities (Trading Post)
     if C_PerksProgram then
@@ -301,8 +303,11 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
     local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
     
+    local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not C_QuestLog.IsWorldQuest(questID)
+    local type = typeOverride or (isBonusObjective and "bonus" or "quest")
+
     local questInfo = {
-        type = typeOverride or "quest",
+        type = type,
         id = questID,
         logIndex = logIndex,
         title = info.title,
@@ -453,7 +458,7 @@ function addon:CollectAchievements(trackables)
                 points = points,
                 objectives = {},
                 zone = categoryName,
-                color = {r = 0.5, g = 0.5, b = 1, a = 1},
+                color = self.db.achievementColor,
             }
             
             -- Get criteria
@@ -516,7 +521,7 @@ function addon:CollectScenarioObjectives(trackables)
             level = currentStage,
             zone = "Scenario",
             objectives = {},
-            color = {r = 1, g = 0.5, b = 0, a = 1},
+            color = self.db.scenarioColor,
         }
         
         -- Get stage info
@@ -581,7 +586,7 @@ function addon:CollectProfessionTracking(trackables)
                     zone = professionName,
                     isRecraft = isRecraft,
                     objectives = {}, -- Could list reagents here if we wanted
-                    color = self.db.questTypeColors.profession
+                    color = self.db.professionColor
                 })
             end
         end
@@ -632,7 +637,7 @@ function addon:CollectMonthlyActivities(trackables)
                 zone = "Traveler's Log",
                 isComplete = isComplete,
                 objectives = objectives,
-                color = {r=0.6, g=0.8, b=1, a=1} -- Cyan-ish
+                color = self.db.monthlyColor -- Cyan-ish
             })
         end
     end
@@ -722,7 +727,7 @@ function addon:CollectEndeavors(trackables)
                            level = 0, 
                            zone = "Housing",
                            objectives = objectives,
-                           color = {r=1, g=0.4, b=0.8, a=1} -- Warm Pink
+                           color = self.db.endeavorColor -- Warm Pink
                       })
                   end
               end
@@ -738,6 +743,8 @@ function addon:GetQuestColor(info)
         return self.db.completeColor
     elseif info.isWorldQuest then
         return self.db.questTypeColors.worldQuest
+    elseif C_QuestLog.IsQuestTask(info.questID) then
+        return self.db.bonusColor
     else
         -- Use level-based coloring or type-based coloring
         return self.db.questColor
