@@ -455,25 +455,47 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         local currentY = -(textHeight + 2)
         
         for objIndex, obj in ipairs(item.objectives) do
-            local objText = "  - " .. obj.text
+            local objText = "  - " .. (obj.text or "")
             local isProgressBar = false
             local progressValue = 0
             local progressMax = 100
             
-            if obj.text and string.find(obj.text, "%%") then
+            -- Determine if this should be a progress bar
+            local forceBar = (item.type == "bonus" or item.isWorldQuest) and (obj.numRequired and obj.numRequired > 1)
+            
+            if obj.type == "progressbar" or (obj.text and string.find(obj.text, "%%")) or forceBar then
                  isProgressBar = true
-                 local val = string.match(obj.text, "(%d+)%%")
+                 
+                 -- Try to extract percent from text first (most accurate for raw percent bars)
+                 local val = string.match(obj.text or "", "(%d+)%%")
+                 
                  if val then
                      progressValue = tonumber(val)
                      progressMax = 100
+                 elseif obj.numFulfilled and obj.numRequired and obj.numRequired > 0 then
+                     -- Calculate percent from raw numbers
+                     progressValue = obj.numFulfilled
+                     progressMax = obj.numRequired
+                     -- For display on the bar, we might want percent or values?
+                     -- Usually bars show percent or 45/100.
+                     -- Use specific Max for the bar
+                 elseif obj.type == "progressbar" then
+                      val = obj.numFulfilled 
+                      progressValue = tonumber(val) or 0
+                      progressMax = 100
                  end
-                 local cleanText = obj.text
-                 cleanText = cleanText:gsub("%s*%(%d+%%%)", "")
-                 cleanText = cleanText:gsub("%s*%d+%%", "")
+
+                 -- Text Cleanup
+                 local cleanText = obj.text or ""
+                 cleanText = cleanText:gsub("%s*%(%d+%%%)", "") -- remove (45%)
+                 cleanText = cleanText:gsub("%s*%d+%%", "")      -- remove 45%
+                 cleanText = cleanText:gsub("^%d+/%d+%s*", "")   -- remove 0/100 at start
                  cleanText = cleanText:gsub(":%s*$", "")
                  cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
-                 if cleanText == "" then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
-                 objText = "  - " .. cleanText
+                 
+                 if cleanText == "" and obj.text then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
+                 objText = "  - " .. (cleanText or "Progress")
+                 
             elseif obj.numRequired and obj.numRequired > 0 then
                 local cleanText = obj.text:gsub("^%d+/%d+%s*", "")
                 cleanText = cleanText:gsub("^%s+", "")
@@ -529,7 +551,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 bar:SetMinMaxValues(0, progressMax)
                 bar:SetValue(progressValue)
                 bar:SetStatusBarColor(0, 0.5, 1, 1)
-                if bar.value then bar.value:SetText(progressValue .. "%") end
+                
+                if bar.value then 
+                    local percent = 0
+                    if progressMax > 0 then
+                        percent = math.floor((progressValue / progressMax) * 100)
+                    end
+                    bar.value:SetText(percent .. "%") 
+                end
                 bar:Show()
                 
                 local barH = 19

@@ -337,11 +337,40 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     end
     
     -- Get objectives
-    local objectives = C_QuestLog.GetQuestObjectives(questID)
+    local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
+
+    -- DEBUG OBJECTIVES
+    -- if C_QuestLog.IsQuestTask(questID) or (info and info.isHidden) then ... end (Removed for production)
     
+    -- Check for Task/Bonus Objective Progress Bar
+    if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
+        local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
+        
+        -- Force debug print for tasks
+        if C_QuestLog.IsQuestTask(questID) then
+            print("TrackerPlus Debug: Checking Task " .. questID .. " Progress: " .. tostring(progress))
+        end
+
+        if progress then
+             hasObjectives = true
+             table.insert(questInfo.objectives, {
+                 text = "Progress",
+                 type = "progressbar",
+                 finished = (progress >= 100),
+                 numFulfilled = progress,
+                 numRequired = 100,
+             })
+             -- Debug
+             print("TrackerPlus Debug: Found Progress Bar for Quest " .. questID .. " (" .. (info.title or "Unknown") .. "): " .. progress .. "%")
+        end
+    end
+
     if objectives then
         for _, obj in ipairs(objectives) do
+            -- Dont add redundant "0/1" objectives if we have a progress bar for the whole quest
+            -- But usually tasks have "Assault X" as text and the bar is separate. 
+            -- Keeping the text is useful for context.
             hasObjectives = true
             table.insert(questInfo.objectives, {
                 text = obj.text,
@@ -383,10 +412,23 @@ function addon:CollectQuests(trackables)
         if info then
             if info.isHeader then
                 currentZone = info.title
-            elseif not info.isHidden and C_QuestLog.GetQuestWatchType(info.questID) ~= nil then
-                local questInfo = self:GetQuestData(i, nil, currentZone)
-                if questInfo then
-                    table.insert(trackables, questInfo)
+            else
+                local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
+                local isTask = C_QuestLog.IsQuestTask(info.questID)
+                
+                -- FORCE WATCH TASKS FOR DEBUGGING IF THEY ARE ACTIVE
+                if isTask and C_QuestLog.IsOnQuest(info.questID) then
+                     isWatched = true
+                end
+
+                -- Allow hidden quests IF they are Tasks (Bonus Objectives)
+                local allowHidden = info.isHidden and isTask
+                
+                if (not info.isHidden or allowHidden) and isWatched then
+                    local questInfo = self:GetQuestData(i, nil, currentZone)
+                    if questInfo then
+                        table.insert(trackables, questInfo)
+                    end
                 end
             end
         end
@@ -693,43 +735,62 @@ function addon:CollectEndeavors(trackables)
      -- C_NeighborhoodInitiative (Housing API)
      if C_NeighborhoodInitiative and C_NeighborhoodInitiative.GetTrackedInitiativeTasks then
           local trackerData = C_NeighborhoodInitiative.GetTrackedInitiativeTasks()
-          if trackerData and trackerData.trackedIDs then
-              for _, id in ipairs(trackerData.trackedIDs) do
-                  local info = C_NeighborhoodInitiative.GetInitiativeTaskInfo(id)
+          local trackedIDs = {}
+          local useCache = false
+          
+          -- Try to get live data
+          if trackerData and trackerData.trackedIDs and #trackerData.trackedIDs > 0 then
+               trackedIDs = trackerData.trackedIDs
+               -- Update cache
+               self.db.endeavorCache = {}
+               for _, id in ipairs(trackedIDs) do
+                   self.db.endeavorCache[id] = true
+               end
+          else
+               -- Fallback to cache if live data missing (common on login)
+               useCache = true
+               if self.db.endeavorCache then
+                   for id, _ in pairs(self.db.endeavorCache) do
+                       table.insert(trackedIDs, id)
+                   end
+               end
+          end
+          
+          for _, id in ipairs(trackedIDs) do
+              local info = C_NeighborhoodInitiative.GetInitiativeTaskInfo(id)
+              
+              if info and not info.completed then
+                  local objectives = {}
                   
-                  if info and not info.completed then
-                      local objectives = {}
-                      
-                      if info.requirementsList then
-                          for _, req in ipairs(info.requirementsList) do
-                              local text = req.requirementText
-                              if text then
-                                  -- Clean up text formatting
-                                  -- Remove leading dashes to prevent double dashes in tracker
-                                  text = text:gsub("^%s*-%s*", "")
-                                  text = string.gsub(text, " / ", "/") 
-                                  
-                                  local isFinished = req.completed
-                                  if not isFinished then
-                                      table.insert(objectives, {
-                                          text = text,
-                                          finished = isFinished
-                                      })
-                                  end
+                  if info.requirementsList then
+                      for _, req in ipairs(info.requirementsList) do
+                          local text = req.requirementText
+                          if text then
+                              -- Clean up text formatting
+                              -- Remove leading dashes to prevent double dashes in tracker
+                              text = text:gsub("^%s*-%s*", "")
+                              text = string.gsub(text, " / ", "/") 
+                              
+                              local isFinished = req.completed
+                              if not isFinished then
+                                  table.insert(objectives, {
+                                      text = text,
+                                      finished = isFinished
+                                  })
                               end
                           end
                       end
-                      
-                      table.insert(trackables, {
-                           type = "endeavor",
-                           id = info.ID or id,
-                           title = info.taskName or ("Endeavor " .. id),
-                           level = 0, 
-                           zone = "Housing",
-                           objectives = objectives,
-                           color = self.db.endeavorColor -- Warm Pink
-                      })
                   end
+                  
+                  table.insert(trackables, {
+                       type = "endeavor",
+                       id = info.ID or id,
+                       title = info.taskName or ("Endeavor " .. id),
+                       level = 0, 
+                       zone = "Housing",
+                       objectives = objectives,
+                       color = self.db.endeavorColor -- Warm Pink
+                  })
               end
           end
      end

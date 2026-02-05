@@ -102,6 +102,9 @@ local DEFAULTS = {
     -- Performance
     updateInterval = 0.1,
     
+    -- Cache
+    endeavorCache = {}, -- Stores last known tracked endeavors {id=true}
+    
     -- Spacing & Layout
     spacingMajorHeaderIndent = 0,      -- Indent for major category headers (Quests, Achievements, etc.)
     spacingMinorHeaderIndent = 5,      -- Indent for minor zone headers
