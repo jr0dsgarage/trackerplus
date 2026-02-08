@@ -61,12 +61,8 @@ function addon:UpdateDefaultTrackerVisibility()
         if ObjectiveTrackerFrame.Show then
             ObjectiveTrackerFrame:Show()
         end
-        -- If we messed with parent earlier, we might need to fix it, but removing that code solves it for future.
     end
 end
-
--- Hidden frame for parenting
--- (Removed local definition, moved to top)
 
 -- Event registration
 function addon:RegisterEvents()
@@ -242,19 +238,9 @@ function addon:CollectTrackables()
         self:CollectQuests(trackables)
     end
     
-    -- World Quests
-    if db.showWorldQuests then
-        self:CollectWorldQuests(trackables)
-    end
-    
     -- Achievements
     if db.showAchievements then
         self:CollectAchievements(trackables)
-    end
-    
-    -- Bonus Objectives
-    if db.showBonusObjectives then
-        self:CollectBonusObjectives(trackables)
     end
     
     -- Scenarios/Dungeons
@@ -296,17 +282,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     
     local questID = info.questID
     
-    -- Classification
-    local questClassification
-    if C_QuestLog.GetQuestClassification then
-        questClassification = C_QuestLog.GetQuestClassification(questID)
-    elseif GetQuestClassification then
-        questClassification = GetQuestClassification(questID)
-    end
-
-    local isCampaign = info.isStory or (questClassification == Enum.QuestClassification.Campaign) or (questClassification == Enum.QuestClassification.Calling)
-    local isLegendary = (questClassification == Enum.QuestClassification.Legendary)
-    
     local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not C_QuestLog.IsWorldQuest(questID)
     local type = typeOverride or (isBonusObjective and "bonus" or "quest")
 
@@ -320,10 +295,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         isComplete = C_QuestLog.IsComplete(questID),
         isFailed = info.isFailed,
         isWorldQuest = C_QuestLog.IsWorldQuest(questID),
-        isDaily = info.frequency == Enum.QuestFrequency.Daily,
-        frequency = info.frequency,
-        isCampaign = isCampaign,
-        isLegendary = isLegendary,
         zone = zoneOverride or GetRealZoneText() or "Unknown Zone",
         distance = self:GetQuestDistance(questID),
         objectives = {},
@@ -331,12 +302,11 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     }
 
     -- Get Quest Item Info
-    local itemLink, itemTexture, _, itemStack = GetQuestLogSpecialItemInfo(logIndex)
+    local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
     if itemLink then
         questInfo.item = {
             link = itemLink,
             texture = itemTexture,
-            stack = itemStack
         }
     end
     
@@ -344,18 +314,10 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
 
-    -- DEBUG OBJECTIVES
-    -- if C_QuestLog.IsQuestTask(questID) or (info and info.isHidden) then ... end (Removed for production)
-    
     -- Check for Task/Bonus Objective Progress Bar
     if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
         
-        -- Force debug print for tasks
-        if C_QuestLog.IsQuestTask(questID) then
-            print("TrackerPlus Debug: Checking Task " .. questID .. " Progress: " .. tostring(progress))
-        end
-
         if progress then
              hasObjectives = true
              table.insert(questInfo.objectives, {
@@ -365,8 +327,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
                  numFulfilled = progress,
                  numRequired = 100,
              })
-             -- Debug
-             print("TrackerPlus Debug: Found Progress Bar for Quest " .. questID .. " (" .. (info.title or "Unknown") .. "): " .. progress .. "%")
+
         end
     end
 
@@ -420,11 +381,6 @@ function addon:CollectQuests(trackables)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
                 
-                -- FORCE WATCH TASKS FOR DEBUGGING IF THEY ARE ACTIVE
-                if isTask and C_QuestLog.IsOnQuest(info.questID) then
-                     isWatched = true
-                end
-
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
                 
@@ -437,12 +393,6 @@ function addon:CollectQuests(trackables)
             end
         end
     end
-end
-
--- Collect world quests
-function addon:CollectWorldQuests(trackables)
-    -- World quests are included in regular quest tracking
-    -- This is for additional world quest specific tracking if needed
 end
 
 -- Collect tracked achievements
@@ -543,12 +493,6 @@ function addon:CollectAchievements(trackables)
             table.insert(trackables, achievementInfo)
         end
     end
-end
-
--- Collect bonus objectives
-function addon:CollectBonusObjectives(trackables)
-    -- Bonus objectives are typically tracked as quests
-    -- Additional handling if needed
 end
 
 -- Collect Auto Quest PopUps
@@ -680,24 +624,6 @@ function addon:CollectMonthlyActivities(trackables)
     end
 end
 
--- Get quest zone
-function addon:GetQuestZone(questID)
-    if C_QuestLog.IsWorldQuest(questID) then
-        local mapID
-        if C_TaskQuest and C_TaskQuest.GetQuestZoneID then
-            mapID = C_TaskQuest.GetQuestZoneID(questID)
-        end
-        
-        if mapID then
-            local mapInfo = C_Map.GetMapInfo(mapID)
-            if mapInfo then
-                return mapInfo.name
-            end
-        end
-    end
-    return GetRealZoneText() or "Unknown"
-end
-
 -- Get quest distance
 function addon:GetQuestDistance(questID)
     -- Get distance to quest objective if available
@@ -713,16 +639,15 @@ end
 
 -- Get quest type name
 function addon:GetQuestTypeName(questID)
-    local questType = C_QuestLog.GetQuestType(questID)
     local questInfo = C_QuestLog.GetQuestTagInfo(questID)
     
     if C_QuestLog.IsWorldQuest(questID) then
         return "World Quest"
     elseif questInfo then
-        return questInfo.tagName -- returns nil if no tag name
+        return questInfo.tagName
     end
     
-    return nil -- Default to nil so we don't display "(0)" or "(Quest)"
+    return nil
 end
 
 -- Collect Endeavors (Housing)
@@ -797,12 +722,11 @@ function addon:GetQuestColor(info)
         return self.db.failedColor
     elseif C_QuestLog.IsComplete(info.questID) then
         return self.db.completeColor
-    elseif info.isWorldQuest then
+    elseif C_QuestLog.IsWorldQuest(info.questID) then
         return self.db.questTypeColors.worldQuest
     elseif C_QuestLog.IsQuestTask(info.questID) then
         return self.db.bonusColor
     else
-        -- Use level-based coloring or type-based coloring
         return self.db.questColor
     end
 end
@@ -858,15 +782,7 @@ function addon:CollectSuperTrackedQuest(trackables)
 
     local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
     if questInfo then
-         -- Override distance/zone for pinned
          questInfo.distance = 0
-         
-         -- Ensure no duplicates if it's already in the list?
-         -- CollectQuests runs first. We might want to remove it from there or mark it.
-         -- But technically, Tracked Quests vs Super Tracked Quest:
-         -- A quest can be tracked AND super tracked.
-         -- If we want it only at the top, we should filter it out in CollectQuests.
-         -- For now, let's just add it.
          table.insert(trackables, questInfo)
     end
 end
@@ -946,5 +862,3 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- Once Initialize is called, it overwrites the OnEvent script to addon:OnEvent
     end
 end)
--- EOF Check
---]]

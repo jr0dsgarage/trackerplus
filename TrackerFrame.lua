@@ -10,8 +10,6 @@ local activeButtons = 0
 local secureButtons = {} -- Pool for SecureActionButtons
 local activeSecureButtons = 0
 
-local WHITE_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
-
 -- Create the main tracker frame
 function addon:CreateTrackerFrame()
     if trackerFrame then
@@ -343,9 +341,6 @@ function addon:UpdateTrackerLock()
         trackerFrame:EnableMouse(false)
         if trackerFrame.resizeBR then trackerFrame.resizeBR:Hide() end
         if trackerFrame.resizeBL then trackerFrame.resizeBL:Hide() end
-        -- Keep settings button clickable? No, if locked, maybe we want it hidden or clickable through passthrough?
-        -- Actually, usually you want settings accessible. But EnableMouse(false) kills children input too unless FrameLevel is higher?
-        -- No, children of mouse-disabled frames can still be mouse enabled.
     else
         trackerFrame:EnableMouse(true)
         if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
@@ -517,7 +512,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     else
         button.poiButton:Hide()
         if button.icon then button.icon:Hide() end
-        leftPadding = db.spacingMinorHeaderIndent
     end
     
     if not isQuest then
@@ -656,7 +650,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                          bar.bg:SetAllPoints()
                          bar.bg:SetColorTexture(0, 0, 0, 0.5)
                          
-                         if CreateBorderLines then CreateBorderLines(bar) end
+                         CreateBorderLines(bar)
      
                          bar.value = bar:CreateFontString(nil, "OVERLAY") 
                          bar.value:SetFont(db.fontFace, 9, "OUTLINE")
@@ -866,8 +860,7 @@ function addon:UpdateTrackerDisplay(trackables)
          if addon.Log then addon:Log("Scenario Final Layout: Height=%s | YOffset=%s", scenarioHeight, scenarioYOffset) end
          
     elseif self.currentScenarios and #self.currentScenarios > 0 then
-        -- OLD MANUAL RENDERING FALLBACK (Or if Blizzard frame fails)
-        -- Render Header
+        -- Manual rendering fallback
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
@@ -1031,7 +1024,6 @@ function addon:UpdateTrackerDisplay(trackables)
                              progressMax = 100
                              progressText = string.format("%d%%", math.floor(percent))
                             
-                             -- Override text line to NOT show "Hyperspawn: 136/160"
                              objText = "  - " .. obj.text
                         elseif obj.numRequired and obj.numRequired > 0 then
                              if not foundPercent then
@@ -1040,16 +1032,10 @@ function addon:UpdateTrackerDisplay(trackables)
                                  
                                  if req > 0 then
                                      percent = (cur / req) * 100
+                                 elseif cur <= 100 then
+                                     percent = cur
                                  else
-                                     -- Fallback: If required is missing/zero, AND no string info found...
-                                     -- It's possible "quantityString" was just "136" (points) without max.
-                                     -- If cur > 100, assume it is NOT a percent
-                                     if cur <= 100 then
-                                         percent = cur
-                                     else
-                                         -- Assume we are in fail state, show 100% or ?
-                                         percent = 100 
-                                     end
+                                     percent = 100
                                  end
                              end
                              
@@ -1062,26 +1048,7 @@ function addon:UpdateTrackerDisplay(trackables)
                              progressMax = 100
                              progressText = string.format("%d%%", math.floor(percent))
                             
-                             -- Override text line to NOT show "Hyperspawn: 136/160"
                              objText = "  - " .. obj.text
-                        elseif obj.numRequired and obj.numRequired > 0 then
-                            -- Standard X/Y objective, but maybe use a bar for visuals?
-                            if obj.text and not string.find(obj.text, "/") then
-                                -- If text doesn't already contain "0/3", append it
-                                objText = string.format("  - %s: %d/%d", obj.text, obj.numFulfilled or 0, obj.numRequired)
-                            else
-                                objText = "  - " .. obj.text
-                            end
-                            
-                            -- Don't force bar unless we want to styling-wise. 
-                            -- But if user sees 67/160 and wants 67%, they probably have a bar in default UI.
-                            -- Let's stick to flags for now to be safe.
-                            if obj.numRequired > 20 and not item.isComplete and not obj.finished then -- Arbitrary threshold for "big numbers" that look good as bars
-                                isProgressBar = true
-                                progressValue = obj.numFulfilled or 0
-                                progressMax = obj.numRequired
-                                progressText = string.format("%d%%", math.floor((progressValue/progressMax)*100))
-                            end
                         elseif obj.quantityString and obj.quantityString ~= "" then
                              -- Fallback if numRequired is 0 but we have a quantity string (common in some scenarios)
                              objText = string.format("  - %s: %s", obj.text, obj.quantityString)
@@ -1222,24 +1189,7 @@ function addon:UpdateTrackerDisplay(trackables)
               if button.distance then button.distance:Hide() end
               button.bg:SetColorTexture(0, 0, 0, 0)
               
-              -- Use Blizzard's ObjectiveTracker_GetPopUpQuestFrame if accessible/relevant? 
-              -- Actually, the best way for "Click to Complete" reuse is using the "ContentLoader" which Blizzard uses.
-              -- But since we just want the visual, we can use the "QuestObjectiveScrollFrameTemplate" logic, or just replicate the style 
-              -- as we did, BUT parent the actual API calls correctly.
-              
-              -- Wait, the user wants to REUSE Blizzard UI elements.
-              -- The Blizzard auto-quest popups are typically handled by `ObjectiveTrackerFrame.BlocksFrame.QuestHeader`.
-              -- Specifically `BonusObjectiveTracker_OnOneQuestFinished` or `AutoQuestPopUpTracker_AddPopUp`.
-              
-              -- A truly "native" way is to see if we can reparent the existing AutoQuestPopUpBlock?
-              -- Usually it's `ObjectiveTrackerFrame.BlocksFrame` -> `QuestObjectiveTracker` -> `AutoQuestPopUpBlock`.
-              -- But that logic is deeply embedded in the C_QuestLog / FrameXML mix.
-              
-              -- Use our styled button but try to leverage any secure frames if possible?
-              -- For now, we stick to our recreation but ensure it matches 100%. The previous edit 
-              -- had specific textures. Let's keep that but ensure logic is robust.
-              
-              -- 1. Styled Backdrop (Gold/Yellow Border)
+              -- Styled Backdrop (Gold/Yellow Border)
               if not button.popupBackdrop then
                    button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
                    button.popupBackdrop:SetBackdrop({
@@ -1560,7 +1510,6 @@ function addon:UpdateTrackerDisplay(trackables)
             header:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", 0, -yOffset)
             
             -- Compatibility: Auctionator Crafting Search Button
-            -- If this is the Professions major header, try to hijack the Auctionator frame
             if isMajor and item.key == "MAJOR_profession" then
                 if AuctionatorCraftingInfoObjectiveTrackerFrame then
                      AuctionatorCraftingInfoObjectiveTrackerFrame:SetParent(header)
@@ -1924,9 +1873,6 @@ function addon:OrganizeTrackables(trackables)
     AddBucket("profession", "Professions")
     AddBucket("monthly", "Monthly Activities")
     AddBucket("endeavor", "Endeavors")
-    
-    -- Leftovers (if any new types added later)
-    -- ...
     
     return organized
 end

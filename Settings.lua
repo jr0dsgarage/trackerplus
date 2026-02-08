@@ -1,5 +1,5 @@
 ---@diagnostic disable: undefined-global
-local addonName, addon = ... -- Version: ForceUpdate1
+local addonName, addon = ...
 
 -- Settings panel using manual frame construction for maximum control
 local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
@@ -27,7 +27,7 @@ end
 local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
     local cb = CreateFrame("CheckButton", addonName .. dbKey .. "Check", parent, "InterfaceOptionsCheckButtonTemplate")
     cb:SetPoint("TOPLEFT", 16, yOffset)
-    getglobal(cb:GetName() .. "Text"):SetText(text)
+    _G[cb:GetName() .. "Text"]:SetText(text)
     
     -- Load saved state
     cb:SetChecked(addon.db[dbKey])
@@ -73,9 +73,9 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
     slider:SetHeight(17)
     slider:SetOrientation("HORIZONTAL")
     
-    local label = getglobal(slider:GetName() .. "Text")
-    local low = getglobal(slider:GetName() .. "Low")
-    local high = getglobal(slider:GetName() .. "High")
+    local label = _G[slider:GetName() .. "Text"]
+    local low = _G[slider:GetName() .. "Low"]
+    local high = _G[slider:GetName() .. "High"]
     
     local val = addon.db[dbKey] or minVal
     label:SetText(text .. ": " .. val)
@@ -288,7 +288,7 @@ end
 function addon:UpdateSettingWidgets()
     -- Helpers to update specific types if needed
     local function UpdateSlider(dbKey)
-        local slider = getglobal(addonName .. dbKey .. "Slider")
+        local slider = _G[addonName .. dbKey .. "Slider"]
         if slider and addon.db[dbKey] then
             -- Temporarily disable script to prevent feedback loop
             local oldScript = slider:GetScript("OnValueChanged")
@@ -297,7 +297,7 @@ function addon:UpdateSettingWidgets()
             slider:SetScript("OnValueChanged", oldScript)
             
             -- Update Text
-            local label = getglobal(slider:GetName() .. "Text")
+            local label = _G[slider:GetName() .. "Text"]
             if label then
                 local text = label:GetText() or ""
                 -- Assuming text format "Name: Value"

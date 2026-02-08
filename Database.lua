@@ -192,29 +192,4 @@ function addon:SetSetting(key, value)
     addon.db[key] = value
 end
 
--- Table utilities
-function addon:TableCount(t)
-    local count = 0
-    for _ in pairs(t) do
-        count = count + 1
-    end
-    return count
-end
 
-function addon:TableContains(t, value)
-    for _, v in pairs(t) do
-        if v == value then
-            return true
-        end
-    end
-    return false
-end
-
--- Color utilities
-function addon:ColorToHex(r, g, b)
-    return string.format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
-end
-
-function addon:ColorText(text, r, g, b)
-    return addon:ColorToHex(r, g, b) .. text .. "|r"
-end
