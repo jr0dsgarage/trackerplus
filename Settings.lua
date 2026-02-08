@@ -284,6 +284,42 @@ local function EndSection(frame, innerY)
     return height + 15 -- Return total consumed height (height + margin)
 end
 
+-- External update function to sync UI with DB changes (e.g. from resizing)
+function addon:UpdateSettingWidgets()
+    -- Helpers to update specific types if needed
+    local function UpdateSlider(dbKey)
+        local slider = getglobal(addonName .. dbKey .. "Slider")
+        if slider and addon.db[dbKey] then
+            -- Temporarily disable script to prevent feedback loop
+            local oldScript = slider:GetScript("OnValueChanged")
+            slider:SetScript("OnValueChanged", nil)
+            slider:SetValue(addon.db[dbKey])
+            slider:SetScript("OnValueChanged", oldScript)
+            
+            -- Update Text
+            local label = getglobal(slider:GetName() .. "Text")
+            if label then
+                local text = label:GetText() or ""
+                -- Assuming text format "Name: Value"
+                local name = text:match("^(.*):")
+                if name then
+                    -- Handle rounding if needed, but for frame dimension integers are fine.
+                    -- If scale (float), might need formatting.
+                    local msg = name .. ": " .. addon.db[dbKey]
+                     if dbKey == "frameScale" then
+                         msg = string.format("%s: %.2f", name, addon.db[dbKey])
+                     end
+                    label:SetText(msg)
+                end
+            end
+        end
+    end
+    
+    UpdateSlider("frameWidth")
+    UpdateSlider("frameHeight")
+    UpdateSlider("frameScale")
+end
+
 -- Initialize the Settings UI
 local function InitUI()
     -- Title info
@@ -477,6 +513,7 @@ local function InitUI()
     sy = CreateSlider(s, "Item Button Spacing", "spacingItemButton", 0, 50, 1, "Additional space when item/action button exists", sy)
     sy = CreateSlider(s, "Objective Indent", "spacingObjectiveIndent", 0, 50, 1, "Extra indent for objective lines (relative to quest)", sy)
     sy = CreateSlider(s, "Progress Bar Inset", "spacingProgressBarInset", 0, 50, 1, "Horizontal margin for progress bars from edges", sy)
+    sy = CreateSlider(s, "Progress Bar Padding", "spacingProgressBarPadding", 0, 20, 1, "Vertical padding between text and progress bar", sy)
     y = y - EndSection(s, sy)
     
     s, sy = StartSection(p3, "Vertical Spacing", y)

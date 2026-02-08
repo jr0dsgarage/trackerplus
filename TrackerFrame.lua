@@ -37,7 +37,9 @@ function addon:CreateTrackerFrame()
     addon.RestorePosition = function()
         if trackerFrame and addon.db.framePosition then
              trackerFrame:ClearAllPoints()
-             trackerFrame:SetPoint(addon.db.framePosition.point, UIParent, addon.db.framePosition.point, addon.db.framePosition.x, addon.db.framePosition.y)
+             -- Use saved relativePoint if available, otherwise fallback to point (legacy support)
+             local relativePoint = addon.db.framePosition.relativePoint or addon.db.framePosition.point
+             trackerFrame:SetPoint(addon.db.framePosition.point, UIParent, relativePoint, addon.db.framePosition.x, addon.db.framePosition.y)
         elseif trackerFrame then
              trackerFrame:ClearAllPoints()
              trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)
@@ -83,9 +85,9 @@ function addon:CreateTrackerFrame()
     end)
     trackerFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        -- Save position
-        local point, _, _, x, y = self:GetPoint()
-        addon.db.framePosition = {point = point, x = x, y = y}
+        -- Save position including relativePoint
+        local point, _, relativePoint, x, y = self:GetPoint()
+        addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
     end)
     
     -- Resizing Handles (Triangles)
@@ -108,6 +110,7 @@ function addon:CreateTrackerFrame()
         -- Update content width
         if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
         addon:RequestUpdate()
+        if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
     end)
 
     -- Bottom Left
@@ -131,6 +134,7 @@ function addon:CreateTrackerFrame()
         addon.db.frameHeight = trackerFrame:GetHeight()
         if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
         addon:RequestUpdate()
+        if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
     end)
     
     -- Mouse wheel scrolling
@@ -144,11 +148,19 @@ function addon:CreateTrackerFrame()
         end
     end)
     
-    -- Scenario Frame (Pinned to top, below title)
+    -- Auto Quest Frame (Pinned to top, below title)
+    -- This resides outside the scroll frame so it doesn't scroll
+    local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
+    autoQuestFrame:SetPoint("TOPLEFT", 5, -25)
+    autoQuestFrame:SetPoint("TOPRIGHT", -5, -25)
+    autoQuestFrame:SetHeight(1) -- Will be dynamic
+    self.autoQuestFrame = autoQuestFrame
+
+    -- Scenario Frame (Pinned to Auto Quest)
     -- This resides outside the scroll frame so it doesn't scroll
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
-    scenarioFrame:SetPoint("TOPLEFT", 5, -25)
-    scenarioFrame:SetPoint("TOPRIGHT", -5, -25)
+    scenarioFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, -5)
+    scenarioFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, -5)
     scenarioFrame:SetHeight(1) -- Will be dynamic
     self.scenarioFrame = scenarioFrame
 
@@ -176,13 +188,13 @@ function addon:CreateTrackerFrame()
     trackerFrame.headerBg = trackerFrame:CreateTexture(nil, "BACKGROUND")
     trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
     trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
-    trackerFrame.headerBg:SetHeight(24) -- Standard header height
+    trackerFrame.headerBg:SetHeight(1) -- Standard header height
 
     -- Title Header (Left aligned)
     trackerFrame.title = trackerFrame:CreateFontString(nil, "OVERLAY")
     trackerFrame.title:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 8, 0)
     local titleFont = self.db.headerFontFace or "Fonts\\FRIZQT__.TTF"
-    local titleSize = self.db.headerFontSize or 14
+    local titleSize = 1 -- self.db.headerFontSize or 14
     trackerFrame.title:SetFont(titleFont, titleSize, self.db.headerFontOutline)
     trackerFrame.title:SetTextColor(
         self.db.headerColor.r,
@@ -190,12 +202,13 @@ function addon:CreateTrackerFrame()
         self.db.headerColor.b,
         self.db.headerColor.a
     )
-    trackerFrame.title:SetText("Tracker Plus")
+    trackerFrame.title:SetText("")
 
     -- Settings Button (Gear icon)
     trackerFrame.settingsParam = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.settingsParam:SetSize(16, 16)
-    trackerFrame.settingsParam:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -5)
+    trackerFrame.settingsParam:SetSize(16, 16) 
+    -- Center vertically relative to header (-34 ensures it sits to left of minmax button)
+    trackerFrame.settingsParam:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -34, 0)
     trackerFrame.settingsParam:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
     trackerFrame.settingsParam:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
     trackerFrame.settingsParam:SetScript("OnClick", function()
@@ -213,6 +226,100 @@ function addon:CreateTrackerFrame()
     trackerFrame.settingsParam:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
+
+    -- Minimize/Maximize Button
+    trackerFrame.minMaxBtn = CreateFrame("Button", nil, trackerFrame)
+    trackerFrame.minMaxBtn:SetSize(24, 24) -- 1.5x bigger
+    -- Center vertically relative to header
+    trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
+    trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Collapse")
+    trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Collapse")
+    trackerFrame.minMaxBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight") 
+
+    local function UpdateMinMaxState()
+        -- Ensure we work with screen coordinates to maintain position relative to TOP-RIGHT
+        local right = trackerFrame:GetRight()
+        local top = trackerFrame:GetTop()
+        local scale = trackerFrame:GetEffectiveScale()
+        
+        -- If we have valid coordinates (frame is visible/layouted), lock top-right
+        if right and top then
+             trackerFrame:ClearAllPoints()
+             -- SetPoint uses coordinates relative to the anchor parent (UIParent usually)
+             -- We want the Frame's TOPRIGHT to stay at (right, top)
+             trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
+        end
+
+        if addon.db.minimized then
+            -- Minimized State: Only Maximize button visible
+            -- Save current dimensions if not already small
+            if trackerFrame:GetWidth() > 50 then
+                 addon.db.savedWidth = trackerFrame:GetWidth()
+                 addon.db.savedHeight = trackerFrame:GetHeight()
+            end
+
+            -- Size to fit just the button (plus defined border padding)
+            -- 34x34 box allows 24x24 button to sit with 5px padding (34-24)/2 = 5
+            trackerFrame:SetSize(34, 34) 
+            
+            -- Gold-only textures (Plus)
+            -- Quest Log option (Atlas)
+            trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Expand")
+            trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Expand") 
+            
+            -- Hide Elements
+            trackerFrame.settingsParam:Hide()
+            trackerFrame.title:Hide()
+            trackerFrame.headerBg:Hide()
+            trackerFrame.bg:Hide()
+            if trackerFrame.border then trackerFrame.border:Hide() end
+            if trackerFrame.resizeBR then trackerFrame.resizeBR:Hide() end
+            if trackerFrame.resizeBL then trackerFrame.resizeBL:Hide() end
+            if scrollFrame then scrollFrame:Hide() end
+            if self.scenarioFrame then self.scenarioFrame:Hide() end
+            if self.bonusFrame then self.bonusFrame:Hide() end
+            
+            -- Center button
+            trackerFrame.minMaxBtn:ClearAllPoints()
+            trackerFrame.minMaxBtn:SetPoint("CENTER", trackerFrame, "CENTER", 0, 0)
+        else
+            -- Restored State
+            trackerFrame:SetSize(addon.db.savedWidth or 300, addon.db.savedHeight or 400)
+            
+            -- Gold-only textures (Minus)
+            trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Collapse")
+            trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Collapse")
+
+            -- Show Elements
+            trackerFrame.settingsParam:Show()
+            trackerFrame.title:Show()
+            trackerFrame.headerBg:Show()
+            trackerFrame.bg:Show()
+            if trackerFrame.border then trackerFrame.border:Show() end
+            if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
+            if trackerFrame.resizeBL then trackerFrame.resizeBL:Show() end
+            if scrollFrame then scrollFrame:Show() end
+            if self.scenarioFrame then self.scenarioFrame:Show() end
+            
+            -- Reset button position
+            trackerFrame.minMaxBtn:ClearAllPoints()
+            trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
+            
+            addon:RequestUpdate()
+        end
+        
+        -- After manipulation, ensure position is saved so reloading keeps the anchor choice
+        local point, relativeTo, relativePoint, x, y = trackerFrame:GetPoint()
+        addon.db.framePosition = {point = point, x = x, y = y}
+    end
+
+    trackerFrame.minMaxBtn:SetScript("OnClick", function()
+        addon.db.minimized = not addon.db.minimized
+        UpdateMinMaxState()
+    end)
+    
+    -- Initialize state
+    UpdateMinMaxState()
     
     -- Store references
     self.trackerFrame = trackerFrame
@@ -461,9 +568,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             local progressMax = 100
             
             -- Determine if this should be a progress bar
-            local forceBar = (item.type == "bonus" or item.isWorldQuest) and (obj.numRequired and obj.numRequired > 1)
-            
-            if obj.type == "progressbar" or (obj.text and string.find(obj.text, "%%")) or forceBar then
+            -- Only use progress bars if explicitly set or if the text contains a percentage
+            if obj.type == "progressbar" or (obj.text and string.find(obj.text, "%%")) then
                  isProgressBar = true
                  
                  -- Try to extract percent from text first (most accurate for raw percent bars)
@@ -476,9 +582,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                      -- Calculate percent from raw numbers
                      progressValue = obj.numFulfilled
                      progressMax = obj.numRequired
-                     -- For display on the bar, we might want percent or values?
-                     -- Usually bars show percent or 45/100.
-                     -- Use specific Max for the bar
                  elseif obj.type == "progressbar" then
                       val = obj.numFulfilled 
                       progressValue = tonumber(val) or 0
@@ -496,8 +599,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                  if cleanText == "" and obj.text then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
                  objText = "  - " .. (cleanText or "Progress")
                  
+            elseif obj.quantityString and obj.quantityString ~= "" then
+                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
+                cleanText = cleanText:gsub("^%s+", "")
+                objText = string.format("  - %s %s", obj.quantityString, cleanText)
             elseif obj.numRequired and obj.numRequired > 0 then
-                local cleanText = obj.text:gsub("^%d+/%d+%s*", "")
+                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
                 cleanText = cleanText:gsub("^%s+", "")
                 objText = string.format("  - %d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
             end
@@ -527,43 +634,66 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             if isProgressBar then
                 if not button.progressBars then button.progressBars = {} end
                 local bar = button.progressBars[objIndex]
-                if not bar then
-                    bar = CreateFrame("StatusBar", nil, button)
-                    bar:SetSize(1, 15)
-                    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-                    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-                    bar.bg:SetAllPoints()
-                    bar.bg:SetColorTexture(0, 0, 0, 0.5)
-                    
-                    CreateBorderLines(bar)
+                
+                local padding = db.spacingProgressBarPadding or 0
 
-                    bar.value = bar:CreateFontString(nil, "OVERLAY") 
-                    bar.value:SetFont(db.fontFace, 9, "OUTLINE")
-                    bar.value:SetPoint("CENTER")
+                if not bar then
+                    -- Use Blizzard Template (QuestProgressBarTemplate or QuestObjectiveProgressBarTemplate)
+                    -- Check for standard templates implicitly by using them
+                    -- We'll try "QuestObjectiveProgressBarTemplate" which is common in modern WoW
+                    -- Fallback logic embedded within the object use
+                    local pcallStatus, newBar = pcall(CreateFrame, "Frame", nil, button, "QuestObjectiveProgressBarTemplate")
+                    
+                    if pcallStatus and newBar then
+                         bar = newBar
+                         bar.isTemplate = true
+                    else
+                         -- Fallback to manual creation
+                         bar = CreateFrame("StatusBar", nil, button)
+                         bar:SetSize(1, 15)
+                         bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                         bar.bg = bar:CreateTexture(nil, "BACKGROUND")
+                         bar.bg:SetAllPoints()
+                         bar.bg:SetColorTexture(0, 0, 0, 0.5)
+                         
+                         if CreateBorderLines then CreateBorderLines(bar) end
+     
+                         bar.value = bar:CreateFontString(nil, "OVERLAY") 
+                         bar.value:SetFont(db.fontFace, 9, "OUTLINE")
+                         bar.value:SetPoint("CENTER")
+                         bar.isTemplate = false
+                    end
                     button.progressBars[objIndex] = bar
                 end
                 
-                bar:SetHeight(15) -- Ensure height update
-                -- Border color is set on creation (white)
+                bar:ClearAllPoints()
+                bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY - padding)
+                bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY - padding)
                 
-                bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
-                bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY)
-                bar:SetMinMaxValues(0, progressMax)
-                bar:SetValue(progressValue)
-                bar:SetStatusBarColor(0, 0.5, 1, 1)
-                
-                if bar.value then 
-                    local percent = 0
-                    if progressMax > 0 then
-                        percent = math.floor((progressValue / progressMax) * 100)
-                    end
-                    bar.value:SetText(percent .. "%") 
+                local percent = 0
+                if progressMax > 0 then
+                    percent = math.floor((progressValue / progressMax) * 100)
                 end
-                bar:Show()
+                local dispText = percent .. "%"
+
+                if bar.isTemplate and bar.Bar then
+                    bar.Bar:SetMinMaxValues(0, progressMax)
+                    bar.Bar:SetValue(progressValue)
+                    bar.Bar:SetStatusBarColor(0, 0.5, 1, 1)
+                    if bar.Bar.Label then bar.Bar.Label:SetText(dispText) end
+                else
+                    bar:SetHeight(15)
+                    bar:SetMinMaxValues(0, progressMax)
+                    bar:SetValue(progressValue)
+                    bar:SetStatusBarColor(0, 0.5, 1, 1)
+                    if bar.value then bar.value:SetText(dispText) end
+                end
                 
+                bar:Show()
+
                 local barH = 19
-                currentY = currentY - barH
-                height = height + barH
+                currentY = currentY - barH - padding
+                height = height + barH + padding
             elseif button.progressBars and button.progressBars[objIndex] then
                  button.progressBars[objIndex]:Hide()
             end
@@ -669,12 +799,74 @@ function addon:UpdateTrackerDisplay(trackables)
     local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
     
     --------------------------------------------------------------------------
-    -- 1. Render Scenarios (Sticky Header)
+    -- 1. Render Scenarios (Sticky Header) - USING BLIZZARD FRAME
     --------------------------------------------------------------------------
+    
+    -- Check if we are in a Scenario and have the Blizzard frame available
+    local scenarioTracker = ScenarioObjectiveTracker
+    local useBlizzardScenario = (C_Scenario.IsInScenario() and scenarioTracker and scenarioTracker.ContentsFrame)
+    
     local scenarioHeight = 0
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
-    if self.currentScenarios and #self.currentScenarios > 0 then
+    if useBlizzardScenario then
+         -- We are using Blizzard's frame, so we hijack it.
+         local contents = scenarioTracker.ContentsFrame
+         
+         -- DEBUG: Print status
+         if addon.Log then addon:Log("Blizzard Scenario Frame Found. Parent: %s | Height: %s | Visible: %s", 
+             tostring(contents:GetParent():GetName()), tostring(contents:GetHeight()), tostring(contents:IsVisible())) 
+         end
+         
+         -- Parent it to our frame
+         if contents:GetParent() ~= self.scenarioFrame then
+              contents:SetParent(self.scenarioFrame)
+              -- FORCE STRATA: The user screenshot showed LOW, but our frame is MEDIUM.
+              -- We must bring it up to at least MEDIUM or HIGH to be seen on top of our bg.
+              contents:SetFrameStrata("HIGH") 
+              contents:SetFrameLevel(100)
+         end
+         
+         -- Clear points and set to top-center of our container
+         contents:ClearAllPoints()
+         contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -5)
+         -- Constrain width so it fits our frame (and forces word wrap if supported)
+         contents:SetWidth(self.db.frameWidth - 5)
+         
+         contents:Show()
+         
+         -- Attempt to find internal WidgetContainer and force show it
+         if contents.WidgetContainer then
+             contents.WidgetContainer:Show()
+             if addon.Log then addon:Log("WidgetContainer: Vis=%s | Height=%s", 
+                 tostring(contents.WidgetContainer:IsVisible()), tostring(contents.WidgetContainer:GetHeight())) 
+             end
+         end
+         
+         -- Try to force update safely
+         if scenarioTracker.Update then
+             local status, err = pcall(function() scenarioTracker:Update() end)
+             if not status and addon.Log then
+                 addon:Log("Blizzard Update Failed: %s", tostring(err))
+             end
+         end
+
+         -- The height of the blizzard frame varies. We need to update our container to match it.
+         local blizzardHeight = contents:GetHeight()
+         
+         -- If height is 0 (collapsed/hidden), force a minimum reasonable height so widgets aren't crushed
+         if not blizzardHeight or blizzardHeight < 40 then 
+             blizzardHeight = 100 
+             contents:SetHeight(blizzardHeight) -- Force the frame open
+         end
+         
+         scenarioHeight = blizzardHeight
+         scenarioYOffset = scenarioHeight + 30 -- Increase padding to prevent overlap with headers
+         
+         if addon.Log then addon:Log("Scenario Final Layout: Height=%s | YOffset=%s", scenarioHeight, scenarioYOffset) end
+         
+    elseif self.currentScenarios and #self.currentScenarios > 0 then
+        -- OLD MANUAL RENDERING FALLBACK (Or if Blizzard frame fails)
         -- Render Header
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
@@ -758,6 +950,11 @@ function addon:UpdateTrackerDisplay(trackables)
               -- Objectives
                if item.objectives and #item.objectives > 0 then
                     for objIndex, obj in ipairs(item.objectives) do
+                        -- Filter unwanted "Progress" objective 
+                        if obj.text == "Progress" then
+                             if button.objectives and button.objectives[objIndex] then button.objectives[objIndex]:Hide() end
+                             if button.progressBars and button.progressBars[objIndex] then button.progressBars[objIndex]:Hide() end
+                        else
                         local objText = "  - " .. obj.text
                         local isProgressBar = false
                         local progressValue = 0
@@ -916,62 +1113,74 @@ function addon:UpdateTrackerDisplay(trackables)
                             if not button.progressBars then button.progressBars = {} end
                             local bar = button.progressBars[objIndex]
                             if not bar then
-                                bar = CreateFrame("StatusBar", nil, button)
-                                bar:SetSize(1, 21) -- width dynamic
-                                bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-                                bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-                                bar.bg:SetAllPoints()
-                                bar.bg:SetColorTexture(0, 0, 0, 0.5)
-                                
-                                bar.value = bar:CreateFontString(nil, "OVERLAY")
-                                bar.value:SetFont(db.fontFace, 10, "OUTLINE")
-                                bar.value:SetPoint("CENTER")
-                                
-                                -- Border (Using textures for 1px thickness)
-                                bar.border = CreateFrame("Frame", nil, bar)
-                                bar.border:SetPoint("TOPLEFT", -1, 1)
-                                bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
-                                
-                                local function CreateLine(p) local t = p:CreateTexture(nil, "BORDER") t:SetColorTexture(1, 1, 1, 1) return t end
-                                bar.border.top = CreateLine(bar.border)
-                                bar.border.top:SetPoint("TOPLEFT")
-                                bar.border.top:SetPoint("TOPRIGHT")
-                                bar.border.top:SetHeight(1)
-                                
-                                bar.border.bottom = CreateLine(bar.border)
-                                bar.border.bottom:SetPoint("BOTTOMLEFT")
-                                bar.border.bottom:SetPoint("BOTTOMRIGHT")
-                                bar.border.bottom:SetHeight(1)
-                                
-                                bar.border.left = CreateLine(bar.border)
-                                bar.border.left:SetPoint("TOPLEFT")
-                                bar.border.left:SetPoint("BOTTOMLEFT")
-                                bar.border.left:SetWidth(1)
-                                
-                                bar.border.right = CreateLine(bar.border)
-                                bar.border.right:SetPoint("TOPRIGHT")
-                                bar.border.right:SetPoint("BOTTOMRIGHT")
-                                bar.border.right:SetWidth(1)
-                                
+                                local pcallStatus, newBar = pcall(CreateFrame, "Frame", nil, button, "QuestObjectiveProgressBarTemplate")
+                                if pcallStatus and newBar then
+                                    bar = newBar
+                                    bar.isTemplate = true
+                                else
+                                    bar = CreateFrame("StatusBar", nil, button)
+                                    bar:SetSize(1, 21) 
+                                    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                                    bar.bg = bar:CreateTexture(nil, "BACKGROUND")
+                                    bar.bg:SetAllPoints()
+                                    bar.bg:SetColorTexture(0, 0, 0, 0.5)
+                                    
+                                    bar.value = bar:CreateFontString(nil, "OVERLAY")
+                                    bar.value:SetFont(db.fontFace, 10, "OUTLINE")
+                                    bar.value:SetPoint("CENTER")
+                                    
+                                    bar.border = CreateFrame("Frame", nil, bar)
+                                    bar.border:SetPoint("TOPLEFT", -1, 1)
+                                    bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
+                                    
+                                    local function CreateLine(p) local t = p:CreateTexture(nil, "BORDER") t:SetColorTexture(1, 1, 1, 1) return t end
+                                    bar.border.top = CreateLine(bar.border)
+                                    bar.border.top:SetPoint("TOPLEFT")
+                                    bar.border.top:SetPoint("TOPRIGHT")
+                                    bar.border.top:SetHeight(1)
+                                    
+                                    bar.border.bottom = CreateLine(bar.border)
+                                    bar.border.bottom:SetPoint("BOTTOMLEFT")
+                                    bar.border.bottom:SetPoint("BOTTOMRIGHT")
+                                    bar.border.bottom:SetHeight(1)
+                                    
+                                    bar.border.left = CreateLine(bar.border)
+                                    bar.border.left:SetPoint("TOPLEFT")
+                                    bar.border.left:SetPoint("BOTTOMLEFT")
+                                    bar.border.left:SetWidth(1)
+                                    
+                                    bar.border.right = CreateLine(bar.border)
+                                    bar.border.right:SetPoint("TOPRIGHT")
+                                    bar.border.right:SetPoint("BOTTOMRIGHT")
+                                    bar.border.right:SetWidth(1)
+                                    bar.isTemplate = false
+                                end
                                 button.progressBars[objIndex] = bar
                             end
                             
-                            bar:SetHeight(21)
-                            -- Border color is set on creation (white)
-
+                            bar:ClearAllPoints()
                             bar:SetPoint("TOPLEFT", 20, -height)
                             bar:SetPoint("TOPRIGHT", -20, -height)
-                            bar:SetMinMaxValues(0, progressMax)
-                            bar:SetValue(progressValue)
-                            bar:SetStatusBarColor(0, 0.5, 1, 1) -- Blueish
                             
-                            bar.value:SetText(progressText)
+                            if bar.isTemplate and bar.Bar then
+                                 bar.Bar:SetMinMaxValues(0, progressMax)
+                                 bar.Bar:SetValue(progressValue)
+                                 bar.Bar:SetStatusBarColor(0, 0.5, 1, 1)
+                                 if bar.Bar.Label then bar.Bar.Label:SetText(progressText) end
+                            else
+                                bar:SetHeight(21)
+                                bar:SetMinMaxValues(0, progressMax)
+                                bar:SetValue(progressValue)
+                                bar:SetStatusBarColor(0, 0.5, 1, 1) 
+                                if bar.value then bar.value:SetText(progressText) end
+                            end
                             
                             bar:Show()
                             height = height + 25
                         elseif button.progressBars and button.progressBars[objIndex] then
                              button.progressBars[objIndex]:Hide()
                         end
+                        end -- End of skip check
                     end
                     
                     -- Start hiding unused bars
@@ -988,22 +1197,48 @@ function addon:UpdateTrackerDisplay(trackables)
         end
     end
     
-    -- Render Auto Quests
+    -- Render Auto Quests with native Blizzard text when possible
     if #autoQuests > 0 then
-         if scenarioYOffset > 0 then
-              scenarioYOffset = scenarioYOffset + 10
-         end
-
+         -- Determine vertical offset
+         local autoQuestFrame = self.autoQuestFrame
+         local currentY = 0
+         
          for _, item in ipairs(autoQuests) do
-              -- Use a dedicated rendering style for PopUps
-              local button = self:GetOrCreateButton(self.scenarioFrame)
+              local button = self:GetOrCreateButton(autoQuestFrame)
               
-               -- Reset points and ensure visibility
+              -- Reset
               button:ClearAllPoints()
-              button:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioYOffset)
-              button:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -5, -scenarioYOffset)
+              button:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -currentY)
+              button:SetPoint("TOPRIGHT", autoQuestFrame, "TOPRIGHT", -5, -currentY)
               button:Show()
-
+              
+              -- Hide unnecessary components
+              if button.poiButton then button.poiButton:Hide() end
+              if button.itemButton then button.itemButton:Hide() end
+              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
+              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
+              if button.expandBtn then button.expandBtn:Hide() end
+              if button.stageBox then button.stageBox:Hide() end
+              if button.distance then button.distance:Hide() end
+              button.bg:SetColorTexture(0, 0, 0, 0)
+              
+              -- Use Blizzard's ObjectiveTracker_GetPopUpQuestFrame if accessible/relevant? 
+              -- Actually, the best way for "Click to Complete" reuse is using the "ContentLoader" which Blizzard uses.
+              -- But since we just want the visual, we can use the "QuestObjectiveScrollFrameTemplate" logic, or just replicate the style 
+              -- as we did, BUT parent the actual API calls correctly.
+              
+              -- Wait, the user wants to REUSE Blizzard UI elements.
+              -- The Blizzard auto-quest popups are typically handled by `ObjectiveTrackerFrame.BlocksFrame.QuestHeader`.
+              -- Specifically `BonusObjectiveTracker_OnOneQuestFinished` or `AutoQuestPopUpTracker_AddPopUp`.
+              
+              -- A truly "native" way is to see if we can reparent the existing AutoQuestPopUpBlock?
+              -- Usually it's `ObjectiveTrackerFrame.BlocksFrame` -> `QuestObjectiveTracker` -> `AutoQuestPopUpBlock`.
+              -- But that logic is deeply embedded in the C_QuestLog / FrameXML mix.
+              
+              -- Use our styled button but try to leverage any secure frames if possible?
+              -- For now, we stick to our recreation but ensure it matches 100%. The previous edit 
+              -- had specific textures. Let's keep that but ensure logic is robust.
+              
               -- 1. Styled Backdrop (Gold/Yellow Border)
               if not button.popupBackdrop then
                    button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
@@ -1020,37 +1255,64 @@ function addon:UpdateTrackerDisplay(trackables)
                    button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()) 
               end
               button.popupBackdrop:Show()
-              button.bg:SetColorTexture(0, 0, 0, 0)
               
               -- 3. Icon (Large, Left)
               if not button.largeIcon then
-                   button.largeIcon = button:CreateTexture(nil, "ARTWORK")
-                   button.largeIcon:SetSize(32, 32)
-                   button.largeIcon:SetPoint("LEFT", 10, 0)
+                   -- Container
+                   button.largeIcon = CreateFrame("Frame", nil, button)
+                   button.largeIcon:SetSize(60, 60)
+                   button.largeIcon:SetPoint("LEFT", 0, 0)
+                   
+                   -- 3a. Background
+                   button.largeIcon.Bg = button.largeIcon:CreateTexture(nil, "BACKGROUND")
+                   button.largeIcon.Bg:SetTexture(404985)
+                   button.largeIcon.Bg:SetTexCoord(0.302734375, 0.419921875, 0.015625, 0.953125)
+                   button.largeIcon.Bg:SetAllPoints()
+
+                   -- 3b. Symbol (! or ?)
+                   button.largeIcon.Symbol = button.largeIcon:CreateTexture(nil, "ARTWORK")
+                   button.largeIcon.Symbol:SetSize(19, 33)
+                   button.largeIcon.Symbol:SetPoint("CENTER", 0, 0)
+                   button.largeIcon.Symbol:SetTexture(404985)
+                   
+                   -- 3c. Shine
+                   button.largeIcon.Shine = button.largeIcon:CreateTexture(nil, "OVERLAY")
+                   button.largeIcon.Shine:SetTexture("Interface\\ItemSocketingFrame\\UI-ItemSockets-GoldShine")
+                   button.largeIcon.Shine:SetBlendMode("ADD")
+                   button.largeIcon.Shine:SetAllPoints()
+                   button.largeIcon.Shine:SetAlpha(0.8)
+
+                   -- 3d. Red Flash
+                   button.largeIcon.Flash = button.largeIcon:CreateTexture(nil, "OVERLAY")
+                   button.largeIcon.Flash:SetTexture(404985)
+                   button.largeIcon.Flash:SetTexCoord(0.216796875, 0.298828125, 0.015625, 0.671875)
+                   button.largeIcon.Flash:SetVertexColor(1, 0, 0, 0.498) 
+                   button.largeIcon.Flash:SetBlendMode("ADD")
+                   button.largeIcon.Flash:SetSize(42, 42)
+                   button.largeIcon.Flash:SetPoint("CENTER", 0, 0)
+                   
+                   -- 3e. Pulse Animation
+                   button.largeIcon.Flash.AnimGroup = button.largeIcon.Flash:CreateAnimationGroup()
+                   button.largeIcon.Flash.AnimGroup:SetLooping("BOUNCE")
+                   local alphaAnim = button.largeIcon.Flash.AnimGroup:CreateAnimation("Alpha")
+                   alphaAnim:SetFromAlpha(0.1)
+                   alphaAnim:SetToAlpha(1)
+                   alphaAnim:SetDuration(1.0)
+                   alphaAnim:SetSmoothing("IN_OUT")
               end
               button.largeIcon:Show()
+              button.largeIcon.Flash.AnimGroup:Play()
               
               if item.popUpType == "COMPLETE" then
-                   if button.largeIcon.SetAtlas then 
-                        button.largeIcon:SetAtlas("Quest-AutoQuest-Complete", true) 
-                   else
-                        button.largeIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-                   end
+                   button.largeIcon.Symbol:SetTexCoord(0.17578125, 0.212890625, 0.015625, 0.53125)
               else
-                   if button.largeIcon.SetAtlas then
-                        button.largeIcon:SetAtlas("Quest-AutoQuest-Offer", true)
-                   else
-                        button.largeIcon:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon") -- Yellow Exclamation
-                   end
+                   button.largeIcon.Symbol:SetTexCoord(0.134765625, 0.171875, 0.015625, 0.53125)
               end
-              -- Adjust size if Atlas wasn't used or reset it
-              button.largeIcon:SetSize(32, 32)
-
+              
               -- 4. Text (Two lines)
-              -- "Click to complete quest" (Top, Yellow/Gold)
               button.text:ClearAllPoints()
-              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -5)
-              button.text:SetPoint("TOPRIGHT", -5, -5)
+              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -18)
+              button.text:SetPoint("TOPRIGHT", -5, -18)
               button.text:SetFont(db.fontFace, db.fontSize + 1, db.fontOutline)
               button.text:SetTextColor(1, 0.82, 0, 1) -- Gold
               
@@ -1058,37 +1320,34 @@ function addon:UpdateTrackerDisplay(trackables)
               button.text:SetText(topText)
               button.text:SetJustifyH("LEFT")
               
-              -- Title (Bottom, White)
               if not button.subText then
                    button.subText = button:CreateFontString(nil, "OVERLAY")
               end
-              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline) -- Title slightly larger
-              button.subText:SetTextColor(1, 1, 1, 1) -- White
+              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline)
+              button.subText:SetTextColor(1, 1, 1, 1)
               button.subText:SetPoint("TOPLEFT", button.text, "BOTTOMLEFT", 0, -2)
               button.subText:SetPoint("TOPRIGHT", button.text, "BOTTOMRIGHT", 0, -2)
               button.subText:SetText(item.title)
               button.subText:SetJustifyH("LEFT")
               button.subText:Show()
               
-              -- Hide unused standard elements
-              if button.poiButton then button.poiButton:Hide() end
-              if button.itemButton then button.itemButton:Hide() end
-              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
-              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
-              if button.expandBtn then button.expandBtn:Hide() end
-              if button.stageBox then button.stageBox:Hide() end
+              button.height = 70 -- Larger hit area
+              button:SetHeight(70)
               
-              -- Set Height
-              button:SetHeight(48)
-              button:Show()
-              
+              -- Interaction
               button.trackableData = item
               button:SetScript("OnClick", function(self, mouseButton)
                   addon:OnTrackableClick(self.trackableData, mouseButton)
               end)
               
-              scenarioYOffset = scenarioYOffset + 48 + db.spacingItemVertical
+              currentY = currentY + 70 + 5
          end
+         
+         autoQuestFrame:SetHeight(currentY)
+         autoQuestFrame:Show()
+    else
+         self.autoQuestFrame:SetHeight(1)
+         self.autoQuestFrame:Hide()
     end
 
     
@@ -1336,9 +1595,9 @@ function addon:UpdateTrackerDisplay(trackables)
             -- Position Button (Left or Right)
             header.expandBtn:ClearAllPoints()
             if iconPos == "right" then
-                header.expandBtn:SetPoint("RIGHT", -4, 0)
+                header.expandBtn:SetPoint("RIGHT", -8, 0)
             else
-                header.expandBtn:SetPoint("LEFT", 4, 0)
+                header.expandBtn:SetPoint("LEFT", 8, 0)
             end
             
             if iconStyle == "none" then
@@ -1373,20 +1632,28 @@ function addon:UpdateTrackerDisplay(trackables)
                     end
                 elseif iconStyle == "questlog" then
                     header.expandBtn:SetSize(16, 16)
-                    if header.expandBtn.SetAtlas then
-                         -- Use specific QuestLog atlases as identified by FrameInspect 
-                         -- Note: "Expand" means "Show More" (currently collapsed), "Shrink" means "Show Less" (currently expanded)
-                         local atlas = isCollapsed and "QuestLog-icon-expand" or "QuestLog-icon-shrink"
-                         
-                         header.expandBtn:SetNormalAtlas(atlas)
-                         header.expandBtn:SetPushedAtlas(atlas)
-                         -- Highlight matches the normal state usually, or there might be a highlit version. 
-                         -- Assuming same for now as no highlight atlas was provided.
-                         header.expandBtn:SetHighlightAtlas(atlas) 
-                    else
-                        -- Fallback
-                        header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
-                    end
+                    -- Clear text from potentially reused button
+                    header.expandBtn:SetText("")
+                    
+                    -- Use Atlas for texture
+                    -- isCollapsed means "I am closed, show a Plus (Expand)"
+                    -- not isCollapsed means "I am open, show a Minus (Collapse)"
+                    
+                    -- User provided specific Atlas names:
+                    -- Expand:  "UI-QuestTrackerButton-Secondary-Expand"
+                    -- Collapse: "UI-QuestTrackerButton-Secondary-Collapse"
+                    
+                    local atlas = isCollapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
+                    
+                    -- Need to clear normal texture if it was set by another style previously
+                    header.expandBtn:SetNormalTexture("")
+                    header.expandBtn:SetPushedTexture("")
+                    header.expandBtn:SetHighlightTexture("")
+                    
+                    -- Apply Atlas
+                    header.expandBtn:SetNormalAtlas(atlas)
+                    header.expandBtn:SetPushedAtlas(atlas)
+                    header.expandBtn:SetHighlightAtlas(atlas)
                 end
             end
             
@@ -1699,6 +1966,12 @@ function addon:GetOrCreateButton(parent)
         
         table.insert(trackableButtons, btn)
     end
+    
+    -- Reset Custom Elements (Cleanup from potentially being used as a Popup/AutoQuest)
+    if btn.popupBackdrop then btn.popupBackdrop:Hide() end
+    if btn.largeIcon then btn.largeIcon:Hide() end
+    if btn.stageBox then btn.stageBox:Hide() end
+    if btn.subText then btn.subText:Hide() end
     
     -- IMPORTANT: Clear points on reuse to prevent anchor conflicts
     btn:ClearAllPoints()

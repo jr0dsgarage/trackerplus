@@ -116,6 +116,7 @@ local DEFAULTS = {
     spacingMajorHeaderAfter = 26,      -- Vertical space after major headers
     spacingMinorHeaderAfter = 22,      -- Vertical space after minor headers
     spacingProgressBarInset = 20,      -- Horizontal inset for progress bars from edges
+    spacingProgressBarPadding = 5,     -- Vertical padding above progress bars (below text)
 }
 
 -- Deep copy helper

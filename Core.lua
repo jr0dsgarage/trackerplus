@@ -581,63 +581,26 @@ end
 
 -- Collect scenario objectives
 function addon:CollectScenarioObjectives(trackables)
+    -- If we are using the Blizzard frame (which is the plan now), we don't need to manually collect items
+    -- However, we still need to detect attendance so the core loop knows we have "scenarios" to trigger the layout logic.
     if not C_Scenario.IsInScenario() then
         return
     end
     
-    local scenarioName, currentStage, numStages, flags, _, _, _, xp, money = C_Scenario.GetInfo()
-    
-    if scenarioName then
-        local scenarioInfo = {
+    -- Insert a dummy item so TrackerFrame knows to activate the Scenario section
+    -- The actual rendering will now look for the Blizzard Frame instead of this data 
+    -- (See TrackerFrame.lua changes)
+    local scenarioInfo = {
             type = "scenario",
             id = 0,
-            title = scenarioName,
-            level = currentStage,
+            title = "Blizzard Scenario Frame",
+            level = 0,
             zone = "Scenario",
             objectives = {},
             color = self.db.scenarioColor,
-        }
-        
-        -- Get stage info
-        local stageName, stageDescription, numCriteria = C_Scenario.GetStepInfo()
-        scenarioInfo.stageName = stageName
-        scenarioInfo.stageDescription = stageDescription
-
-        local GetCriteriaInfo = (C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfo) or C_Scenario.GetCriteriaInfo
-        
-        if numCriteria and GetCriteriaInfo then
-            for i = 1, numCriteria do
-                local criteriaString, criteriaType, criteriaCompleted, quantity, totalQuantity, flags, assetID, quantityString, criteriaID, duration, elapsed, failed = GetCriteriaInfo(i)
-                
-                -- Support for TWW (GetCriteriaInfo returns a struct)
-                if type(criteriaString) == "table" then
-                    local info = criteriaString
-                    criteriaString = info.description
-                    criteriaType = info.criteriaType
-                    criteriaCompleted = info.completed
-                    quantity = info.quantity
-                    totalQuantity = info.totalQuantity
-                    flags = info.flags
-                    assetID = info.assetID
-                    quantityString = info.quantityString
-                    criteriaID = info.criteriaID
-                end
-
-                if criteriaString then
-                    table.insert(scenarioInfo.objectives, {
-                        text = criteriaString,
-                        finished = criteriaCompleted,
-                        numFulfilled = quantity,
-                        numRequired = totalQuantity,
-                        flags = flags,
-                        quantityString = quantityString,
-                    })
-                end
-            end
-        end
-        
-        table.insert(trackables, scenarioInfo)
-    end
+            isDummy = true
+    }
+    table.insert(trackables, scenarioInfo)
 end
 
 -- Collect profession tracking
@@ -983,3 +946,5 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- Once Initialize is called, it overwrites the OnEvent script to addon:OnEvent
     end
 end)
+-- EOF Check
+--]]
