@@ -186,13 +186,13 @@ function addon:CreateTrackerFrame()
     trackerFrame.headerBg = trackerFrame:CreateTexture(nil, "BACKGROUND")
     trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
     trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
-    trackerFrame.headerBg:SetHeight(1) -- Standard header height
+    trackerFrame.headerBg:SetHeight(24) -- Standard header height
 
     -- Title Header (Left aligned)
     trackerFrame.title = trackerFrame:CreateFontString(nil, "OVERLAY")
     trackerFrame.title:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 8, 0)
     local titleFont = self.db.headerFontFace or "Fonts\\FRIZQT__.TTF"
-    local titleSize = 1 -- self.db.headerFontSize or 14
+    local titleSize = self.db.headerFontSize or 14
     trackerFrame.title:SetFont(titleFont, titleSize, self.db.headerFontOutline)
     trackerFrame.title:SetTextColor(
         self.db.headerColor.r,
@@ -200,7 +200,7 @@ function addon:CreateTrackerFrame()
         self.db.headerColor.b,
         self.db.headerColor.a
     )
-    trackerFrame.title:SetText("")
+    trackerFrame.title:SetText("Tracker Plus")
 
     -- Settings Button (Gear icon)
     trackerFrame.settingsParam = CreateFrame("Button", nil, trackerFrame)
@@ -294,8 +294,6 @@ function addon:CreateTrackerFrame()
             trackerFrame.headerBg:Show()
             trackerFrame.bg:Show()
             if trackerFrame.border then trackerFrame.border:Show() end
-            if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
-            if trackerFrame.resizeBL then trackerFrame.resizeBL:Show() end
             if scrollFrame then scrollFrame:Show() end
             if self.scenarioFrame then self.scenarioFrame:Show() end
             
@@ -304,11 +302,14 @@ function addon:CreateTrackerFrame()
             trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
             
             addon:RequestUpdate()
+            
+            -- Restore lock state (handles resize buttons)
+            addon:UpdateTrackerLock()
         end
         
         -- After manipulation, ensure position is saved so reloading keeps the anchor choice
         local point, relativeTo, relativePoint, x, y = trackerFrame:GetPoint()
-        addon.db.framePosition = {point = point, x = x, y = y}
+        addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
     end
 
     trackerFrame.minMaxBtn:SetScript("OnClick", function()
@@ -1549,6 +1550,13 @@ function addon:UpdateTrackerDisplay(trackables)
                 header.expandBtn:SetPoint("LEFT", 8, 0)
             end
             
+            -- Reset button state to prevent specific style overlapping (e.g. Text + Texture)
+            header.expandBtn:SetText("")
+            header.expandBtn:SetNormalTexture("")
+            header.expandBtn:SetPushedTexture("")
+            header.expandBtn:SetHighlightTexture("")
+            -- Note: Setting Texture to "" usually clears Atlas as well in WoW API
+            
             if iconStyle == "none" then
                 header.expandBtn:Hide()
             else
@@ -1581,8 +1589,6 @@ function addon:UpdateTrackerDisplay(trackables)
                     end
                 elseif iconStyle == "questlog" then
                     header.expandBtn:SetSize(16, 16)
-                    -- Clear text from potentially reused button
-                    header.expandBtn:SetText("")
                     
                     -- Use Atlas for texture
                     -- isCollapsed means "I am closed, show a Plus (Expand)"
@@ -1593,11 +1599,6 @@ function addon:UpdateTrackerDisplay(trackables)
                     -- Collapse: "UI-QuestTrackerButton-Secondary-Collapse"
                     
                     local atlas = isCollapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
-                    
-                    -- Need to clear normal texture if it was set by another style previously
-                    header.expandBtn:SetNormalTexture("")
-                    header.expandBtn:SetPushedTexture("")
-                    header.expandBtn:SetHighlightTexture("")
                     
                     -- Apply Atlas
                     header.expandBtn:SetNormalAtlas(atlas)
