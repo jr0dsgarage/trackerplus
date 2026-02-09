@@ -82,6 +82,10 @@ function addon:RegisterEvents()
     frame:RegisterEvent("QUEST_WATCH_UPDATE")
     frame:RegisterEvent("WORLD_QUEST_COMPLETED_BY_SPELL")
     
+    -- Bonus objective / Task quest events
+    pcall(function() frame:RegisterEvent("QUEST_POI_UPDATE") end)
+    pcall(function() frame:RegisterEvent("TASK_PROGRESS_UPDATE") end)
+    
     -- Achievement events
     frame:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     frame:RegisterEvent("ACHIEVEMENT_EARNED")
@@ -317,6 +321,12 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     -- Check for Task/Bonus Objective Progress Bar
     if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
+        
+        -- DEBUG: Log progress bar info
+        if addon.Log and (isBonusObjective or type == "bonus" or type == "supertrack" or type == "quest") then
+             local isTask = C_QuestLog.IsQuestTask(questID)
+             addon:Log("Quest [%d] '%s' IsTask=%s IsBonus=%s Progress=%s", questID, info.title, tostring(isTask), tostring(isBonusObjective), tostring(progress))
+        end
         
         if progress then
              hasObjectives = true

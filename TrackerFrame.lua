@@ -154,11 +154,19 @@ function addon:CreateTrackerFrame()
     autoQuestFrame:SetHeight(1) -- Will be dynamic
     self.autoQuestFrame = autoQuestFrame
 
-    -- Scenario Frame (Pinned to Auto Quest)
+    -- Widget Frame (For Progress Bars / Power Bars)
+    -- Resides between Auto Quest and Scenario
+    local widgetFrame = CreateFrame("Frame", nil, trackerFrame)
+    widgetFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, -5)
+    widgetFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, -5)
+    widgetFrame:SetHeight(1) -- Will be dynamic
+    self.widgetFrame = widgetFrame
+
+    -- Scenario Frame (Pinned to Widget Frame)
     -- This resides outside the scroll frame so it doesn't scroll
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
-    scenarioFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, -5)
-    scenarioFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, -5)
+    scenarioFrame:SetPoint("TOPLEFT", widgetFrame, "BOTTOMLEFT", 0, -5)
+    scenarioFrame:SetPoint("TOPRIGHT", widgetFrame, "BOTTOMRIGHT", 0, -5)
     scenarioFrame:SetHeight(1) -- Will be dynamic
     self.scenarioFrame = scenarioFrame
 
@@ -236,17 +244,15 @@ function addon:CreateTrackerFrame()
 
     local function UpdateMinMaxState()
         -- Ensure we work with screen coordinates to maintain position relative to TOP-RIGHT
-        local right = trackerFrame:GetRight()
-        local top = trackerFrame:GetTop()
-        local scale = trackerFrame:GetEffectiveScale()
+        -- NOTE: This re-anchoring logic is causing issues with position persistence and restoration.
+        -- Removing it allows the standard movable frame logic to hold the user's preferred anchor.
         
-        -- If we have valid coordinates (frame is visible/layouted), lock top-right
-        if right and top then
-             trackerFrame:ClearAllPoints()
-             -- SetPoint uses coordinates relative to the anchor parent (UIParent usually)
-             -- We want the Frame's TOPRIGHT to stay at (right, top)
-             trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
-        end
+        -- local right = trackerFrame:GetRight()
+        -- local top = trackerFrame:GetTop()
+        -- if right and top then
+        --      trackerFrame:ClearAllPoints()
+        --      trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
+        -- end
 
         if addon.db.minimized then
             -- Minimized State: Only Maximize button visible
@@ -546,10 +552,22 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     button.text:SetTextColor(color.r, color.g, color.b, color.a)
     button.text:SetText(titleText)
     button.text:SetJustifyH("LEFT")
+    button.text:SetWordWrap(true)
     
     button.bg:SetColorTexture(0, 0, 0, 0)
     
+    -- Force width calculation for accurate multi-line height measurement
+    -- If the button hasn't been laid out yet, GetStringHeight() returns 1 line height
+    local parentWidth = parent:GetWidth() or 300
+    local buttonWidth = parentWidth - indent - 5
+    local textWidth = buttonWidth - leftPadding + rightPadding
+    
+    if textWidth > 0 then
+        button.text:SetWidth(textWidth)
+    end
+    
     local textHeight = button.text:GetStringHeight()
+    button.text:SetWidth(0) -- Release fixed width to allow anchors to work on resize
     local height = math.max(db.fontSize + 4, textHeight + 4)
     
     -- Objectives
@@ -557,6 +575,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         local currentY = -(textHeight + 2)
         
         for objIndex, obj in ipairs(item.objectives) do
+            -- DEBUG: Log objective processing for bonus/tasks
+            if addon.Log and (item.type == "bonus" or item.type == "quest" or item.type == "supertrack") then
+                 addon:Log("Rendering Obj [%d] for '%s': Text='%s', Type='%s', Finished=%s, NumFul=%s, NumReq=%s", 
+                     objIndex, item.title, tostring(obj.text), tostring(obj.type), tostring(obj.finished), tostring(obj.numFulfilled), tostring(obj.numRequired))
+            end
+
             local objText = "  - " .. (obj.text or "")
             local isProgressBar = false
             local progressValue = 0
@@ -642,6 +666,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     if pcallStatus and newBar then
                          bar = newBar
                          bar.isTemplate = true
+                         if addon.Log then addon:Log("Created Bar Template. Has .Bar? %s", tostring(bar.Bar ~= nil)) end
                     else
                          -- Fallback to manual creation
                          bar = CreateFrame("StatusBar", nil, button)
@@ -676,12 +701,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     bar.Bar:SetValue(progressValue)
                     bar.Bar:SetStatusBarColor(0, 0.5, 1, 1)
                     if bar.Bar.Label then bar.Bar.Label:SetText(dispText) end
-                else
+                elseif bar.SetMinMaxValues then
                     bar:SetHeight(15)
                     bar:SetMinMaxValues(0, progressMax)
                     bar:SetValue(progressValue)
                     bar:SetStatusBarColor(0, 0.5, 1, 1)
                     if bar.value then bar.value:SetText(dispText) end
+                else
+                    if addon.Log then addon:Log("Error: Invalid Bar Object - No .Bar and no SetMinMaxValues") end
                 end
                 
                 bar:Show()
@@ -792,6 +819,208 @@ function addon:UpdateTrackerDisplay(trackables)
     end
     
     local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
+
+    -- Render Auto Quests with native Blizzard text when possible
+    if #autoQuests > 0 then
+         -- Determine vertical offset
+         local autoQuestFrame = self.autoQuestFrame
+         local currentY = 0
+         
+         for _, item in ipairs(autoQuests) do
+              local button = self:GetOrCreateButton(autoQuestFrame)
+              
+              -- Reset
+              button:ClearAllPoints()
+              button:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -currentY)
+              button:SetPoint("TOPRIGHT", autoQuestFrame, "TOPRIGHT", -5, -currentY)
+              button:Show()
+              
+              -- Hide unnecessary components
+              if button.poiButton then button.poiButton:Hide() end
+              if button.itemButton then button.itemButton:Hide() end
+              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
+              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
+              if button.expandBtn then button.expandBtn:Hide() end
+              if button.stageBox then button.stageBox:Hide() end
+              if button.distance then button.distance:Hide() end
+              button.bg:SetColorTexture(0, 0, 0, 0)
+              
+              -- Styled Backdrop (Gold/Yellow Border)
+              if not button.popupBackdrop then
+                   button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
+                   button.popupBackdrop:SetBackdrop({
+                        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+                        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                        tile = true, tileSize = 16, edgeSize = 16,
+                        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+                   })
+                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+                   button.popupBackdrop:SetBackdropBorderColor(1, 0.8, 0, 1) -- Gold Border
+                   button.popupBackdrop:SetPoint("TOPLEFT", 0, 0)
+                   button.popupBackdrop:SetPoint("BOTTOMRIGHT", 0, 0)
+                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()) 
+              end
+              button.popupBackdrop:Show()
+              
+              -- 3. Icon (Large, Left)
+              if not button.largeIcon then
+                   -- Container
+                   button.largeIcon = CreateFrame("Frame", nil, button)
+                   button.largeIcon:SetSize(60, 60)
+                   button.largeIcon:SetPoint("LEFT", 0, 0)
+                   
+                   -- 3a. Background
+                   button.largeIcon.Bg = button.largeIcon:CreateTexture(nil, "BACKGROUND")
+                   button.largeIcon.Bg:SetTexture(404985)
+                   button.largeIcon.Bg:SetTexCoord(0.302734375, 0.419921875, 0.015625, 0.953125)
+                   button.largeIcon.Bg:SetAllPoints()
+
+                   -- 3b. Symbol (! or ?)
+                   button.largeIcon.Symbol = button.largeIcon:CreateTexture(nil, "ARTWORK")
+                   button.largeIcon.Symbol:SetSize(19, 33)
+                   button.largeIcon.Symbol:SetPoint("CENTER", 0, 0)
+                   button.largeIcon.Symbol:SetTexture(404985)
+                   
+                   -- 3c. Shine
+                   button.largeIcon.Shine = button.largeIcon:CreateTexture(nil, "OVERLAY")
+                   button.largeIcon.Shine:SetTexture("Interface\\ItemSocketingFrame\\UI-ItemSockets-GoldShine")
+                   button.largeIcon.Shine:SetBlendMode("ADD")
+                   button.largeIcon.Shine:SetAllPoints()
+                   button.largeIcon.Shine:SetAlpha(0.8)
+
+                   -- 3d. Red Flash
+                   button.largeIcon.Flash = button.largeIcon:CreateTexture(nil, "OVERLAY")
+                   button.largeIcon.Flash:SetTexture(404985)
+                   button.largeIcon.Flash:SetTexCoord(0.216796875, 0.298828125, 0.015625, 0.671875)
+                   button.largeIcon.Flash:SetVertexColor(1, 0, 0, 0.498) 
+                   button.largeIcon.Flash:SetBlendMode("ADD")
+                   button.largeIcon.Flash:SetSize(42, 42)
+                   button.largeIcon.Flash:SetPoint("CENTER", 0, 0)
+                   
+                   -- 3e. Pulse Animation
+                   button.largeIcon.Flash.AnimGroup = button.largeIcon.Flash:CreateAnimationGroup()
+                   button.largeIcon.Flash.AnimGroup:SetLooping("BOUNCE")
+                   local alphaAnim = button.largeIcon.Flash.AnimGroup:CreateAnimation("Alpha")
+                   alphaAnim:SetFromAlpha(0.1)
+                   alphaAnim:SetToAlpha(1)
+                   alphaAnim:SetDuration(1.0)
+                   alphaAnim:SetSmoothing("IN_OUT")
+              end
+              button.largeIcon:Show()
+              button.largeIcon.Flash.AnimGroup:Play()
+              
+              if item.popUpType == "COMPLETE" then
+                   button.largeIcon.Symbol:SetTexCoord(0.17578125, 0.212890625, 0.015625, 0.53125)
+              else
+                   button.largeIcon.Symbol:SetTexCoord(0.134765625, 0.171875, 0.015625, 0.53125)
+              end
+              
+              -- 4. Text (Two lines)
+              button.text:ClearAllPoints()
+              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -18)
+              button.text:SetPoint("TOPRIGHT", -5, -18)
+              button.text:SetFont(db.fontFace, db.fontSize + 1, db.fontOutline)
+              button.text:SetTextColor(1, 0.82, 0, 1) -- Gold
+              
+              local topText = (item.popUpType == "COMPLETE") and "Click to complete quest" or "New Quest Available"
+              button.text:SetText(topText)
+              button.text:SetJustifyH("LEFT")
+              
+              if not button.subText then
+                   button.subText = button:CreateFontString(nil, "OVERLAY")
+              end
+              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline)
+              button.subText:SetTextColor(1, 1, 1, 1)
+              button.subText:SetPoint("TOPLEFT", button.text, "BOTTOMLEFT", 0, -2)
+              button.subText:SetPoint("TOPRIGHT", button.text, "BOTTOMRIGHT", 0, -2)
+              button.subText:SetText(item.title)
+              button.subText:SetJustifyH("LEFT")
+              button.subText:Show()
+              
+              button.height = 70 -- Larger hit area
+              button:SetHeight(70)
+              
+              -- Interaction
+              button.trackableData = item
+              button:SetScript("OnClick", function(self, mouseButton)
+                  addon:OnTrackableClick(self.trackableData, mouseButton)
+              end)
+              
+              currentY = currentY + 70 + 5
+         end
+         
+         autoQuestFrame:SetHeight(currentY)
+         autoQuestFrame:Show()
+    else
+         self.autoQuestFrame:SetHeight(1)
+         self.autoQuestFrame:Hide()
+    end
+
+    --------------------------------------------------------------------------
+    -- 0. Render Widgets (Power Bars, PvP Bars)
+    --------------------------------------------------------------------------
+    local widgetContainer = ObjectiveTrackerUIWidgetContainer
+    local widgetHeight = 0
+    
+    if self.widgetFrame then  -- Safety Check
+        if widgetContainer then
+             -- Use pcall to prevent taint/secure errors from crashing execution
+             local status, err = pcall(function()
+                -- Reparent to our dedicated frame
+                if widgetContainer:GetParent() ~= self.widgetFrame then
+                    widgetContainer:SetParent(self.widgetFrame)
+                    widgetContainer:SetFrameStrata("HIGH")
+                end
+                
+                -- Force re-anchoring
+                widgetContainer:ClearAllPoints()
+                widgetContainer:SetPoint("TOP", self.widgetFrame, "TOP", 0, -5)
+                
+                widgetContainer:Show()
+             end)
+             
+             if not status and addon.Log then
+                  addon:Log("Widget Reparent Error: %s", tostring(err))
+             end
+            
+            -- Calculate height
+            widgetHeight = widgetContainer:GetHeight() or 0
+            
+            -- Ignore negligible height (often ghost frames)
+            if widgetHeight < 2 then widgetHeight = 0 end
+
+            if addon.Log then addon:Log("Widget Layout: H=%s", widgetHeight) end
+        end
+        
+        -- Exact height if content exists, otherwise 1px
+        local finalWidgetH = (widgetHeight > 0) and (widgetHeight + 5) or 1
+        self.widgetFrame:SetHeight(finalWidgetH)
+
+        -- Dynamic Anchoring to remove gaps
+        if self.autoQuestFrame then
+             local aqVisible = (self.autoQuestFrame:GetHeight() > 10)
+             -- Use 0 padding if not visible, standard -5 if visible
+             local padding = aqVisible and -5 or 0
+             self.widgetFrame:ClearAllPoints()
+             self.widgetFrame:SetPoint("TOPLEFT", self.autoQuestFrame, "BOTTOMLEFT", 0, padding)
+             self.widgetFrame:SetPoint("TOPRIGHT", self.autoQuestFrame, "BOTTOMRIGHT", 0, padding)
+        end
+    else
+         if addon.Log then addon:Log("CRITICAL: self.widgetFrame is missing in UpdateTrackerDisplay") end
+    end
+    
+    -- Dynamic Anchoring for Scenario Frame
+    if self.scenarioFrame and self.widgetFrame then
+          local widgetVisible = (self.widgetFrame:GetHeight() > 2)
+          local padding = widgetVisible and -5 or 0
+          self.scenarioFrame:ClearAllPoints()
+          -- Use a tighter anchor
+          self.scenarioFrame:SetPoint("TOPLEFT", self.widgetFrame, "BOTTOMLEFT", 0, padding)
+          self.scenarioFrame:SetPoint("TOPRIGHT", self.widgetFrame, "BOTTOMRIGHT", 0, padding)
+     end
+          self.scenarioFrame:SetPoint("TOPLEFT", self.widgetFrame, "BOTTOMLEFT", 0, padding)
+          self.scenarioFrame:SetPoint("TOPRIGHT", self.widgetFrame, "BOTTOMRIGHT", 0, padding)
+     end
     
     --------------------------------------------------------------------------
     -- 1. Render Scenarios (Sticky Header) - USING BLIZZARD FRAME
@@ -1165,142 +1394,6 @@ function addon:UpdateTrackerDisplay(trackables)
         end
     end
     
-    -- Render Auto Quests with native Blizzard text when possible
-    if #autoQuests > 0 then
-         -- Determine vertical offset
-         local autoQuestFrame = self.autoQuestFrame
-         local currentY = 0
-         
-         for _, item in ipairs(autoQuests) do
-              local button = self:GetOrCreateButton(autoQuestFrame)
-              
-              -- Reset
-              button:ClearAllPoints()
-              button:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -currentY)
-              button:SetPoint("TOPRIGHT", autoQuestFrame, "TOPRIGHT", -5, -currentY)
-              button:Show()
-              
-              -- Hide unnecessary components
-              if button.poiButton then button.poiButton:Hide() end
-              if button.itemButton then button.itemButton:Hide() end
-              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
-              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
-              if button.expandBtn then button.expandBtn:Hide() end
-              if button.stageBox then button.stageBox:Hide() end
-              if button.distance then button.distance:Hide() end
-              button.bg:SetColorTexture(0, 0, 0, 0)
-              
-              -- Styled Backdrop (Gold/Yellow Border)
-              if not button.popupBackdrop then
-                   button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
-                   button.popupBackdrop:SetBackdrop({
-                        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-                        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                        tile = true, tileSize = 16, edgeSize = 16,
-                        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-                   })
-                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-                   button.popupBackdrop:SetBackdropBorderColor(1, 0.8, 0, 1) -- Gold Border
-                   button.popupBackdrop:SetPoint("TOPLEFT", 0, 0)
-                   button.popupBackdrop:SetPoint("BOTTOMRIGHT", 0, 0)
-                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()) 
-              end
-              button.popupBackdrop:Show()
-              
-              -- 3. Icon (Large, Left)
-              if not button.largeIcon then
-                   -- Container
-                   button.largeIcon = CreateFrame("Frame", nil, button)
-                   button.largeIcon:SetSize(60, 60)
-                   button.largeIcon:SetPoint("LEFT", 0, 0)
-                   
-                   -- 3a. Background
-                   button.largeIcon.Bg = button.largeIcon:CreateTexture(nil, "BACKGROUND")
-                   button.largeIcon.Bg:SetTexture(404985)
-                   button.largeIcon.Bg:SetTexCoord(0.302734375, 0.419921875, 0.015625, 0.953125)
-                   button.largeIcon.Bg:SetAllPoints()
-
-                   -- 3b. Symbol (! or ?)
-                   button.largeIcon.Symbol = button.largeIcon:CreateTexture(nil, "ARTWORK")
-                   button.largeIcon.Symbol:SetSize(19, 33)
-                   button.largeIcon.Symbol:SetPoint("CENTER", 0, 0)
-                   button.largeIcon.Symbol:SetTexture(404985)
-                   
-                   -- 3c. Shine
-                   button.largeIcon.Shine = button.largeIcon:CreateTexture(nil, "OVERLAY")
-                   button.largeIcon.Shine:SetTexture("Interface\\ItemSocketingFrame\\UI-ItemSockets-GoldShine")
-                   button.largeIcon.Shine:SetBlendMode("ADD")
-                   button.largeIcon.Shine:SetAllPoints()
-                   button.largeIcon.Shine:SetAlpha(0.8)
-
-                   -- 3d. Red Flash
-                   button.largeIcon.Flash = button.largeIcon:CreateTexture(nil, "OVERLAY")
-                   button.largeIcon.Flash:SetTexture(404985)
-                   button.largeIcon.Flash:SetTexCoord(0.216796875, 0.298828125, 0.015625, 0.671875)
-                   button.largeIcon.Flash:SetVertexColor(1, 0, 0, 0.498) 
-                   button.largeIcon.Flash:SetBlendMode("ADD")
-                   button.largeIcon.Flash:SetSize(42, 42)
-                   button.largeIcon.Flash:SetPoint("CENTER", 0, 0)
-                   
-                   -- 3e. Pulse Animation
-                   button.largeIcon.Flash.AnimGroup = button.largeIcon.Flash:CreateAnimationGroup()
-                   button.largeIcon.Flash.AnimGroup:SetLooping("BOUNCE")
-                   local alphaAnim = button.largeIcon.Flash.AnimGroup:CreateAnimation("Alpha")
-                   alphaAnim:SetFromAlpha(0.1)
-                   alphaAnim:SetToAlpha(1)
-                   alphaAnim:SetDuration(1.0)
-                   alphaAnim:SetSmoothing("IN_OUT")
-              end
-              button.largeIcon:Show()
-              button.largeIcon.Flash.AnimGroup:Play()
-              
-              if item.popUpType == "COMPLETE" then
-                   button.largeIcon.Symbol:SetTexCoord(0.17578125, 0.212890625, 0.015625, 0.53125)
-              else
-                   button.largeIcon.Symbol:SetTexCoord(0.134765625, 0.171875, 0.015625, 0.53125)
-              end
-              
-              -- 4. Text (Two lines)
-              button.text:ClearAllPoints()
-              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -18)
-              button.text:SetPoint("TOPRIGHT", -5, -18)
-              button.text:SetFont(db.fontFace, db.fontSize + 1, db.fontOutline)
-              button.text:SetTextColor(1, 0.82, 0, 1) -- Gold
-              
-              local topText = (item.popUpType == "COMPLETE") and "Click to complete quest" or "New Quest Available"
-              button.text:SetText(topText)
-              button.text:SetJustifyH("LEFT")
-              
-              if not button.subText then
-                   button.subText = button:CreateFontString(nil, "OVERLAY")
-              end
-              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline)
-              button.subText:SetTextColor(1, 1, 1, 1)
-              button.subText:SetPoint("TOPLEFT", button.text, "BOTTOMLEFT", 0, -2)
-              button.subText:SetPoint("TOPRIGHT", button.text, "BOTTOMRIGHT", 0, -2)
-              button.subText:SetText(item.title)
-              button.subText:SetJustifyH("LEFT")
-              button.subText:Show()
-              
-              button.height = 70 -- Larger hit area
-              button:SetHeight(70)
-              
-              -- Interaction
-              button.trackableData = item
-              button:SetScript("OnClick", function(self, mouseButton)
-                  addon:OnTrackableClick(self.trackableData, mouseButton)
-              end)
-              
-              currentY = currentY + 70 + 5
-         end
-         
-         autoQuestFrame:SetHeight(currentY)
-         autoQuestFrame:Show()
-    else
-         self.autoQuestFrame:SetHeight(1)
-         self.autoQuestFrame:Hide()
-    end
-
     
     -- Render Super Tracked Items (Pinned)
     if #superTrackedItems > 0 then
@@ -1388,7 +1481,84 @@ function addon:UpdateTrackerDisplay(trackables)
     -- 1.5 Render Bonus Objectives (Pinned to Bottom)
     --------------------------------------------------------------------------
     local bonusYOffset = 0
-    if db.showBonusObjectives and #bonusObjectives > 0 then
+    
+    -- Strategy: Hijack Blizzard's BonusObjectiveTracker frame if it exists and has content
+    local bonusTracker = BonusObjectiveTracker
+    local useBlizzardBonus = (bonusTracker and bonusTracker.ContentsFrame)
+    
+    if addon.Log then
+         addon:Log("Checking BonusTracker: Exists=%s | ContentsFrame=%s", 
+             tostring(bonusTracker ~= nil), 
+             tostring(bonusTracker and bonusTracker.ContentsFrame ~= nil))
+    end
+    
+    if useBlizzardBonus then
+         local contents = bonusTracker.ContentsFrame
+         local blizzardBonusHeight = contents:GetHeight() or 0
+         local hasContent = blizzardBonusHeight > 1 and contents:IsVisible()
+         
+         -- Also check if there are actual child frames with bars
+         if not hasContent then
+             -- ContentsFrame might report height but children are individually visible
+             for _, child in pairs({contents:GetChildren()}) do
+                 if child:IsVisible() and child:GetHeight() > 1 then
+                     hasContent = true
+                     blizzardBonusHeight = math.max(blizzardBonusHeight, 10) -- Will recalculate below
+                     break
+                 end
+             end
+         end
+         
+         if addon.Log then 
+              addon:Log("BonusObjectiveTracker: Vis=%s | Height=%s | HasContent=%s | Parent=%s", 
+                  tostring(contents:IsVisible()), tostring(blizzardBonusHeight), tostring(hasContent),
+                  contents:GetParent() and contents:GetParent():GetName() or "nil")
+         end
+         
+         if hasContent then
+              -- Reparent to our bonusFrame
+              local status, err = pcall(function()
+                  if contents:GetParent() ~= self.bonusFrame then
+                       contents:SetParent(self.bonusFrame)
+                       contents:SetFrameStrata("HIGH")
+                       contents:SetFrameLevel(100)
+                  end
+                  
+                  contents:ClearAllPoints()
+                   contents:ClearAllPoints()
+                   contents:SetPoint("TOP", self.bonusFrame, "TOP", 0, -5)
+                   contents:SetWidth(self.db.frameWidth - 10)
+                   contents:Show()
+
+                   -- Force update if module exists
+                   if bonusTracker.Update then bonusTracker:Update() end
+              end)
+              
+              if not status and addon.Log then
+                   addon:Log("BonusObjectiveTracker Reparent Error: %s", tostring(err))
+              end
+              
+              -- Recalculate height after reparenting (layout may have changed)
+              blizzardBonusHeight = contents:GetHeight() or 0
+              if blizzardBonusHeight < 20 then blizzardBonusHeight = 60 end -- Minimum if we know there's content
+              
+              bonusYOffset = blizzardBonusHeight + 10
+              
+              if addon.Log then addon:Log("Bonus Blizzard Frame: Final H=%s", blizzardBonusHeight) end
+         else
+              -- No bonus content - restore to its original parent if we stole it
+              if contents:GetParent() == self.bonusFrame then
+                   pcall(function()
+                       contents:SetParent(bonusTracker)
+                       contents:ClearAllPoints()
+                       contents:SetPoint("TOPLEFT", bonusTracker, "TOPLEFT", 0, 0)
+                   end)
+              end
+         end
+    end
+    
+    -- Fallback: Manually render bonus items if we collected any and Blizzard frame isn't available
+    if bonusYOffset == 0 and db.showBonusObjectives and #bonusObjectives > 0 then
          -- Render Header (Bonus Objective)
          local header = self:GetOrCreateButton(self.bonusFrame)
          header:SetPoint("TOPLEFT", self.bonusFrame, "TOPLEFT", 0, -bonusYOffset)
