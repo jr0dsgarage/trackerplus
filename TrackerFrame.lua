@@ -1018,9 +1018,6 @@ function addon:UpdateTrackerDisplay(trackables)
           self.scenarioFrame:SetPoint("TOPLEFT", self.widgetFrame, "BOTTOMLEFT", 0, padding)
           self.scenarioFrame:SetPoint("TOPRIGHT", self.widgetFrame, "BOTTOMRIGHT", 0, padding)
      end
-          self.scenarioFrame:SetPoint("TOPLEFT", self.widgetFrame, "BOTTOMLEFT", 0, padding)
-          self.scenarioFrame:SetPoint("TOPRIGHT", self.widgetFrame, "BOTTOMRIGHT", 0, padding)
-     end
     
     --------------------------------------------------------------------------
     -- 1. Render Scenarios (Sticky Header) - USING BLIZZARD FRAME
