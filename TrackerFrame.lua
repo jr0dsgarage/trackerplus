@@ -165,6 +165,7 @@ function addon:CreateTrackerFrame()
     -- Scenario Frame (Pinned to Widget Frame)
     -- This resides outside the scroll frame so it doesn't scroll
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
+    scenarioFrame:SetFrameStrata("HIGH") -- Ensure it sits above scrolling content
     scenarioFrame:SetPoint("TOPLEFT", widgetFrame, "BOTTOMLEFT", 0, -5)
     scenarioFrame:SetPoint("TOPRIGHT", widgetFrame, "BOTTOMRIGHT", 0, -5)
     scenarioFrame:SetHeight(1) -- Will be dynamic
@@ -433,8 +434,20 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     if item.item then
         local secureBtn = self:GetOrCreateSecureButton(button)
         secureBtn:ClearAllPoints()
-        secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
-        secureBtn:SetSize(18, 18) -- Slightly smaller
+        
+        local btnSize = 18
+        if item.type == "supertrack" then
+             btnSize = 36 -- 2x Normal Size (18 * 2)
+             -- Move up into the header space (Active Quest backdrop corner)
+             -- Button is at yOffset (approx 30px down). 
+             -- We want Icon at -5px from top. Button is at -30px. Difference is +25px.
+             -- Button is at -5px from right. We want Icon at -5px from right. Difference is 0px.
+             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 25) 
+        else
+             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
+        end
+
+        secureBtn:SetSize(btnSize, btnSize) 
         secureBtn:SetAttribute("type", "item")
         secureBtn:SetAttribute("item", item.item.link)
         secureBtn.icon:SetTexture(item.item.texture)
@@ -529,7 +542,13 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     
     local rightPadding = -2
     if item.item then
-        rightPadding = -22 -- Make room for item button
+        if item.type == "supertrack" then
+             -- Icon is 36px wide and sits at -5px from right. Left edge is at -41px.
+             -- Add padding so text doesn't overlap (approx -45px)
+             rightPadding = -45 
+        else
+             rightPadding = -22 -- Make room for item button
+        end
     end
 
     button.text:ClearAllPoints()
@@ -581,7 +600,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                      objIndex, item.title, tostring(obj.text), tostring(obj.type), tostring(obj.finished), tostring(obj.numFulfilled), tostring(obj.numRequired))
             end
 
-            local objText = "  - " .. (obj.text or "")
+            local objText = ""
             local isProgressBar = false
             local progressValue = 0
             local progressMax = 100
@@ -616,18 +635,38 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                  cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
                  
                  if cleanText == "" and obj.text then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
-                 objText = "  - " .. (cleanText or "Progress")
+                 objText = (cleanText or "Progress")
                  
             elseif obj.quantityString and obj.quantityString ~= "" then
                 local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
                 cleanText = cleanText:gsub("^%s+", "")
-                objText = string.format("  - %s %s", obj.quantityString, cleanText)
+                objText = string.format("%s %s", obj.quantityString, cleanText)
             elseif obj.numRequired and obj.numRequired > 0 then
                 local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
                 cleanText = cleanText:gsub("^%s+", "")
-                objText = string.format("  - %d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
+                objText = string.format("%d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
+            else
+                objText = (obj.text or "")
             end
             
+            -- Prepare Bullet
+            if not button.objectiveBullets then button.objectiveBullets = {} end
+            local bulletLine = button.objectiveBullets[objIndex]
+            if not bulletLine then
+                bulletLine = button:CreateFontString(nil, "OVERLAY")
+                button.objectiveBullets[objIndex] = bulletLine
+            end
+            
+            local indentAmount = 14 -- Roughly width of "  - "
+            
+            bulletLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+            bulletLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+            local objColor = obj.finished and db.completeColor or db.objectiveColor
+            bulletLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
+            bulletLine:SetText("  -")
+            bulletLine:Show()
+
+            -- Prepare Text
             if not button.objectives then button.objectives = {} end
             local objLine = button.objectives[objIndex]
             if not objLine then
@@ -635,12 +674,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 button.objectives[objIndex] = objLine
             end
             
-            objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - 5)
+            -- Width reduced by indentAmount to account for hanging indent
+            objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - indentAmount - 5)
             objLine:SetWordWrap(true)
             objLine:ClearAllPoints()
-            objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+            -- Anchor to right of bullet position start
+            objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent + indentAmount, currentY)
             objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
-            local objColor = obj.finished and db.completeColor or db.objectiveColor
+            --local objColor = obj.finished and db.completeColor or db.objectiveColor -- Already set above
             objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
             objLine:SetText(objText)
             objLine:SetJustifyH("LEFT")
@@ -724,11 +765,15 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         if button.objectives then
             for i = #item.objectives + 1, #button.objectives do button.objectives[i]:Hide() end
         end
+        if button.objectiveBullets then
+             for i = #item.objectives + 1, #button.objectiveBullets do button.objectiveBullets[i]:Hide() end
+        end
         if button.progressBars then
              for i = #item.objectives + 1, #button.progressBars do button.progressBars[i]:Hide() end
         end
     else
         if button.objectives then for _, objLine in ipairs(button.objectives) do objLine:Hide() end end
+        if button.objectiveBullets then for _, objBullet in ipairs(button.objectiveBullets) do objBullet:Hide() end end
         if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
     end
     
@@ -1471,7 +1516,13 @@ function addon:UpdateTrackerDisplay(trackables)
          local totalHeight = scenarioYOffset - activeQuestStartY
          -- Add a bit of padding at the bottom for aesthetics
          if totalHeight < 30 then totalHeight = 30 end -- Minimum height
-         header.styledBackdrop:SetHeight(totalHeight + 5)
+         
+         -- User requested "a few pixels bigger"
+         local backdropPadding = 10
+         header.styledBackdrop:SetHeight(totalHeight + backdropPadding)
+         
+         -- Increase frame offset so the scroll frame below doesn't overlap the backdrop
+         scenarioYOffset = scenarioYOffset + backdropPadding
     end
     
     --------------------------------------------------------------------------
