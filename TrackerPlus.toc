@@ -9,5 +9,7 @@
 Database.lua
 DebugFrame.lua
 Core.lua
+TrackerUtils.lua
+TrackerRenderer.lua
 TrackerFrame.lua
 Settings.lua
