@@ -6,40 +6,56 @@ local secureButtons = {}
 local activeButtons = 0
 local activeSecureButtons = 0
 
--- Helper to create 1px border lines
-function addon:CreateBorderLines(bar)
-    if bar.border then return end
+-- Helper to create or update border lines
+function addon:CreateBorderLines(bar, size)
+    size = size or 1
     
-    -- Border (Using textures for 1px thickness)
-    bar.border = CreateFrame("Frame", nil, bar)
-    bar.border:SetPoint("TOPLEFT", -1, 1)
-    bar.border:SetPoint("BOTTOMRIGHT", 1, -1)
-    
-    local function CreateLine(p) 
-        local t = p:CreateTexture(nil, "BORDER") 
-        t:SetColorTexture(1, 1, 1, 1) 
-        return t 
+    -- Calculate explicit pixel size to ensure 1 means 1 physical pixel
+    local pixelSize = size
+    if bar.GetEffectiveScale then
+        local scale = bar:GetEffectiveScale()
+        -- Only apply correction if valid scale is found
+        if scale and scale > 0.001 then 
+            pixelSize = size / scale
+        end
     end
     
-    bar.border.top = CreateLine(bar.border)
-    bar.border.top:SetPoint("TOPLEFT")
-    bar.border.top:SetPoint("TOPRIGHT")
-    bar.border.top:SetHeight(1)
+    -- Create border frame if it doesn't exist
+    if not bar.border then
+        bar.border = CreateFrame("Frame", nil, bar)
+        
+        local function CreateLine(p) 
+            local t = p:CreateTexture(nil, "BORDER") 
+            t:SetColorTexture(1, 1, 1, 1) 
+            return t 
+        end
+        
+        bar.border.top = CreateLine(bar.border)
+        bar.border.top:SetPoint("TOPLEFT")
+        bar.border.top:SetPoint("TOPRIGHT")
+        
+        bar.border.bottom = CreateLine(bar.border)
+        bar.border.bottom:SetPoint("BOTTOMLEFT")
+        bar.border.bottom:SetPoint("BOTTOMRIGHT")
+        
+        bar.border.left = CreateLine(bar.border)
+        bar.border.left:SetPoint("TOPLEFT")
+        bar.border.left:SetPoint("BOTTOMLEFT")
+        
+        bar.border.right = CreateLine(bar.border)
+        bar.border.right:SetPoint("TOPRIGHT")
+        bar.border.right:SetPoint("BOTTOMRIGHT")
+    end
     
-    bar.border.bottom = CreateLine(bar.border)
-    bar.border.bottom:SetPoint("BOTTOMLEFT")
-    bar.border.bottom:SetPoint("BOTTOMRIGHT")
-    bar.border.bottom:SetHeight(1)
+    -- Update Size & Anchors
+    bar.border:ClearAllPoints()
+    bar.border:SetPoint("TOPLEFT", -pixelSize, pixelSize)
+    bar.border:SetPoint("BOTTOMRIGHT", pixelSize, -pixelSize)
     
-    bar.border.left = CreateLine(bar.border)
-    bar.border.left:SetPoint("TOPLEFT")
-    bar.border.left:SetPoint("BOTTOMLEFT")
-    bar.border.left:SetWidth(1)
-    
-    bar.border.right = CreateLine(bar.border)
-    bar.border.right:SetPoint("TOPRIGHT")
-    bar.border.right:SetPoint("BOTTOMRIGHT")
-    bar.border.right:SetWidth(1)
+    bar.border.top:SetHeight(pixelSize)
+    bar.border.bottom:SetHeight(pixelSize)
+    bar.border.left:SetWidth(pixelSize)
+    bar.border.right:SetWidth(pixelSize)
 end
 
 -- Organize trackables into Major/Minor hierarchy

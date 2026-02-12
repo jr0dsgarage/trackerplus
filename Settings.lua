@@ -1,5 +1,6 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
+local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Settings panel using manual frame construction for maximum control
 local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
@@ -99,8 +100,9 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
         label:SetText(text .. ": " .. value)
         
         -- Immediate updates
-        if dbKey == "frameWidth" or dbKey == "frameHeight" or dbKey == "frameScale" then
+        if dbKey == "frameWidth" or dbKey == "frameHeight" or dbKey == "frameScale" or dbKey == "barBorderSize" then
             addon:UpdateTrackerAppearance()
+            if dbKey == "barBorderSize" then addon:RefreshDisplay() end
         elseif dbKey == "fontSize" or dbKey == "headerFontSize" or dbKey:find("^spacing") then
             addon:RefreshDisplay()
         end
@@ -472,6 +474,78 @@ local function InitUI()
         {text = "Tracker Background (Custom)", value = "tracker"}
     }, "Style of the header background", sy)
 
+    -- Progress Bar Settings
+    local barHeader = s:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    barHeader:SetPoint("TOPLEFT", 16, sy - 10)
+    barHeader:SetText("Progress Bars")
+    sy = sy - 30
+
+    sy = CreateSlider(s, "Border Size", "barBorderSize", 1, 5, 1, "Thickness of the progress bar border", sy)
+
+    -- Media Dropdown for Bar Texture
+    local function CreateMediaDropdown(section, label, key, description, y)
+        local frame = CreateFrame("Frame", nil, section, "UIDropDownMenuTemplate")
+        frame:SetPoint("TOPLEFT", 0, y - 20)
+        
+        local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 16, 5)
+        text:SetText(label)
+        
+        -- Tooltip
+        local hitRect = CreateFrame("Frame", nil, frame)
+        hitRect:SetAllPoints(text)
+        hitRect:SetScript("OnEnter", function()
+            GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+            GameTooltip:SetText(description, 1, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        hitRect:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        
+        UIDropDownMenu_SetWidth(frame, 150)
+        
+        local function Initialize(self, level)
+            local selected = addon.db[key]
+            
+            -- Get textures from LSM
+            local lsmRef = LibStub and LibStub("LibSharedMedia-3.0", true)
+            local textureList = lsmRef and lsmRef:List("statusbar") or {}
+            
+            -- Sort textures
+            table.sort(textureList)
+            
+            -- Add Blizzard default if missing
+            local found = false
+            for _, v in ipairs(textureList) do if v == "Blizzard" then found = true break end end
+            if not found then table.insert(textureList, 1, "Blizzard") end
+            
+            for _, name in ipairs(textureList) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = name
+                info.value = name
+                info.checked = (name == selected)
+                info.func = function(self)
+                    addon.db[key] = self.value
+                    UIDropDownMenu_SetText(frame, self.value)
+                    addon:UpdateTrackerAppearance()
+                    addon:RefreshDisplay()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+        
+        UIDropDownMenu_Initialize(frame, Initialize)
+        -- Set initial text safely
+        if addon.db[key] then
+            UIDropDownMenu_SetText(frame, addon.db[key])
+        else
+            UIDropDownMenu_SetText(frame, "Blizzard")
+        end
+        
+        return y - 50
+    end
+    
+    sy = CreateMediaDropdown(s, "Bar Texture", "barTexture", "Texture used for progress bars", sy)
+
     y = y - EndSection(s, sy)
     
     s, sy = StartSection(p2, "Fonts", y)
@@ -486,6 +560,8 @@ local function InitUI()
     sy = CreateColorPicker(s, "Border Color", "borderColor", updateAppearance, sy)
     sy = CreateColorPicker(s, "Header Text", "headerColor", updateDisplay, sy)
     sy = CreateColorPicker(s, "Quest Text", "questColor", updateDisplay, sy)
+    
+    sy = CreateColorPicker(s, "Bar Background", "barBackgroundColor", updateDisplay, sy)
     
     sy = CreateColorPicker(s, "Achievements", "achievementColor", updateDisplay, sy)
     sy = CreateColorPicker(s, "Professions", "professionColor", updateDisplay, sy)

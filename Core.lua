@@ -38,9 +38,27 @@ function addon:Initialize()
         if not addon.hookedTracker then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
                 if addon:GetSetting("enabled") then
-                    self:Hide()
+                    -- Instead of Hide(), move it offscreen so we can still hijack its children (Bonus Frames)
+                    -- If we Hide() it, its children (BonusObjectiveTracker) are also hidden and inactive.
+                    self:ClearAllPoints()
+                    self:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+                    self:SetAlpha(0) -- Visual hide
+                    self:EnableMouse(false) -- No interaction
                 end
             end)
+            
+            -- Prevent internal layout resets from moving it back
+            hooksecurefunc(ObjectiveTrackerFrame, "SetPoint", function(self)
+                 if addon:GetSetting("enabled") and not InCombatLockdown() then
+                      -- If it tries to move back, force it away
+                      local point, _, _, x, _ = self:GetPoint()
+                      if x < 5000 then -- If it's on screen
+                           self:ClearAllPoints()
+                           self:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+                      end
+                 end
+            end)
+            
             addon.hookedTracker = true
         end
 
@@ -55,11 +73,26 @@ end
 function addon:UpdateDefaultTrackerVisibility()
     if not ObjectiveTrackerFrame then return end
     
+    if addon.Log then addon:Log("UpdateDefaultTrackerVisibility called. Enabled: %s", tostring(self:GetSetting("enabled"))) end
+    
     if self:GetSetting("enabled") then
-        ObjectiveTrackerFrame:Hide()
+        -- Offscreen Mode
+        ObjectiveTrackerFrame:ClearAllPoints()
+        ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+        ObjectiveTrackerFrame:SetAlpha(0)
+        ObjectiveTrackerFrame:EnableMouse(false)
+        if ObjectiveTrackerFrame.Show then ObjectiveTrackerFrame:Show() end
+        if addon.Log then addon:Log("ObjectiveTrackerFrame Moved Offscreen (x=10000, Alpha=0)") end
     else
+        -- Restore (This might need a ReloadUI to perfect, but we try)
         if ObjectiveTrackerFrame.Show then
+            ObjectiveTrackerFrame:SetAlpha(1)
+            ObjectiveTrackerFrame:EnableMouse(true)
+            ObjectiveTrackerFrame:ClearAllPoints()
+            -- Let Blizzard layout handle the rest or EditMode
+            ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -180) 
             ObjectiveTrackerFrame:Show()
+            if addon.Log then addon:Log("ObjectiveTrackerFrame Restored") end
         end
     end
 end
@@ -286,8 +319,18 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     
     local questID = info.questID
     
-    local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not C_QuestLog.IsWorldQuest(questID)
-    local type = typeOverride or (isBonusObjective and "bonus" or "quest")
+    local isWorldQuest = C_QuestLog.IsWorldQuest(questID)
+    local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not isWorldQuest
+    local type = typeOverride
+    if not type then
+         if isBonusObjective then
+             type = "bonus"
+         elseif isWorldQuest then
+             type = "worldquest"
+         else
+             type = "quest"
+         end
+    end
 
     local questInfo = {
         type = type,

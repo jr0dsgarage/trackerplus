@@ -167,19 +167,28 @@ function addon:CreateTrackerFrame()
     scenarioFrame:SetPoint("TOPRIGHT", widgetFrame, "BOTTOMRIGHT", 0, -5)
     scenarioFrame:SetHeight(1) -- Will be dynamic
     self.scenarioFrame = scenarioFrame
+    
+    -- World Quest Frame (Pinned to absolute bottom)
+    local worldQuestFrame = CreateFrame("Frame", nil, trackerFrame)
+    worldQuestFrame:SetPoint("BOTTOMLEFT", 5, 5)
+    worldQuestFrame:SetPoint("BOTTOMRIGHT", -5, 5)
+    worldQuestFrame:SetHeight(1)
+    worldQuestFrame:Hide()
+    self.worldQuestFrame = worldQuestFrame
 
-    -- Bonus Objective Frame (Pinned to bottom)
+    -- Bonus Objective Frame (Pinned above World Quest Frame, defaults to bottom if WQ hidden)
     local bonusFrame = CreateFrame("Frame", nil, trackerFrame)
-    bonusFrame:SetPoint("BOTTOMLEFT", 5, 5)
-    bonusFrame:SetPoint("BOTTOMRIGHT", -5, 5)
+    bonusFrame:SetPoint("BOTTOMLEFT", worldQuestFrame, "TOPLEFT", 0, 0)
+    bonusFrame:SetPoint("BOTTOMRIGHT", worldQuestFrame, "TOPRIGHT", 0, 0)
     bonusFrame:SetHeight(1) 
     bonusFrame:Hide()
     self.bonusFrame = bonusFrame
     
     -- Create scroll frame (Between Scenario and Bonus)
     scrollFrame = CreateFrame("ScrollFrame", nil, trackerFrame)
-    scrollFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0) -- Attach to bottom of scenario frame
-    scrollFrame:SetPoint("BOTTOMRIGHT", -5, 5) -- Default bottom, will be adjusted dynamically
+    -- Initial anchor (will be updated in Renderer based on BonusFrame existence)
+    scrollFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", bonusFrame, "TOPRIGHT", 0, 0) 
     scrollFrame:EnableMouse(false)
     scrollFrame:EnableMouseWheel(false)
     
@@ -242,15 +251,6 @@ function addon:CreateTrackerFrame()
 
     local function UpdateMinMaxState()
         -- Ensure we work with screen coordinates to maintain position relative to TOP-RIGHT
-        -- NOTE: This re-anchoring logic is causing issues with position persistence and restoration.
-        -- Removing it allows the standard movable frame logic to hold the user's preferred anchor.
-        
-        -- local right = trackerFrame:GetRight()
-        -- local top = trackerFrame:GetTop()
-        -- if right and top then
-        --      trackerFrame:ClearAllPoints()
-        --      trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
-        -- end
 
         if addon.db.minimized then
             -- Minimized State: Only Maximize button visible
@@ -258,6 +258,22 @@ function addon:CreateTrackerFrame()
             if trackerFrame:GetWidth() > 50 then
                  addon.db.savedWidth = trackerFrame:GetWidth()
                  addon.db.savedHeight = trackerFrame:GetHeight()
+                 
+                 -- Save position
+                 local point, relativeTo, relativePoint, x, y = trackerFrame:GetPoint()
+                 -- Ensure we only save if relativeTo is UIParent or nil (Screen), otherwise default logic
+                 if relativeTo == UIParent or relativeTo == nil then
+                      addon.db.savedPoint = {point = point, relativePoint = relativePoint, x = x, y = y}
+                 end
+
+                 -- RE-ANCHOR to keep the Top-Right corner in place visually
+                 local right = trackerFrame:GetRight()
+                 local top = trackerFrame:GetTop()
+                 if right and top then
+                      trackerFrame:ClearAllPoints()
+                      -- Use TOPRIGHT anchor relative to screen coordinates
+                      trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
+                 end
             end
 
             -- Size to fit just the button (plus defined border padding)
@@ -280,6 +296,7 @@ function addon:CreateTrackerFrame()
             if scrollFrame then scrollFrame:Hide() end
             if self.scenarioFrame then self.scenarioFrame:Hide() end
             if self.bonusFrame then self.bonusFrame:Hide() end
+            if self.worldQuestFrame then self.worldQuestFrame:Hide() end
             
             -- Center button
             trackerFrame.minMaxBtn:ClearAllPoints()
@@ -287,6 +304,17 @@ function addon:CreateTrackerFrame()
         else
             -- Restored State
             trackerFrame:SetSize(addon.db.savedWidth or 300, addon.db.savedHeight or 400)
+            
+            -- Restore Position if saved
+            if addon.db.savedPoint then
+                 trackerFrame:ClearAllPoints()
+                 local point = addon.db.savedPoint.point or "TOPLEFT"
+                 local relativePoint = addon.db.savedPoint.relativePoint or "TOPLEFT"
+                 local x = addon.db.savedPoint.x or 100
+                 local y = addon.db.savedPoint.y or -200
+                 trackerFrame:SetPoint(point, UIParent, relativePoint, x, y)
+                 addon.db.savedPoint = nil
+            end
             
             -- Gold-only textures (Minus)
             trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Collapse")
@@ -300,6 +328,8 @@ function addon:CreateTrackerFrame()
             if trackerFrame.border then trackerFrame.border:Show() end
             if scrollFrame then scrollFrame:Show() end
             if self.scenarioFrame then self.scenarioFrame:Show() end
+            if self.bonusFrame and self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
+            if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
             -- Reset button position
             trackerFrame.minMaxBtn:ClearAllPoints()

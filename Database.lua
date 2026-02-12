@@ -63,6 +63,7 @@ local DEFAULTS = {
     
     -- State
     collapsedHeaders = {},
+    collapsedSections = {},
     
     -- Trackable Types
     showQuests = true,
@@ -117,6 +118,11 @@ local DEFAULTS = {
     spacingMinorHeaderAfter = 22,      -- Vertical space after minor headers
     spacingProgressBarInset = 20,      -- Horizontal inset for progress bars from edges
     spacingProgressBarPadding = 5,     -- Vertical padding above progress bars (below text)
+    
+    -- Progress Bar Styling
+    barTexture = "Blizzard",          -- Texture for progress bars
+    barBorderSize = 1,                -- Size of the 1px border around progress bars
+    barBackgroundColor = {r = 0, g = 0, b = 0, a = 0.5}, -- Background color of progress bars
 }
 
 -- Deep copy helper

@@ -1,10 +1,18 @@
 local addonName, addon = ...
+local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Update tracker display with trackables
 function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local db = self.db
     local button = self:GetOrCreateButton(parent)
     if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
+    
+    -- Cleanup recycled elements
+    if button.objectiveBullets then for _, v in ipairs(button.objectiveBullets) do v:Hide() end end
+    if button.objectives then for _, v in ipairs(button.objectives) do v:Hide() end end
+    if button.objectivePrefixes then for _, v in ipairs(button.objectivePrefixes) do v:Hide() end end
+    if button.progressBars then for _, v in ipairs(button.progressBars) do v:Hide() end end
+
     button:Show()
     
     -- Reset button point completely to avoid previous anchor persistence
@@ -51,14 +59,37 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
              -- We want Icon at -5px from top. Button is at -30px. Difference is +25px.
              -- Button is at -5px from right. We want Icon at -5px from right. Difference is 0px.
              secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 25) 
+             secureBtn:SetFrameLevel(button:GetFrameLevel() + 10) -- Ensure on top of header/backdrop
         else
              secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
         end
 
         secureBtn:SetSize(btnSize, btnSize) 
+        button:SetClipsChildren(false) -- Allow button to extend outside (for supertrack)
         secureBtn:SetAttribute("type", "item")
         secureBtn:SetAttribute("item", item.item.link)
-        secureBtn.icon:SetTexture(item.item.texture)
+        
+        -- Robust Icon handling
+        local texture = item.item.texture
+        
+        -- Try to fetch via API if missing
+        if not texture and item.item.link then
+             texture = GetItemIcon(item.item.link)
+             
+             -- If GetItemIcon fails (returns nil), try Instant info which is cache-independent for icons
+             if not texture then
+                  local _, _, _, _, iconID = GetItemInfoInstant(item.item.link)
+                  if iconID then texture = iconID end
+             end
+        end
+
+        -- Final Fallback: Red Question Mark (134400) to ensure visibility
+        if not texture then
+             texture = 134400 
+        end
+
+        secureBtn.icon:SetTexture(texture)
+        secureBtn.icon:Show() -- Enforce visibility
         secureBtn:Show()
         button.itemButton = secureBtn
         
@@ -198,7 +229,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local height = math.max(db.fontSize + 4, textHeight + 4)
     
     -- Objectives
-    if item.objectives and #item.objectives > 0 then
+    if not item.collapsed and item.objectives and #item.objectives > 0 then
         local currentY = -(textHeight + 2)
         
         for objIndex, obj in ipairs(item.objectives) do
@@ -208,7 +239,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                      objIndex, item.title, tostring(obj.text), tostring(obj.type), tostring(obj.finished), tostring(obj.numFulfilled), tostring(obj.numRequired))
             end
 
-            local objText = ""
+            local prefixText = ""
+            local bodyText = ""
             local isProgressBar = false
             local progressValue = 0
             local progressMax = 100
@@ -243,18 +275,25 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                  cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
                  
                  if cleanText == "" and obj.text then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
-                 objText = (cleanText or "Progress")
+                 bodyText = (cleanText or "Progress")
                  
             elseif obj.quantityString and obj.quantityString ~= "" then
-                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
-                cleanText = cleanText:gsub("^%s+", "")
-                objText = string.format("%s %s", obj.quantityString, cleanText)
+                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+                prefixText = obj.quantityString
+                bodyText = cleanText
             elseif obj.numRequired and obj.numRequired > 0 then
-                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", "")
-                cleanText = cleanText:gsub("^%s+", "")
-                objText = string.format("%d/%d %s", obj.numFulfilled or 0, obj.numRequired, cleanText)
+                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+                prefixText = string.format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
+                bodyText = cleanText
             else
-                objText = (obj.text or "")
+                -- Try to detect prefix in raw text
+                local p, b = (obj.text or ""):match("^%s*([%d]+/[%d]+)%s+(.*)$")
+                if p then
+                    prefixText = p
+                    bodyText = b
+                else
+                    bodyText = (obj.text or "")
+                end
             end
             
             -- Prepare Bullet
@@ -274,7 +313,28 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             bulletLine:SetText("  -")
             bulletLine:Show()
 
-            -- Prepare Text
+            -- Prepare Prefix
+            if not button.objectivePrefixes then button.objectivePrefixes = {} end
+            local prefixLine = button.objectivePrefixes[objIndex]
+            if not prefixLine then
+                prefixLine = button:CreateFontString(nil, "OVERLAY")
+                button.objectivePrefixes[objIndex] = prefixLine
+            end
+            
+            local prefixWidth = 0
+            if prefixText ~= "" then
+                prefixLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                prefixLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
+                prefixLine:SetText(prefixText)
+                prefixLine:ClearAllPoints()
+                prefixLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent + indentAmount, currentY)
+                prefixLine:Show()
+                prefixWidth = prefixLine:GetStringWidth()
+            else
+                prefixLine:Hide()
+            end
+
+            -- Prepare Text (Body)
             if not button.objectives then button.objectives = {} end
             local objLine = button.objectives[objIndex]
             if not objLine then
@@ -282,16 +342,22 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 button.objectives[objIndex] = objLine
             end
             
-            -- Width reduced by indentAmount to account for hanging indent
-            objLine:SetWidth(button:GetWidth() - leftPadding - db.spacingObjectiveIndent - indentAmount - 5)
+            -- Gap between prefix and body (Reduced to match request)
+            local gap = (prefixText ~= "") and 1 or 0
+            
+            local bodyIndent = leftPadding + db.spacingObjectiveIndent + indentAmount + prefixWidth + gap
+            
+            -- Width reduced by indent to account for hanging indent
+            -- use buttonWidth (calculated from parent) instead of button:GetWidth() which is 0 on first render
+            objLine:SetWidth(buttonWidth - bodyIndent - 5)
             objLine:SetWordWrap(true)
             objLine:ClearAllPoints()
-            -- Anchor to right of bullet position start
-            objLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent + indentAmount, currentY)
+            -- Anchor to right of prefix (or bullet if no prefix)
+            objLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)
             objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
             --local objColor = obj.finished and db.completeColor or db.objectiveColor -- Already set above
             objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
-            objLine:SetText(objText)
+            objLine:SetText(bodyText)
             objLine:SetJustifyH("LEFT")
             objLine:Show()
             
@@ -320,12 +386,19 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                          -- Fallback to manual creation
                          bar = CreateFrame("StatusBar", nil, button)
                          bar:SetSize(1, 15)
-                         bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                         
+                         local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                         if LSM and db.barTexture then
+                              barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
+                         end
+                         bar:SetStatusBarTexture(barTex)
+                         
                          bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                          bar.bg:SetAllPoints()
-                         bar.bg:SetColorTexture(0, 0, 0, 0.5)
+                         local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
+                         bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
                          
-                         addon:CreateBorderLines(bar)
+                         addon:CreateBorderLines(bar, db.barBorderSize)
      
                          bar.value = bar:CreateFontString(nil, "OVERLAY") 
                          bar.value:SetFont(db.fontFace, 9, "OUTLINE")
@@ -333,6 +406,22 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                          bar.isTemplate = false
                     end
                     button.progressBars[objIndex] = bar
+                end
+                
+                -- Update Existing Manual Bars
+                if not bar.isTemplate then
+                     local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                     if LSM and db.barTexture then
+                          barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
+                     end
+                     bar:SetStatusBarTexture(barTex)
+                     
+                     local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
+                     if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
+                     
+                     addon:CreateBorderLines(bar, db.barBorderSize)
+                elseif bar.Bar then
+                     addon:CreateBorderLines(bar.Bar, db.barBorderSize)
                 end
                 
                 bar:ClearAllPoints()
@@ -369,20 +458,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                  button.progressBars[objIndex]:Hide()
             end
         end
-        
-        if button.objectives then
-            for i = #item.objectives + 1, #button.objectives do button.objectives[i]:Hide() end
-        end
-        if button.objectiveBullets then
-             for i = #item.objectives + 1, #button.objectiveBullets do button.objectiveBullets[i]:Hide() end
-        end
-        if button.progressBars then
-             for i = #item.objectives + 1, #button.progressBars do button.progressBars[i]:Hide() end
-        end
-    else
-        if button.objectives then for _, objLine in ipairs(button.objectives) do objLine:Hide() end end
-        if button.objectiveBullets then for _, objBullet in ipairs(button.objectiveBullets) do objBullet:Hide() end end
-        if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
     end
     
     if db.showDistance and item.distance and item.distance < 999999 then
@@ -434,6 +509,7 @@ function addon:UpdateTrackerDisplay(trackables)
     local autoQuests = {}
     local superTrackedItems = {}
     local bonusObjectives = {}
+    local worldQuestItems = {}
     local remainingTrackables = {}
     
     for _, item in ipairs(trackables) do
@@ -445,12 +521,14 @@ function addon:UpdateTrackerDisplay(trackables)
             table.insert(superTrackedItems, item)
         elseif item.type == "bonus" then
             table.insert(bonusObjectives, item)
+        elseif item.type == "worldquest" then
+            table.insert(worldQuestItems, item)
         else
             table.insert(remainingTrackables, item)
         end
     end
     
-    if addon.Log then addon:Log("Scenarios: %d | Bonus: %d | Remaining: %d", #scenarios, #bonusObjectives, #remainingTrackables) end
+    if addon.Log then addon:Log("Scenarios: %d | Bonus: %d | WQ: %d | Remaining: %d", #scenarios, #bonusObjectives, #worldQuestItems, #remainingTrackables) end
     
     self.currentScenarios = scenarios
     trackables = remainingTrackables
@@ -481,6 +559,8 @@ function addon:UpdateTrackerDisplay(trackables)
               if button.poiButton then button.poiButton:Hide() end
               if button.itemButton then button.itemButton:Hide() end
               if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
+              if button.objectiveBullets then for _, obj in ipairs(button.objectiveBullets) do obj:Hide() end end
+              if button.objectivePrefixes then for _, obj in ipairs(button.objectivePrefixes) do obj:Hide() end end
               if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
               if button.expandBtn then button.expandBtn:Hide() end
               if button.stageBox then button.stageBox:Hide() end
@@ -496,11 +576,11 @@ function addon:UpdateTrackerDisplay(trackables)
                         tile = true, tileSize = 16, edgeSize = 16,
                         insets = { left = 4, right = 4, top = 4, bottom = 4 }
                    })
-                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
                    button.popupBackdrop:SetBackdropBorderColor(1, 0.8, 0, 1) -- Gold Border
                    button.popupBackdrop:SetPoint("TOPLEFT", 0, 0)
                    button.popupBackdrop:SetPoint("BOTTOMRIGHT", 0, 0)
-                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()) 
+                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()+1) 
               end
               button.popupBackdrop:Show()
               
@@ -688,6 +768,26 @@ function addon:UpdateTrackerDisplay(trackables)
               -- We must bring it up to at least MEDIUM or HIGH to be seen on top of our bg.
               contents:SetFrameStrata("HIGH") 
               contents:SetFrameLevel(100)
+              
+              -- Create a solid opaque backdrop behind the hijacked scenario frame to hide content below it
+              if not self.scenarioFrame.bgMask then
+                   self.scenarioFrame.bgMask = self.scenarioFrame:CreateTexture(nil, "BACKGROUND")
+                   self.scenarioFrame.bgMask:SetColorTexture(0, 0, 0, 0.9) -- Dark opaque background
+              end
+              -- Fix the mask size to cover the content strictly within the tracker frame width
+              self.scenarioFrame.bgMask:ClearAllPoints()
+              self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
+              self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
+              self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -10)
+              self.scenarioFrame.bgMask:Show()
+         else
+              if self.scenarioFrame.bgMask then
+                   self.scenarioFrame.bgMask:ClearAllPoints()
+                   self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
+                   self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
+                   self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -10)
+                   self.scenarioFrame.bgMask:Show()
+              end
          end
          
          -- Clear points and set to top-center of our container
@@ -757,6 +857,10 @@ function addon:UpdateTrackerDisplay(trackables)
         if header.itemButton then header.itemButton:Hide() end
         if header.icon then header.icon:Hide() end
         if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+        if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
+        if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
+        if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+        if header.distance then header.distance:Hide() end
         
         scenarioYOffset = scenarioYOffset + 26
         
@@ -776,6 +880,13 @@ function addon:UpdateTrackerDisplay(trackables)
               
               if button.poiButton then button.poiButton:Hide() end
               if button.itemButton then button.itemButton:Hide() end
+              if button.expandBtn then button.expandBtn:Hide() end
+              if button.distance then button.distance:Hide() end
+              
+              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
+              if button.objectiveBullets then for _, obj in ipairs(button.objectiveBullets) do obj:Hide() end end
+              if button.objectivePrefixes then for _, obj in ipairs(button.objectivePrefixes) do obj:Hide() end end
+              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
               
               local height = db.fontSize + 6
 
@@ -802,6 +913,8 @@ function addon:UpdateTrackerDisplay(trackables)
                  button.stageBox.text:SetFont(db.headerFontFace, db.fontSize + 4, db.headerFontOutline)
                  button.stageBox.text:SetText(item.stageName)
                  button.stageBox:SetHeight(30)
+                 -- Higher frame level to cover other elements if needed, but not too high
+                 button.stageBox:SetFrameLevel(button:GetFrameLevel() + 5) 
                  button.stageBox:Show()
                  
                  height = height + 35
@@ -956,19 +1069,42 @@ function addon:UpdateTrackerDisplay(trackables)
                                 else
                                     bar = CreateFrame("StatusBar", nil, button)
                                     bar:SetSize(1, 21) 
-                                    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+                                    
+                                    local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                                    if LSM and db.barTexture then
+                                         barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
+                                    end
+                                    bar:SetStatusBarTexture(barTex)
+                                    
                                     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                                     bar.bg:SetAllPoints()
-                                    bar.bg:SetColorTexture(0, 0, 0, 0.5)
+                                    local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
+                                    bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
                                     
                                     bar.value = bar:CreateFontString(nil, "OVERLAY")
                                     bar.value:SetFont(db.fontFace, 10, "OUTLINE")
                                     bar.value:SetPoint("CENTER")
                                     
-                                    addon:CreateBorderLines(bar)
+                                    addon:CreateBorderLines(bar, db.barBorderSize)
                                     bar.isTemplate = false
                                 end
                                 button.progressBars[objIndex] = bar
+                            end
+                            
+                            -- Update Manual Scenarios (Important!)
+                            if not bar.isTemplate then
+                                 local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                                 if LSM and db.barTexture then
+                                      barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
+                                 end
+                                 bar:SetStatusBarTexture(barTex)
+                                 
+                                 local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
+                                 if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
+                                 
+                                 addon:CreateBorderLines(bar, db.barBorderSize)
+                            elseif bar.Bar then
+                                 addon:CreateBorderLines(bar.Bar, db.barBorderSize)
                             end
                             
                             bar:ClearAllPoints()
@@ -1112,18 +1248,44 @@ function addon:UpdateTrackerDisplay(trackables)
          addon:Log("Checking BonusTracker: Exists=%s | ContentsFrame=%s", 
              tostring(bonusTracker ~= nil), 
              tostring(bonusTracker and bonusTracker.ContentsFrame ~= nil))
+         
+         if bonusTracker and bonusTracker.ContentsFrame then
+             local c = bonusTracker.ContentsFrame
+             addon:Log("--- BONUS TRACKER DEBUG DETAILS ---")
+             addon:Log("Frame: %s | Parent: %s", tostring(c), c:GetParent() and c:GetParent():GetName() or "nil")
+             addon:Log("State: Shown=%s | Visible=%s | Alpha=%s", tostring(c:IsShown()), tostring(c:IsVisible()), tostring(c:GetAlpha()))
+             local l, t, w, h = c:GetLeft(), c:GetTop(), c:GetWidth(), c:GetHeight()
+             addon:Log("Geometry: Left=%s | Top=%s | Size=%sx%s", tostring(l), tostring(t), tostring(w), tostring(h))
+             
+             local numKids = c:GetNumChildren()
+             addon:Log("Children Count: %d", numKids)
+             local kids = {c:GetChildren()}
+             local visibleKids = 0
+             for i, k in ipairs(kids) do
+                  if k:IsShown() and k:GetHeight() > 1 then visibleKids = visibleKids + 1 end
+                  if i <= 5 then -- Log first 5 children only to avoid spam
+                       addon:Log("  Child %d: %s | Shown=%s | Size=%sx%s | Type=%s", 
+                           i, tostring(k), tostring(k:IsShown()), k:GetWidth(), k:GetHeight(), k:GetObjectType())
+                  end
+             end
+             addon:Log("Visible Children (Found): %d", visibleKids)
+             addon:Log("--- END BONUS DEBUG ---")
+         end
     end
     
     if useBlizzardBonus then
          local contents = bonusTracker.ContentsFrame
          local blizzardBonusHeight = contents:GetHeight() or 0
-         local hasContent = blizzardBonusHeight > 1 and contents:IsVisible()
          
-         -- Also check if there are actual child frames with bars
+         -- Use IsShown() instead of IsVisible() because our parent (ObjectiveTrackerFrame) might be hidden
+         local hasContent = blizzardBonusHeight > 1 and contents:IsShown()
+         
+         -- Also check if there are actual child frames with bars (sometimes height is 0 but children exist)
          if not hasContent then
              -- ContentsFrame might report height but children are individually visible
              for _, child in pairs({contents:GetChildren()}) do
-                 if child:IsVisible() and child:GetHeight() > 1 then
+                 -- Check IsShown because IsVisible fails if we hid the main tracker
+                 if child:IsShown() and child:GetHeight() > 1 then
                      hasContent = true
                      blizzardBonusHeight = math.max(blizzardBonusHeight, 10) -- Will recalculate below
                      break
@@ -1132,9 +1294,7 @@ function addon:UpdateTrackerDisplay(trackables)
          end
          
          if addon.Log then 
-              addon:Log("BonusObjectiveTracker: Vis=%s | Height=%s | HasContent=%s | Parent=%s", 
-                  tostring(contents:IsVisible()), tostring(blizzardBonusHeight), tostring(hasContent),
-                  contents:GetParent() and contents:GetParent():GetName() or "nil")
+              addon:Log("BonusObjectiveTracker Decision: HasContent=%s (Height=%s)", tostring(hasContent), tostring(blizzardBonusHeight))
          end
          
          if hasContent then
@@ -1151,9 +1311,19 @@ function addon:UpdateTrackerDisplay(trackables)
                    contents:SetPoint("TOP", self.bonusFrame, "TOP", 0, -5)
                    contents:SetWidth(self.db.frameWidth - 10)
                    contents:Show()
+                   contents:SetAlpha(1) -- Force visibility even if parent OTF is Alpha 0
+                   
+                   -- Recursively set alpha on children to override parent fade?
+                   -- Frames inherit Alpha by default (use SetIgnoreParentAlpha if available)
+                   if contents.SetIgnoreParentAlpha then
+                        contents:SetIgnoreParentAlpha(true)
+                   end
 
-                   -- Force update if module exists
-                   if bonusTracker.Update then bonusTracker:Update() end
+                   -- Ensure children are shown (some instances hide children but show parent)
+                   if contents.WidgetContainer then 
+                        contents.WidgetContainer:Show() 
+                        contents.WidgetContainer:SetAlpha(1)
+                   end
               end)
               
               if not status and addon.Log then
@@ -1252,8 +1422,236 @@ function addon:UpdateTrackerDisplay(trackables)
     if bonusYOffset > 0 then
         self.bonusFrame:SetHeight(bonusYOffset)
         self.bonusFrame:Show()
+        
+        -- DEBUG: If logic says we are showing it, but it's invisible, force visibility on children
+        if useBlizzardBonus and self.bonusFrame:GetNumChildren() > 0 then
+             local kids = {self.bonusFrame:GetChildren()}
+             for _, kid in ipairs(kids) do
+                  kid:Show()
+                  kid:SetAlpha(1)
+             end
+        end
     else
         self.bonusFrame:Hide()
+    end
+    
+    -- 1.6 Render World Quests (Pinned to Absolute Bottom)
+    --------------------------------------------------------------------------
+    local wqYOffset = 0
+    local wqFrame = self.worldQuestFrame
+    
+    -- Hijacking Strategy for World Quests
+    local wqTracker = WorldQuestObjectiveTracker
+    local useBlizzardWQ = (wqTracker and wqTracker.ContentsFrame)
+    
+    if addon.Log and useBlizzardWQ then
+         local contents = wqTracker.ContentsFrame
+         addon:Log("Checking WQTracker: Parent=%s | Shown=%s | Height=%s", 
+             tostring(contents:GetParent() and contents:GetParent():GetName()), 
+             tostring(contents:IsShown()), tostring(contents:GetHeight()))
+    end
+    
+    if useBlizzardWQ then
+         local contents = wqTracker.ContentsFrame
+         local blizzardWQHeight = contents:GetHeight() or 0
+         
+         -- Use IsShown() instead of IsVisible() because parent might be hidden
+         -- If we are already hijacking (parent is wqFrame) and collapsed, we assume we still have control
+         local isHijacked = (contents:GetParent() == wqFrame)
+         local isCollapsed = db.collapsedSections and db.collapsedSections["World Quests"]
+         
+         local hasContent = (blizzardWQHeight > 1 and contents:IsShown())
+         if isHijacked and isCollapsed then hasContent = true end
+         
+         if not hasContent then
+             -- Deep check for children
+             for _, child in pairs({contents:GetChildren()}) do
+                 if child:IsShown() and child:GetHeight() > 1 then
+                     hasContent = true
+                     blizzardWQHeight = math.max(blizzardWQHeight, 10)
+                     break
+                 end
+             end
+         end
+         
+         if hasContent then
+              -- Hijack it!
+              local status, err = pcall(function()
+                  if contents:GetParent() ~= wqFrame then
+                   contents:SetParent(wqFrame)
+                   contents:SetFrameStrata("HIGH")
+                   contents:SetFrameLevel(100)
+              end
+                  
+              contents:ClearAllPoints()
+              -- Position it BELOW the header (which we will create manually below at y=0)
+              contents:SetPoint("TOP", wqFrame, "TOP", 0, -28) 
+              contents:SetWidth(self.db.frameWidth - 10)
+              
+              -- Force recursive visibility on Hijacked content
+              local function ForceShow(f)
+                 f:Show()
+                 f:SetAlpha(1)
+                 if f.SetIgnoreParentAlpha then f:SetIgnoreParentAlpha(true) end
+                 local kids = {f:GetChildren()}
+                 for _, k in ipairs(kids) do
+                      if k.IsForbidden and not k:IsForbidden() then
+                          k:Show()
+                          k:SetAlpha(1)
+                      end
+                 end
+              end
+              ForceShow(contents)
+              
+              if contents.WidgetContainer then
+                   contents.WidgetContainer:Show()
+                   contents.WidgetContainer:SetAlpha(1)
+              end
+              
+              -- Try to trigger internal update
+              if wqTracker.Update then wqTracker:Update() end
+              end)
+              
+               if not status and addon.Log then
+                   addon:Log("WQ Reparent Error: %s", tostring(err))
+              end
+              
+              if blizzardWQHeight < 20 then blizzardWQHeight = 40 end
+              -- Calculate offset including the header we are about to make
+              wqYOffset = blizzardWQHeight + 35 
+         else
+              -- Restore if empty
+              if contents:GetParent() == wqFrame then
+                   pcall(function()
+                       contents:SetParent(wqTracker)
+                       contents:ClearAllPoints()
+                       contents:SetPoint("TOPLEFT", wqTracker, "TOPLEFT", 0, 0)
+                   end)
+              end
+         end
+    end
+
+    -- Render the Header container for World Quests (Either used by Hijacked frame or manual items)
+    if wqFrame and (wqYOffset > 0 or #worldQuestItems > 0) then
+        if not db.collapsedSections then db.collapsedSections = {} end
+        local collapsed = db.collapsedSections["World Quests"]
+        
+        -- Header
+        local header = self:GetOrCreateButton(wqFrame)
+        header:SetPoint("TOPLEFT", wqFrame, "TOPLEFT", 0, 0)
+        header:SetPoint("TOPRIGHT", wqFrame, "TOPRIGHT", 0, 0)
+        
+        header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
+        header.text:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
+        header.text:SetText("World Quests")
+        header.text:SetJustifyH("LEFT")
+        header.text:ClearAllPoints()
+        header.text:SetPoint("LEFT", 5, 0)
+        header.text:SetPoint("RIGHT", -25, 0)
+        
+        -- Expand Button
+        if not header.expandBtn then
+             header.expandBtn = CreateFrame("Button", nil, header)
+             header.expandBtn:SetSize(16, 16)
+        end
+        header.expandBtn:SetPoint("RIGHT", -8, 0)
+        header.expandBtn:Show()
+        
+        -- Expand/Collapse Logic
+        local function UpdateWQCollapseIcon()
+            local atlas = collapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
+            header.expandBtn:SetNormalAtlas(atlas)
+            header.expandBtn:SetPushedAtlas(atlas)
+        end
+        UpdateWQCollapseIcon()
+        
+        header.expandBtn:SetScript("OnClick", function()
+            db.collapsedSections["World Quests"] = not db.collapsedSections["World Quests"]
+            addon:RequestUpdate()
+        end)
+        
+        header.bg:SetColorTexture(0, 0, 0, 0.8) -- Darker background to be visible
+        
+        -- Cleanup header recycling
+        if header.poiButton then header.poiButton:Hide() end
+        if header.itemButton then header.itemButton:Hide() end
+        if header.distance then header.distance:Hide() end
+        if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+        if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
+        if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
+        if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+        if header.styledBackdrop then header.styledBackdrop:Hide() end
+
+        -- If Hijacked frame was found, we don't need to manually render items, 
+        -- BUT if hijacked frame was found and YOffset > 0, we just set the header. 
+        -- If we are collapsed, we need to hide the hijacked frame!
+        
+        if useBlizzardWQ and wqYOffset > 0 then
+             local contents = wqTracker.ContentsFrame
+             if collapsed then
+                  contents:Hide()
+                  wqYOffset = 24
+             else
+                  contents:Show()
+                  contents:SetAlpha(1)
+                  -- Re-confirm position in case it drifted
+                  contents:ClearAllPoints()
+                  contents:SetPoint("TOP", wqFrame, "TOP", 0, -28)
+                  
+                  -- Aggressively restore visibility of children (Blocks/Lines)
+                  local function RecursiveShow(f)
+                      f:Show()
+                      f:SetAlpha(1)
+                      if f.SetIgnoreParentAlpha then f:SetIgnoreParentAlpha(true) end
+                      local kids = {f:GetChildren()}
+                      for _, k in ipairs(kids) do
+                           if k.IsForbidden and not k:IsForbidden() then
+                               RecursiveShow(k)
+                           end
+                      end
+                  end
+                  RecursiveShow(contents)
+                  
+                  if contents.WidgetContainer then
+                       contents.WidgetContainer:Show()
+                       contents.WidgetContainer:SetAlpha(1)
+                  end
+             end
+        elseif #worldQuestItems > 0 and wqYOffset == 0 then
+             -- Fallback: Manual render if Blizzard frame didn't produce content but we found items?
+             -- Actually, if wqYOffset is 0, it means Blizzard frame yielded nothing.
+             -- So we render manual items.
+             wqYOffset = 24 + 5
+             
+             if not collapsed then
+                for _, item in ipairs(worldQuestItems) do
+                    local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
+                    wqYOffset = wqYOffset + height + db.spacingItemVertical
+                end
+            end
+        end
+    end
+    
+    if wqFrame then
+        if wqYOffset > 0 then
+            wqFrame:SetHeight(wqYOffset)
+            wqFrame:Show()
+            
+            -- Debug Force Show Children if Hijacked
+            if useBlizzardWQ and wqFrame:GetNumChildren() > 0 then
+                 local kids = {wqFrame:GetChildren()}
+                 for _, k in ipairs(kids) do
+                      if k.SetIgnoreParentAlpha then k:SetIgnoreParentAlpha(true) end
+                      k:SetAlpha(1)
+                      if not db.collapsedSections["World Quests"] then 
+                          k:Show() 
+                      end
+                 end
+            end
+        else
+            wqFrame:SetHeight(0.1) -- Minimal height to prevent layout gaps
+            wqFrame:Hide()
+        end
     end
 
     -- Update Scenario Frame Height & ScrollFrame Anchor
@@ -1267,8 +1665,11 @@ function addon:UpdateTrackerDisplay(trackables)
         self.scrollFrame:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -25)
     end
     
+    -- Bottom Anchor Logic: Stack Scroll -> Bonus -> WQ -> Bottom
     if bonusYOffset > 0 then
          self.scrollFrame:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+    elseif wqYOffset > 0 and wqFrame then
+         self.scrollFrame:SetPoint("BOTTOMRIGHT", wqFrame, "TOPRIGHT", 0, 0)
     else
          self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
     end
@@ -1285,16 +1686,27 @@ function addon:UpdateTrackerDisplay(trackables)
     -- 2. Render Normal Trackables (In ScrollFrame)
     --------------------------------------------------------------------------
     local yOffset = 5  -- Start near top of content frame
+    local currentMajorCollapsed = false
+    local currentMinorCollapsed = false
     
     -- Display trackables
     for _, item in ipairs(trackables) do
         if item.isHeader then
-            -- Zone/Category Header
-            local header = self:GetOrCreateButton(contentFrame) -- Use contentFrame
-            header:Show()
-            
-            -- Major headers (Category) vs Minor headers (Zone)
             local isMajor = item.headerType == "major"
+
+            -- Update collapse state
+            if isMajor then
+                currentMajorCollapsed = item.collapsed
+                currentMinorCollapsed = false -- Reset minor scope when entering new major section
+            else
+                currentMinorCollapsed = item.collapsed
+            end
+
+            -- Skip rendering minor headers if the major section is collapsed
+            if not (not isMajor and currentMajorCollapsed) then
+                -- Zone/Category Header
+                local header = self:GetOrCreateButton(contentFrame) -- Use contentFrame
+            header:Show()
             
             -- Padding/Indentation
             local xOffset = isMajor and db.spacingMajorHeaderIndent or db.spacingMinorHeaderIndent
@@ -1497,23 +1909,25 @@ function addon:UpdateTrackerDisplay(trackables)
             yOffset = yOffset + (isMajor and db.spacingMajorHeaderAfter or db.spacingMinorHeaderAfter)
             
             -- Cleanup extra elements if reused
-            if header.objectives then
-                for _, obj in ipairs(header.objectives) do obj:Hide() end
-            end
-            if header.progressBars then
-                for _, bar in ipairs(header.progressBars) do bar:Hide() end
-            end
+            if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+            if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
+            if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
+            if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
             if header.distance then header.distance:Hide() end
             
             -- Ensure POI buttons and Item buttons are hidden on headers
             if header.poiButton then header.poiButton:Hide() end
             if header.itemButton then header.itemButton:Hide() end
             if header.icon then header.icon:Hide() end
+            end -- End skip minor header check
 
         else
             -- Trackable item (quest, achievement, etc.)
-            local height = self:RenderTrackableItem(contentFrame, item, yOffset, db.spacingTrackableIndent)
-            yOffset = yOffset + height + db.spacingItemVertical
+            -- Only render if neither the major nor minor header is collapsed
+            if not currentMajorCollapsed and not currentMinorCollapsed then
+                local height = self:RenderTrackableItem(contentFrame, item, yOffset, db.spacingTrackableIndent)
+                yOffset = yOffset + height + db.spacingItemVertical
+            end
         end
     end
     
