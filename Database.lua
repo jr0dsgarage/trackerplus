@@ -53,13 +53,12 @@ local DEFAULTS = {
     showQuestLevel = true,
     showQuestType = true,
     showZoneHeaders = true,
-    showDistance = true,
     collapseCompleted = false,
     
     -- Grouping & Sorting
     groupByZone = true,
     groupByCategory = true,
-    sortMethod = "distance",  -- "distance", "level", "name", "manual"
+    sortMethod = "name",  -- "level", "name", "manual"
     
     -- State
     collapsedHeaders = {},
@@ -167,6 +166,14 @@ function addon:InitDatabase()
                 TrackerPlusDB.settings[key] = DeepCopy(value)
             end
         end
+
+        -- Migration: distance sort removed
+        if TrackerPlusDB.settings.sortMethod == "distance" then
+            TrackerPlusDB.settings.sortMethod = "name"
+        end
+
+        -- Migration: distance tracking removed
+        TrackerPlusDB.settings.showDistance = nil
         
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then

@@ -8,6 +8,45 @@ local updateTimer = 0
 local requestedUpdate = false
 local pendingUpdate = false
 
+-- Dirty section tracking + cached buckets (high-impact perf)
+local dirtySections = { full = true }
+local sectionCache = {
+    quests = {},
+    achievements = {},
+    scenarios = {},
+    autoQuests = {},
+    superTracked = {},
+    professions = {},
+    monthly = {},
+    endeavors = {},
+}
+
+local function MarkDirty(section)
+    if not section or section == "full" then
+        dirtySections.full = true
+    else
+        dirtySections[section] = true
+    end
+end
+
+local function ClearDirty()
+    for k in pairs(dirtySections) do
+        dirtySections[k] = nil
+    end
+end
+
+local function RefreshBucket(name, collector, owner)
+    local bucket = sectionCache[name]
+    wipe(bucket)
+    collector(owner, bucket)
+end
+
+local function AppendBucket(dest, source)
+    for i = 1, #source do
+        dest[#dest + 1] = source[i]
+    end
+end
+
 -- Print helper
 local function Print(...)
     print("|cff00ff00TrackerPlus:|r", ...)
@@ -178,7 +217,7 @@ end
 function addon:OnEvent(event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
         if self.RestorePosition then self.RestorePosition() end
-        self:RequestUpdate()
+        self:RequestUpdate("full")
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat
         if self:GetSetting("hideInCombat") then
@@ -196,8 +235,53 @@ function addon:OnEvent(event, ...)
             self:RequestUpdate()
         end
     else
-        -- All other events request an update
-        self:RequestUpdate()
+        -- Route events to minimal dirty sections
+        if event == "QUEST_ACCEPTED"
+            or event == "QUEST_REMOVED"
+            or event == "QUEST_WATCH_LIST_CHANGED"
+            or event == "QUEST_LOG_UPDATE"
+            or event == "QUEST_TURNED_IN"
+            or event == "UNIT_QUEST_LOG_CHANGED"
+            or event == "SUPER_TRACKING_CHANGED"
+            or event == "QUEST_AUTOCOMPLETE"
+            or event == "QUEST_WATCH_UPDATE"
+            or event == "WORLD_QUEST_COMPLETED_BY_SPELL"
+            or event == "QUEST_POI_UPDATE"
+            or event == "TASK_PROGRESS_UPDATE"
+            or event == "ZONE_CHANGED"
+            or event == "ZONE_CHANGED_INDOORS"
+            or event == "ZONE_CHANGED_NEW_AREA" then
+            self:RequestUpdate("quests")
+            self:RequestUpdate("autoQuests")
+            self:RequestUpdate("superTracked")
+            self:RequestUpdate("scenarios")
+        elseif event == "TRACKED_ACHIEVEMENT_LIST_CHANGED"
+            or event == "ACHIEVEMENT_EARNED"
+            or event == "CRITERIA_UPDATE" then
+            self:RequestUpdate("achievements")
+        elseif event == "SCENARIO_UPDATE"
+            or event == "SCENARIO_CRITERIA_UPDATE"
+            or event == "PLAYER_DIFFICULTY_CHANGED" then
+            self:RequestUpdate("scenarios")
+        elseif event == "SKILL_LINES_CHANGED"
+            or event == "TRADE_SKILL_SHOW"
+            or event == "TRADE_SKILL_LIST_UPDATE"
+            or event == "TRACKED_RECIPE_UPDATE" then
+            self:RequestUpdate("professions")
+        elseif event == "PERKS_PROGRAM_DATA_REFRESH" then
+            self:RequestUpdate("monthly")
+        elseif event == "INITIATIVE_TASKS_TRACKED_UPDATED"
+            or event == "INITIATIVE_TASKS_TRACKED_LIST_CHANGED"
+            or event == "NEIGHBORHOOD_INITIATIVE_TASKS_UPDATE"
+            or event == "NEIGHBORHOOD_INITIATIVE_TRACKING_UPDATE"
+            or event == "NEIGHBORHOOD_INITIATIVE_UPDATE" then
+            self:RequestUpdate("endeavors")
+        elseif event == "CONTENT_TRACKING_UPDATE" or event == "TRACKABLE_INFO_UPDATE" then
+            -- Broad content tracking changes can affect multiple sections.
+            self:RequestUpdate("full")
+        else
+            self:RequestUpdate("full")
+        end
     end
 end
 
@@ -218,7 +302,12 @@ function addon:OnUpdate(elapsed)
 end
 
 -- Request a tracker update (debounced)
-function addon:RequestUpdate()
+function addon:RequestUpdate(section)
+    if section then
+        MarkDirty(section)
+    elseif next(dirtySections) == nil then
+        MarkDirty("full")
+    end
     requestedUpdate = true
 end
 
@@ -241,7 +330,7 @@ function addon:UpdateTracker()
         return
     end
     
-    -- Collect all trackables
+    -- Collect all trackables (dirty-section aware)
     local trackables = self:CollectTrackables()
     
     -- Update the tracker frame with collected data
@@ -267,47 +356,80 @@ end
 
 -- Collect all trackables (quests, achievements, etc.)
 function addon:CollectTrackables()
+    local full = dirtySections.full
     local trackables = {}
     local db = self.db
-    
-    -- Quests
-    if db.showQuests then
-        self:CollectQuests(trackables)
-    end
-    
-    -- Achievements
-    if db.showAchievements then
-        self:CollectAchievements(trackables)
-    end
-    
-    -- Scenarios/Dungeons
-    if db.showScenarios or db.showDungeonObjectives then
-        self:CollectScenarioObjectives(trackables)
+
+    if full or dirtySections.quests then
+        if db.showQuests then
+            RefreshBucket("quests", addon.CollectQuests, self)
+        else
+            wipe(sectionCache.quests)
+        end
     end
 
-    -- Auto Quests (Popups)
-    self:CollectAutoQuests(trackables)
-
-    -- Super Tracked (Pinned)
-    self:CollectSuperTrackedQuest(trackables)
-    
-    -- Professions
-    if db.showProfessions then
-        self:CollectProfessionTracking(trackables)
+    if full or dirtySections.achievements then
+        if db.showAchievements then
+            RefreshBucket("achievements", addon.CollectAchievements, self)
+        else
+            wipe(sectionCache.achievements)
+        end
     end
 
-    -- Monthly Activities (Traveler's Log)
-    if db.showMonthlyActivities then
-        self:CollectMonthlyActivities(trackables)
+    if full or dirtySections.scenarios then
+        if db.showScenarios or db.showDungeonObjectives then
+            RefreshBucket("scenarios", addon.CollectScenarioObjectives, self)
+        else
+            wipe(sectionCache.scenarios)
+        end
     end
-    
-    -- Endeavors (Housing)
-    if db.showEndeavors then
-        self:CollectEndeavors(trackables)
+
+    if full or dirtySections.autoQuests then
+        RefreshBucket("autoQuests", addon.CollectAutoQuests, self)
     end
+
+    if full or dirtySections.superTracked then
+        RefreshBucket("superTracked", addon.CollectSuperTrackedQuest, self)
+    end
+
+    if full or dirtySections.professions then
+        if db.showProfessions then
+            RefreshBucket("professions", addon.CollectProfessionTracking, self)
+        else
+            wipe(sectionCache.professions)
+        end
+    end
+
+    if full or dirtySections.monthly then
+        if db.showMonthlyActivities then
+            RefreshBucket("monthly", addon.CollectMonthlyActivities, self)
+        else
+            wipe(sectionCache.monthly)
+        end
+    end
+
+    if full or dirtySections.endeavors then
+        if db.showEndeavors then
+            RefreshBucket("endeavors", addon.CollectEndeavors, self)
+        else
+            wipe(sectionCache.endeavors)
+        end
+    end
+
+    AppendBucket(trackables, sectionCache.quests)
+    AppendBucket(trackables, sectionCache.achievements)
+    AppendBucket(trackables, sectionCache.scenarios)
+    AppendBucket(trackables, sectionCache.autoQuests)
+    AppendBucket(trackables, sectionCache.superTracked)
+    AppendBucket(trackables, sectionCache.professions)
+    AppendBucket(trackables, sectionCache.monthly)
+    AppendBucket(trackables, sectionCache.endeavors)
     
     -- Sort trackables
     self:SortTrackables(trackables)
+
+    -- Done applying this dirty batch
+    ClearDirty()
     
     return trackables
 end
@@ -343,7 +465,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         isFailed = info.isFailed,
         isWorldQuest = C_QuestLog.IsWorldQuest(questID),
         zone = zoneOverride or GetRealZoneText() or "Unknown Zone",
-        distance = self:GetQuestDistance(questID),
         objectives = {},
         color = self:GetQuestColor(info),
     }
@@ -677,19 +798,6 @@ function addon:CollectMonthlyActivities(trackables)
     end
 end
 
--- Get quest distance
-function addon:GetQuestDistance(questID)
-    -- Get distance to quest objective if available
-    local distanceSq, onContinent = C_QuestLog.GetDistanceSqToQuest(questID)
-    
-    if distanceSq and onContinent then
-        local distance = math.sqrt(distanceSq)
-        return distance
-    end
-    
-    return 999999  -- Very far or unknown
-end
-
 -- Get quest type name
 function addon:GetQuestTypeName(questID)
     local questInfo = C_QuestLog.GetQuestTagInfo(questID)
@@ -811,9 +919,7 @@ function addon:SortTrackables(trackables)
             return prioA < prioB
         end
     
-        if sortMethod == "distance" then
-            return (a.distance or 999999) < (b.distance or 999999)
-        elseif sortMethod == "level" then
+        if sortMethod == "level" then
             return (a.level or 0) > (b.level or 0)
         elseif sortMethod == "name" then
             return (a.title or "") < (b.title or "")
@@ -835,7 +941,6 @@ function addon:CollectSuperTrackedQuest(trackables)
 
     local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
     if questInfo then
-         questInfo.distance = 0
          table.insert(trackables, questInfo)
     end
 end

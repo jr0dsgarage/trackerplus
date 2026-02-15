@@ -233,12 +233,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         local currentY = -(textHeight + 2)
         
         for objIndex, obj in ipairs(item.objectives) do
-            -- DEBUG: Log objective processing for bonus/tasks
-            if addon.Log and (item.type == "bonus" or item.type == "quest" or item.type == "supertrack") then
-                 addon:Log("Rendering Obj [%d] for '%s': Text='%s', Type='%s', Finished=%s, NumFul=%s, NumReq=%s", 
-                     objIndex, item.title, tostring(obj.text), tostring(obj.type), tostring(obj.finished), tostring(obj.numFulfilled), tostring(obj.numRequired))
-            end
-
             local prefixText = ""
             local bodyText = ""
             local isProgressBar = false
@@ -246,25 +240,65 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             local progressMax = 100
             
             -- Determine if this should be a progress bar
-            -- Only use progress bars if explicitly set or if the text contains a percentage
-            if obj.type == "progressbar" or (obj.text and string.find(obj.text, "%%")) then
+            -- Only use progress bars if explicitly set or if text/quantity includes a percentage
+            if obj.type == "progressbar"
+                or (obj.text and string.find(obj.text, "%%"))
+                or (obj.quantityString and string.find(obj.quantityString, "%%")) then
                  isProgressBar = true
-                 
-                 -- Try to extract percent from text first (most accurate for raw percent bars)
-                 local val = string.match(obj.text or "", "(%d+)%%")
-                 
-                 if val then
-                     progressValue = tonumber(val)
-                     progressMax = 100
-                 elseif obj.numFulfilled and obj.numRequired and obj.numRequired > 0 then
-                     -- Calculate percent from raw numbers
-                     progressValue = obj.numFulfilled
-                     progressMax = obj.numRequired
-                 elseif obj.type == "progressbar" then
-                      val = obj.numFulfilled 
-                      progressValue = tonumber(val) or 0
-                      progressMax = 100
+
+                 -- Prefer exact numeric objective values over parsed percentages.
+                 local required = tonumber(obj.numRequired)
+                 local fulfilled = tonumber(obj.numFulfilled)
+
+                 if required and required > 0 then
+                     progressValue = fulfilled or 0
+                     progressMax = required
+                 else
+                     -- Try ratio patterns first (more exact than percent-only)
+                     local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
+                     if not ratioFulfilled then
+                         ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
+                     end
+
+                     if ratioFulfilled and ratioRequired then
+                         progressValue = tonumber(ratioFulfilled) or 0
+                         progressMax = tonumber(ratioRequired) or 100
+                     else
+                         -- Fallback to percent parsing
+                         local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
+                         if not percentMatch then
+                             percentMatch = string.match(obj.text or "", "(%d+)%%")
+                         end
+
+                         if percentMatch then
+                             progressValue = tonumber(percentMatch) or 0
+                             progressMax = 100
+                         elseif obj.type == "progressbar" then
+                             progressValue = fulfilled or 0
+                             progressMax = 100
+                         end
+                     end
                  end
+
+                 -- For generic "Progress" bars, sync to a concrete sibling objective (e.g. 7/10)
+                 -- so the bar always matches the displayed tracked value.
+                 if obj.type == "progressbar" and (obj.text == "Progress" or obj.text == nil) and item.objectives then
+                     for _, sibling in ipairs(item.objectives) do
+                         if sibling ~= obj then
+                             local sReq = tonumber(sibling.numRequired)
+                             if sReq and sReq > 0 then
+                                 local sFul = tonumber(sibling.numFulfilled) or 0
+                                 progressValue = sFul
+                                 progressMax = sReq
+                                 break
+                             end
+                         end
+                     end
+                 end
+
+                 if progressMax <= 0 then progressMax = 100 end
+                 if progressValue < 0 then progressValue = 0 end
+                 if progressValue > progressMax then progressValue = progressMax end
 
                  -- Text Cleanup
                  local cleanText = obj.text or ""
@@ -381,7 +415,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     if pcallStatus and newBar then
                          bar = newBar
                          bar.isTemplate = true
-                         if addon.Log then addon:Log("Created Bar Template. Has .Bar? %s", tostring(bar.Bar ~= nil)) end
                     else
                          -- Fallback to manual creation
                          bar = CreateFrame("StatusBar", nil, button)
@@ -433,6 +466,9 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     percent = math.floor((progressValue / progressMax) * 100)
                 end
                 local dispText = percent .. "%"
+                if progressMax > 0 and progressMax ~= 100 then
+                    dispText = string.format("%d/%d (%d%%)", math.floor(progressValue), math.floor(progressMax), percent)
+                end
 
                 if bar.isTemplate and bar.Bar then
                     bar.Bar:SetMinMaxValues(0, progressMax)
@@ -445,8 +481,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     bar:SetValue(progressValue)
                     bar:SetStatusBarColor(0, 0.5, 1, 1)
                     if bar.value then bar.value:SetText(dispText) end
-                else
-                    if addon.Log then addon:Log("Error: Invalid Bar Object - No .Bar and no SetMinMaxValues") end
                 end
                 
                 bar:Show()
@@ -460,16 +494,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         end
     end
     
-    if db.showDistance and item.distance and item.distance < 999999 then
-        if not button.distance then button.distance = button:CreateFontString(nil, "OVERLAY") end
-        button.distance:SetPoint("TOPRIGHT", button, "TOPRIGHT", -5, -2)
-        button.distance:SetFont(db.fontFace, db.fontSize - 2, db.fontOutline)
-        button.distance:SetTextColor(0.7, 0.7, 0.7, 1)
-        button.distance:SetText(string.format("%.0f yds", item.distance))
-        button.distance:Show()
-    else
-        if button.distance then button.distance:Hide() end
-    end
+    if button.distance then button.distance:Hide() end
     
     button:SetHeight(height)
     button:Show()
@@ -498,8 +523,6 @@ function addon:UpdateTrackerDisplay(trackables)
         return
     end
     
-    if addon.Log then addon:Log("UpdateTrackerDisplay: Need to render %d items", #trackables) end
-
     self:ResetButtonPool()
     
     local db = self.db
@@ -527,8 +550,6 @@ function addon:UpdateTrackerDisplay(trackables)
             table.insert(remainingTrackables, item)
         end
     end
-    
-    if addon.Log then addon:Log("Scenarios: %d | Bonus: %d | WQ: %d | Remaining: %d", #scenarios, #bonusObjectives, #worldQuestItems, #remainingTrackables) end
     
     self.currentScenarios = scenarios
     trackables = remainingTrackables
@@ -687,31 +708,28 @@ function addon:UpdateTrackerDisplay(trackables)
     if self.widgetFrame then  -- Safety Check
         if widgetContainer then
              -- Use pcall to prevent taint/secure errors from crashing execution
-             local status, err = pcall(function()
+             pcall(function()
                 -- Reparent to our dedicated frame
                 if widgetContainer:GetParent() ~= self.widgetFrame then
                     widgetContainer:SetParent(self.widgetFrame)
                     widgetContainer:SetFrameStrata("HIGH")
+                    self._widgetContainerAnchored = false
                 end
-                
-                -- Force re-anchoring
-                widgetContainer:ClearAllPoints()
-                widgetContainer:SetPoint("TOP", self.widgetFrame, "TOP", 0, -5)
+
+                if not self._widgetContainerAnchored then
+                    widgetContainer:ClearAllPoints()
+                    widgetContainer:SetPoint("TOP", self.widgetFrame, "TOP", 0, -5)
+                    self._widgetContainerAnchored = true
+                end
                 
                 widgetContainer:Show()
              end)
-             
-             if not status and addon.Log then
-                  addon:Log("Widget Reparent Error: %s", tostring(err))
-             end
             
             -- Calculate height
             widgetHeight = widgetContainer:GetHeight() or 0
             
             -- Ignore negligible height (often ghost frames)
             if widgetHeight < 2 then widgetHeight = 0 end
-
-            if addon.Log then addon:Log("Widget Layout: H=%s", widgetHeight) end
         end
         
         -- Exact height if content exists, otherwise 1px
@@ -723,12 +741,16 @@ function addon:UpdateTrackerDisplay(trackables)
              local aqVisible = (self.autoQuestFrame:GetHeight() > 10)
              -- Use 0 padding if not visible, standard -5 if visible
              local padding = aqVisible and -5 or 0
-             self.widgetFrame:ClearAllPoints()
-             self.widgetFrame:SetPoint("TOPLEFT", self.autoQuestFrame, "BOTTOMLEFT", 0, padding)
-             self.widgetFrame:SetPoint("TOPRIGHT", self.autoQuestFrame, "BOTTOMRIGHT", 0, padding)
+               if self._widgetFramePadding ~= padding then
+                  self.widgetFrame:ClearAllPoints()
+                  self.widgetFrame:SetPoint("TOPLEFT", self.autoQuestFrame, "BOTTOMLEFT", 0, padding)
+                  self.widgetFrame:SetPoint("TOPRIGHT", self.autoQuestFrame, "BOTTOMRIGHT", 0, padding)
+                  self._widgetFramePadding = padding
+               end
         end
-    else
-         if addon.Log then addon:Log("CRITICAL: self.widgetFrame is missing in UpdateTrackerDisplay") end
+        else
+            self._widgetContainerAnchored = false
+            self._widgetFramePadding = nil
     end
     
     -- Dynamic Anchoring for Scenario Frame
@@ -756,11 +778,6 @@ function addon:UpdateTrackerDisplay(trackables)
          -- We are using Blizzard's frame, so we hijack it.
          local contents = scenarioTracker.ContentsFrame
          
-         -- DEBUG: Print status
-         if addon.Log then addon:Log("Blizzard Scenario Frame Found. Parent: %s | Height: %s | Visible: %s", 
-             tostring(contents:GetParent():GetName()), tostring(contents:GetHeight()), tostring(contents:IsVisible())) 
-         end
-         
          -- Parent it to our frame
          if contents:GetParent() ~= self.scenarioFrame then
               contents:SetParent(self.scenarioFrame)
@@ -782,36 +799,30 @@ function addon:UpdateTrackerDisplay(trackables)
               self.scenarioFrame.bgMask:Show()
          else
               if self.scenarioFrame.bgMask then
-                   self.scenarioFrame.bgMask:ClearAllPoints()
-                   self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
-                   self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-                   self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -10)
                    self.scenarioFrame.bgMask:Show()
               end
          end
-         
-         -- Clear points and set to top-center of our container
-         contents:ClearAllPoints()
-         contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -5)
-         -- Constrain width so it fits our frame (and forces word wrap if supported)
-         contents:SetWidth(self.db.frameWidth - 5)
+
+            local scenarioWidth = self.db.frameWidth - 5
+            if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
+                contents:ClearAllPoints()
+                contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -5)
+                -- Constrain width so it fits our frame (and forces word wrap if supported)
+                contents:SetWidth(scenarioWidth)
+                self._scenarioContentsAnchored = true
+                self._scenarioContentsWidth = scenarioWidth
+            end
          
          contents:Show()
          
          -- Attempt to find internal WidgetContainer and force show it
          if contents.WidgetContainer then
              contents.WidgetContainer:Show()
-             if addon.Log then addon:Log("WidgetContainer: Vis=%s | Height=%s", 
-                 tostring(contents.WidgetContainer:IsVisible()), tostring(contents.WidgetContainer:GetHeight())) 
-             end
          end
          
          -- Try to force update safely
          if scenarioTracker.Update then
-             local status, err = pcall(function() scenarioTracker:Update() end)
-             if not status and addon.Log then
-                 addon:Log("Blizzard Update Failed: %s", tostring(err))
-             end
+                pcall(function() scenarioTracker:Update() end)
          end
 
          -- The height of the blizzard frame varies. We need to update our container to match it.
@@ -826,9 +837,12 @@ function addon:UpdateTrackerDisplay(trackables)
          scenarioHeight = blizzardHeight
          scenarioYOffset = scenarioHeight + 30 -- Increase padding to prevent overlap with headers
          
-         if addon.Log then addon:Log("Scenario Final Layout: Height=%s | YOffset=%s", scenarioHeight, scenarioYOffset) end
-         
-    elseif self.currentScenarios and #self.currentScenarios > 0 then
+    else
+        self._scenarioContentsAnchored = false
+        self._scenarioContentsWidth = nil
+    end
+
+    if (not useBlizzardScenario) and self.currentScenarios and #self.currentScenarios > 0 then
         -- Manual rendering fallback
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
@@ -1244,35 +1258,6 @@ function addon:UpdateTrackerDisplay(trackables)
     local bonusTracker = BonusObjectiveTracker
     local useBlizzardBonus = (bonusTracker and bonusTracker.ContentsFrame)
     
-    if addon.Log then
-         addon:Log("Checking BonusTracker: Exists=%s | ContentsFrame=%s", 
-             tostring(bonusTracker ~= nil), 
-             tostring(bonusTracker and bonusTracker.ContentsFrame ~= nil))
-         
-         if bonusTracker and bonusTracker.ContentsFrame then
-             local c = bonusTracker.ContentsFrame
-             addon:Log("--- BONUS TRACKER DEBUG DETAILS ---")
-             addon:Log("Frame: %s | Parent: %s", tostring(c), c:GetParent() and c:GetParent():GetName() or "nil")
-             addon:Log("State: Shown=%s | Visible=%s | Alpha=%s", tostring(c:IsShown()), tostring(c:IsVisible()), tostring(c:GetAlpha()))
-             local l, t, w, h = c:GetLeft(), c:GetTop(), c:GetWidth(), c:GetHeight()
-             addon:Log("Geometry: Left=%s | Top=%s | Size=%sx%s", tostring(l), tostring(t), tostring(w), tostring(h))
-             
-             local numKids = c:GetNumChildren()
-             addon:Log("Children Count: %d", numKids)
-             local kids = {c:GetChildren()}
-             local visibleKids = 0
-             for i, k in ipairs(kids) do
-                  if k:IsShown() and k:GetHeight() > 1 then visibleKids = visibleKids + 1 end
-                  if i <= 5 then -- Log first 5 children only to avoid spam
-                       addon:Log("  Child %d: %s | Shown=%s | Size=%sx%s | Type=%s", 
-                           i, tostring(k), tostring(k:IsShown()), k:GetWidth(), k:GetHeight(), k:GetObjectType())
-                  end
-             end
-             addon:Log("Visible Children (Found): %d", visibleKids)
-             addon:Log("--- END BONUS DEBUG ---")
-         end
-    end
-    
     if useBlizzardBonus then
          local contents = bonusTracker.ContentsFrame
          local blizzardBonusHeight = contents:GetHeight() or 0
@@ -1293,23 +1278,26 @@ function addon:UpdateTrackerDisplay(trackables)
              end
          end
          
-         if addon.Log then 
-              addon:Log("BonusObjectiveTracker Decision: HasContent=%s (Height=%s)", tostring(hasContent), tostring(blizzardBonusHeight))
-         end
-         
          if hasContent then
               -- Reparent to our bonusFrame
-              local status, err = pcall(function()
+                pcall(function()
                   if contents:GetParent() ~= self.bonusFrame then
                        contents:SetParent(self.bonusFrame)
                        contents:SetFrameStrata("HIGH")
                        contents:SetFrameLevel(100)
+                       self._bonusContentsAnchored = false
+                       self._bonusContentsWidth = nil
                   end
-                  
-                  contents:ClearAllPoints()
-                   contents:ClearAllPoints()
-                   contents:SetPoint("TOP", self.bonusFrame, "TOP", 0, -5)
-                   contents:SetWidth(self.db.frameWidth - 10)
+
+                    local bonusWidth = self.db.frameWidth - 10
+                    if not self._bonusContentsAnchored or self._bonusContentsWidth ~= bonusWidth then
+                        contents:ClearAllPoints()
+                        contents:SetPoint("TOP", self.bonusFrame, "TOP", 0, -5)
+                        contents:SetWidth(bonusWidth)
+                        self._bonusContentsAnchored = true
+                        self._bonusContentsWidth = bonusWidth
+                    end
+
                    contents:Show()
                    contents:SetAlpha(1) -- Force visibility even if parent OTF is Alpha 0
                    
@@ -1326,17 +1314,12 @@ function addon:UpdateTrackerDisplay(trackables)
                    end
               end)
               
-              if not status and addon.Log then
-                   addon:Log("BonusObjectiveTracker Reparent Error: %s", tostring(err))
-              end
-              
               -- Recalculate height after reparenting (layout may have changed)
               blizzardBonusHeight = contents:GetHeight() or 0
               if blizzardBonusHeight < 20 then blizzardBonusHeight = 60 end -- Minimum if we know there's content
               
               bonusYOffset = blizzardBonusHeight + 10
               
-              if addon.Log then addon:Log("Bonus Blizzard Frame: Final H=%s", blizzardBonusHeight) end
          else
               -- No bonus content - restore to its original parent if we stole it
               if contents:GetParent() == self.bonusFrame then
@@ -1346,8 +1329,15 @@ function addon:UpdateTrackerDisplay(trackables)
                        contents:SetPoint("TOPLEFT", bonusTracker, "TOPLEFT", 0, 0)
                    end)
               end
+                self._bonusContentsAnchored = false
+                self._bonusContentsWidth = nil
          end
     end
+
+        if not useBlizzardBonus then
+            self._bonusContentsAnchored = false
+            self._bonusContentsWidth = nil
+        end
     
     -- Fallback: Manually render bonus items if we collected any and Blizzard frame isn't available
     if bonusYOffset == 0 and db.showBonusObjectives and #bonusObjectives > 0 then
@@ -1421,14 +1411,18 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Update Bonus Frame Height
     if bonusYOffset > 0 then
         self.bonusFrame:SetHeight(bonusYOffset)
-        self.bonusFrame:Show()
+        if addon.db.minimized then
+             self.bonusFrame:Hide()
+        else
+             self.bonusFrame:Show()
         
-        -- DEBUG: If logic says we are showing it, but it's invisible, force visibility on children
-        if useBlizzardBonus and self.bonusFrame:GetNumChildren() > 0 then
-             local kids = {self.bonusFrame:GetChildren()}
-             for _, kid in ipairs(kids) do
-                  kid:Show()
-                  kid:SetAlpha(1)
+             -- DEBUG: If logic says we are showing it, but it's invisible, force visibility on children
+             if useBlizzardBonus and self.bonusFrame:GetNumChildren() > 0 then
+                  local kids = {self.bonusFrame:GetChildren()}
+                  for _, kid in ipairs(kids) do
+                       kid:Show()
+                       kid:SetAlpha(1)
+                  end
              end
         end
     else
@@ -1443,13 +1437,6 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Hijacking Strategy for World Quests
     local wqTracker = WorldQuestObjectiveTracker
     local useBlizzardWQ = (wqTracker and wqTracker.ContentsFrame)
-    
-    if addon.Log and useBlizzardWQ then
-         local contents = wqTracker.ContentsFrame
-         addon:Log("Checking WQTracker: Parent=%s | Shown=%s | Height=%s", 
-             tostring(contents:GetParent() and contents:GetParent():GetName()), 
-             tostring(contents:IsShown()), tostring(contents:GetHeight()))
-    end
     
     if useBlizzardWQ then
          local contents = wqTracker.ContentsFrame
@@ -1476,45 +1463,37 @@ function addon:UpdateTrackerDisplay(trackables)
          
          if hasContent then
               -- Hijack it!
-              local status, err = pcall(function()
+                pcall(function()
                   if contents:GetParent() ~= wqFrame then
-                   contents:SetParent(wqFrame)
-                   contents:SetFrameStrata("HIGH")
-                   contents:SetFrameLevel(100)
-              end
-                  
-              contents:ClearAllPoints()
-              -- Position it BELOW the header (which we will create manually below at y=0)
-              contents:SetPoint("TOP", wqFrame, "TOP", 0, -28) 
-              contents:SetWidth(self.db.frameWidth - 10)
+                       contents:SetParent(wqFrame)
+                       contents:SetFrameStrata("HIGH")
+                       contents:SetFrameLevel(100)
+                       self._wqContentsAnchored = false
+                       self._wqContentsWidth = nil
+                   end
+
+                   local wqWidth = self.db.frameWidth - 10
+                   if not self._wqContentsAnchored or self._wqContentsWidth ~= wqWidth then
+                      contents:ClearAllPoints()
+                      -- Position it BELOW the header (which we will create manually below at y=0)
+                      contents:SetPoint("TOP", wqFrame, "TOP", 0, -28)
+                      contents:SetWidth(wqWidth)
+                      self._wqContentsAnchored = true
+                      self._wqContentsWidth = wqWidth
+                   end
+
+                   contents:Show()
+                   contents:SetAlpha(1)
+                   if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
               
-              -- Force recursive visibility on Hijacked content
-              local function ForceShow(f)
-                 f:Show()
-                 f:SetAlpha(1)
-                 if f.SetIgnoreParentAlpha then f:SetIgnoreParentAlpha(true) end
-                 local kids = {f:GetChildren()}
-                 for _, k in ipairs(kids) do
-                      if k.IsForbidden and not k:IsForbidden() then
-                          k:Show()
-                          k:SetAlpha(1)
-                      end
-                 end
-              end
-              ForceShow(contents)
+                   if contents.WidgetContainer then
+                       contents.WidgetContainer:Show()
+                       contents.WidgetContainer:SetAlpha(1)
+                   end
               
-              if contents.WidgetContainer then
-                   contents.WidgetContainer:Show()
-                   contents.WidgetContainer:SetAlpha(1)
-              end
-              
-              -- Try to trigger internal update
-              if wqTracker.Update then wqTracker:Update() end
+                   -- Try to trigger internal update
+                   if wqTracker.Update then wqTracker:Update() end
               end)
-              
-               if not status and addon.Log then
-                   addon:Log("WQ Reparent Error: %s", tostring(err))
-              end
               
               if blizzardWQHeight < 20 then blizzardWQHeight = 40 end
               -- Calculate offset including the header we are about to make
@@ -1528,8 +1507,15 @@ function addon:UpdateTrackerDisplay(trackables)
                        contents:SetPoint("TOPLEFT", wqTracker, "TOPLEFT", 0, 0)
                    end)
               end
+                self._wqContentsAnchored = false
+                self._wqContentsWidth = nil
          end
     end
+
+        if not useBlizzardWQ then
+            self._wqContentsAnchored = false
+            self._wqContentsWidth = nil
+        end
 
     -- Render the Header container for World Quests (Either used by Hijacked frame or manual items)
     if wqFrame and (wqYOffset > 0 or #worldQuestItems > 0) then
@@ -1594,23 +1580,7 @@ function addon:UpdateTrackerDisplay(trackables)
              else
                   contents:Show()
                   contents:SetAlpha(1)
-                  -- Re-confirm position in case it drifted
-                  contents:ClearAllPoints()
-                  contents:SetPoint("TOP", wqFrame, "TOP", 0, -28)
-                  
-                  -- Aggressively restore visibility of children (Blocks/Lines)
-                  local function RecursiveShow(f)
-                      f:Show()
-                      f:SetAlpha(1)
-                      if f.SetIgnoreParentAlpha then f:SetIgnoreParentAlpha(true) end
-                      local kids = {f:GetChildren()}
-                      for _, k in ipairs(kids) do
-                           if k.IsForbidden and not k:IsForbidden() then
-                               RecursiveShow(k)
-                           end
-                      end
-                  end
-                  RecursiveShow(contents)
+                   if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
                   
                   if contents.WidgetContainer then
                        contents.WidgetContainer:Show()
@@ -1635,18 +1605,10 @@ function addon:UpdateTrackerDisplay(trackables)
     if wqFrame then
         if wqYOffset > 0 then
             wqFrame:SetHeight(wqYOffset)
-            wqFrame:Show()
-            
-            -- Debug Force Show Children if Hijacked
-            if useBlizzardWQ and wqFrame:GetNumChildren() > 0 then
-                 local kids = {wqFrame:GetChildren()}
-                 for _, k in ipairs(kids) do
-                      if k.SetIgnoreParentAlpha then k:SetIgnoreParentAlpha(true) end
-                      k:SetAlpha(1)
-                      if not db.collapsedSections["World Quests"] then 
-                          k:Show() 
-                      end
-                 end
+            if addon.db.minimized then
+                 wqFrame:Hide()
+            else
+                 wqFrame:Show()
             end
         else
             wqFrame:SetHeight(0.1) -- Minimal height to prevent layout gaps
@@ -1658,7 +1620,11 @@ function addon:UpdateTrackerDisplay(trackables)
     self.scrollFrame:ClearAllPoints()
     if scenarioYOffset > 0 then
         self.scenarioFrame:SetHeight(scenarioYOffset)
-        self.scenarioFrame:Show()
+        if addon.db.minimized then
+            self.scenarioFrame:Hide()
+        else
+            self.scenarioFrame:Show()
+        end
         self.scrollFrame:SetPoint("TOPLEFT", self.scenarioFrame, "BOTTOMLEFT", 0, 0)
     else
         self.scenarioFrame:Hide()
@@ -1672,14 +1638,6 @@ function addon:UpdateTrackerDisplay(trackables)
          self.scrollFrame:SetPoint("BOTTOMRIGHT", wqFrame, "TOPRIGHT", 0, 0)
     else
          self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
-    end
-
-    if addon.Log then 
-        addon:Log("ScenarioFrame Height: %d | YOffset: %d", scenarioYOffset, scenarioYOffset)
-        addon:Log("Geometry: TF Vis=%s H=%s | SF Vis=%s H=%s",
-            tostring(self.trackerFrame:IsVisible()), tostring(self.trackerFrame:GetHeight()),
-            tostring(self.scrollFrame:IsVisible()), tostring(self.scrollFrame:GetHeight())
-        )
     end
 
     --------------------------------------------------------------------------
@@ -1933,7 +1891,6 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Update content frame height
     contentFrame:SetHeight(math.max(yOffset, self.db.frameHeight))
-    if addon.Log then addon:Log("ContentFrame Final Height: %d | Buttons Used: %d", contentFrame:GetHeight(), activeButtons) end
     
     -- Update tracker frame appearance
     self:UpdateTrackerAppearance()
