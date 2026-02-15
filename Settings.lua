@@ -609,7 +609,6 @@ local function InitUI()
     
     s, sy = StartSection(p4, "Display Options", y)
     sy = CreateCheckbox(s, "Show Quest Level", "showQuestLevel", "Show the level of the quest", sy)
-    sy = CreateCheckbox(s, "Show Quest Type", "showQuestType", "Show type (Daily, Elite, etc.)", sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
     sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)
     y = y - EndSection(s, sy)

@@ -51,7 +51,6 @@ local DEFAULTS = {
     
     -- Display Options
     showQuestLevel = true,
-    showQuestType = true,
     showZoneHeaders = true,
     collapseCompleted = false,
     
@@ -174,6 +173,9 @@ function addon:InitDatabase()
 
         -- Migration: distance tracking removed
         TrackerPlusDB.settings.showDistance = nil
+
+        -- Migration: quest type toggle removed
+        TrackerPlusDB.settings.showQuestType = nil
         
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then
