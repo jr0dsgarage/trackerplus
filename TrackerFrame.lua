@@ -251,6 +251,9 @@ function addon:CreateTrackerFrame()
 
     local function UpdateMinMaxState()
         -- Ensure we work with screen coordinates to maintain position relative to TOP-RIGHT
+        
+        -- Determine side based on headerIconPosition or default to Right
+        local isLeft = (addon.db.headerIconPosition == "left")
 
         if addon.db.minimized then
             -- Minimized State: Only Maximize button visible
@@ -266,11 +269,17 @@ function addon:CreateTrackerFrame()
                       addon.db.savedPoint = {point = point, relativePoint = relativePoint, x = x, y = y}
                  end
 
-                 -- RE-ANCHOR to keep the Top-Right corner in place visually
-                 local right = trackerFrame:GetRight()
+                 -- RE-ANCHOR to keep the Corner in place visually
                  local top = trackerFrame:GetTop()
-                 if right and top then
-                      trackerFrame:ClearAllPoints()
+                 local left = trackerFrame:GetLeft()
+                 local right = trackerFrame:GetRight()
+                 
+                 trackerFrame:ClearAllPoints()
+
+                 if isLeft and left and top then
+                      -- Use TOPLEFT anchor relative to screen coordinates
+                      trackerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+                 elseif right and top then
                       -- Use TOPRIGHT anchor relative to screen coordinates
                       trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
                  end
@@ -331,9 +340,13 @@ function addon:CreateTrackerFrame()
             if self.bonusFrame and self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
             if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
-            -- Reset button position
+            -- Reset button position based on side
             trackerFrame.minMaxBtn:ClearAllPoints()
-            trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
+            if isLeft then
+                trackerFrame.minMaxBtn:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 5, 0)
+            else
+                trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
+            end
             
             addon:RequestUpdate()
             
@@ -351,6 +364,11 @@ function addon:CreateTrackerFrame()
         UpdateMinMaxState()
     end)
     
+    -- Update tracker frame button state on demand
+    function addon:UpdateMinMaxState()
+        UpdateMinMaxState()
+    end
+
     -- Initialize state
     UpdateMinMaxState()
     

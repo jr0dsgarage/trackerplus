@@ -44,7 +44,10 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             addon:UpdateTrackerLock()
         elseif dbKey == "borderEnabled" then
             addon:UpdateTrackerAppearance()
-        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "headerIconPosition" then
+        elseif dbKey == "headerIconPosition" then
+             if addon.UpdateMinMaxState then addon:UpdateMinMaxState() end
+             addon:RefreshDisplay()
+        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") then
             addon:RefreshDisplay()
         elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
             addon:RequestUpdate()
