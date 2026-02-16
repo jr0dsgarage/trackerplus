@@ -291,6 +291,17 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                                  progressValue = sFul
                                  progressMax = sReq
                                  break
+                             else
+                                 -- Fallback: parse ratio directly from sibling text/quantity string
+                                 local ratioFulfilled, ratioRequired = string.match(sibling.quantityString or "", "(%d+)%s*/%s*(%d+)")
+                                 if not ratioFulfilled then
+                                     ratioFulfilled, ratioRequired = string.match(sibling.text or "", "(%d+)%s*/%s*(%d+)")
+                                 end
+                                 if ratioFulfilled and ratioRequired then
+                                     progressValue = tonumber(ratioFulfilled) or 0
+                                     progressMax = tonumber(ratioRequired) or 100
+                                     break
+                                 end
                              end
                          end
                      end
@@ -328,6 +339,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 else
                     bodyText = (obj.text or "")
                 end
+            end
+
+            -- If this objective is prefix-only (e.g. "215/250"), keep one visual line
+            -- so height calculations include it and it won't overlap the next header.
+            if prefixText ~= "" and (not bodyText or bodyText == "") then
+                bodyText = " "
             end
             
             -- Prepare Bullet
@@ -396,6 +413,10 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             objLine:Show()
             
             local lineH = objLine:GetStringHeight()
+            local minLineH = math.max(1, db.fontSize - 1)
+            if lineH < minLineH then
+                lineH = minLineH
+            end
             currentY = currentY - (lineH + 2)
             height = height + (lineH + 2)
 

@@ -483,7 +483,7 @@ local function InitUI()
     barHeader:SetText("Progress Bars")
     sy = sy - 30
 
-    sy = CreateSlider(s, "Border Size", "barBorderSize", 1, 5, 1, "Thickness of the progress bar border", sy)
+    sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides border)", sy)
 
     -- Media Dropdown for Bar Texture
     local function CreateMediaDropdown(section, label, key, description, y)

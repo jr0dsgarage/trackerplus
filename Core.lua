@@ -157,6 +157,8 @@ function addon:RegisterEvents()
     -- Bonus objective / Task quest events
     pcall(function() frame:RegisterEvent("QUEST_POI_UPDATE") end)
     pcall(function() frame:RegisterEvent("TASK_PROGRESS_UPDATE") end)
+    pcall(function() frame:RegisterEvent("QUEST_PROGRESS_UPDATE") end)
+    pcall(function() frame:RegisterEvent("QUEST_LOG_CRITERIA_UPDATE") end)
     
     -- Achievement events
     frame:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
@@ -248,6 +250,8 @@ function addon:OnEvent(event, ...)
             or event == "WORLD_QUEST_COMPLETED_BY_SPELL"
             or event == "QUEST_POI_UPDATE"
             or event == "TASK_PROGRESS_UPDATE"
+            or event == "QUEST_PROGRESS_UPDATE"
+            or event == "QUEST_LOG_CRITERIA_UPDATE"
             or event == "ZONE_CHANGED"
             or event == "ZONE_CHANGED_INDOORS"
             or event == "ZONE_CHANGED_NEW_AREA" then

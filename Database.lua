@@ -119,7 +119,7 @@ local DEFAULTS = {
     
     -- Progress Bar Styling
     barTexture = "Blizzard",          -- Texture for progress bars
-    barBorderSize = 1,                -- Size of the 1px border around progress bars
+    barBorderSize = 1,                -- Border thickness in pixels (0 hides border)
     barBackgroundColor = {r = 0, g = 0, b = 0, a = 0.5}, -- Background color of progress bars
 }
 
@@ -176,6 +176,15 @@ function addon:InitDatabase()
 
         -- Migration: quest type toggle removed
         TrackerPlusDB.settings.showQuestType = nil
+
+        -- Migration: clamp bar border size to new 0..10 range
+        if TrackerPlusDB.settings.barBorderSize == nil then
+            TrackerPlusDB.settings.barBorderSize = DEFAULTS.barBorderSize
+        elseif TrackerPlusDB.settings.barBorderSize < 0 then
+            TrackerPlusDB.settings.barBorderSize = 0
+        elseif TrackerPlusDB.settings.barBorderSize > 10 then
+            TrackerPlusDB.settings.barBorderSize = 10
+        end
         
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then

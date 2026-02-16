@@ -8,17 +8,9 @@ local activeSecureButtons = 0
 
 -- Helper to create or update border lines
 function addon:CreateBorderLines(bar, size)
-    size = size or 1
-    
-    -- Calculate explicit pixel size to ensure 1 means 1 physical pixel
-    local pixelSize = size
-    if bar.GetEffectiveScale then
-        local scale = bar:GetEffectiveScale()
-        -- Only apply correction if valid scale is found
-        if scale and scale > 0.001 then 
-            pixelSize = size / scale
-        end
-    end
+    size = tonumber(size) or 1
+    if size < 0 then size = 0 end
+    local pixelSize = math.floor(size + 0.5)
     
     -- Create border frame if it doesn't exist
     if not bar.border then
@@ -46,6 +38,13 @@ function addon:CreateBorderLines(bar, size)
         bar.border.right:SetPoint("TOPRIGHT")
         bar.border.right:SetPoint("BOTTOMRIGHT")
     end
+
+    -- 0 means hidden border
+    if pixelSize <= 0 then
+        bar.border:Hide()
+        return
+    end
+    bar.border:Show()
     
     -- Update Size & Anchors
     bar.border:ClearAllPoints()
