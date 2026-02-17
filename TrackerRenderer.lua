@@ -1,5 +1,143 @@
 local addonName, addon = ...
 local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+local objectiveParseCache = {}
+local objectiveParseCacheCount = 0
+
+local function ClearArray(t)
+    for i = #t, 1, -1 do
+        t[i] = nil
+    end
+end
+
+local function GetObjectiveParseKey(item, obj, objIndex)
+    return table.concat({
+        tostring(item.id or item.title or ""),
+        tostring(objIndex),
+        tostring(obj.type or ""),
+        tostring(obj.text or ""),
+        tostring(obj.quantityString or ""),
+        tostring(obj.numFulfilled or ""),
+        tostring(obj.numRequired or ""),
+    }, "\31")
+end
+
+local function ParseObjectiveDisplay(item, obj, objIndex)
+    local cacheKey = GetObjectiveParseKey(item, obj, objIndex)
+    local cached = objectiveParseCache[cacheKey]
+    if cached then
+        return cached
+    end
+
+    local parsed = {
+        prefixText = "",
+        bodyText = "",
+        isProgressBar = false,
+        progressValue = 0,
+        progressMax = 100,
+    }
+
+    if obj.type == "progressbar"
+        or (obj.text and string.find(obj.text, "%%"))
+        or (obj.quantityString and string.find(obj.quantityString, "%%")) then
+        parsed.isProgressBar = true
+
+        local required = tonumber(obj.numRequired)
+        local fulfilled = tonumber(obj.numFulfilled)
+
+        if required and required > 0 then
+            parsed.progressValue = fulfilled or 0
+            parsed.progressMax = required
+        else
+            local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
+            if not ratioFulfilled then
+                ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
+            end
+
+            if ratioFulfilled and ratioRequired then
+                parsed.progressValue = tonumber(ratioFulfilled) or 0
+                parsed.progressMax = tonumber(ratioRequired) or 100
+            else
+                local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
+                if not percentMatch then
+                    percentMatch = string.match(obj.text or "", "(%d+)%%")
+                end
+
+                if percentMatch then
+                    parsed.progressValue = tonumber(percentMatch) or 0
+                    parsed.progressMax = 100
+                elseif obj.type == "progressbar" then
+                    parsed.progressValue = fulfilled or 0
+                    parsed.progressMax = 100
+                end
+            end
+        end
+
+        if obj.type == "progressbar" and (obj.text == "Progress" or obj.text == nil) and item.objectives then
+            for _, sibling in ipairs(item.objectives) do
+                if sibling ~= obj then
+                    local sReq = tonumber(sibling.numRequired)
+                    if sReq and sReq > 0 then
+                        parsed.progressValue = tonumber(sibling.numFulfilled) or 0
+                        parsed.progressMax = sReq
+                        break
+                    else
+                        local ratioFulfilled, ratioRequired = string.match(sibling.quantityString or "", "(%d+)%s*/%s*(%d+)")
+                        if not ratioFulfilled then
+                            ratioFulfilled, ratioRequired = string.match(sibling.text or "", "(%d+)%s*/%s*(%d+)")
+                        end
+                        if ratioFulfilled and ratioRequired then
+                            parsed.progressValue = tonumber(ratioFulfilled) or 0
+                            parsed.progressMax = tonumber(ratioRequired) or 100
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if parsed.progressMax <= 0 then parsed.progressMax = 100 end
+        if parsed.progressValue < 0 then parsed.progressValue = 0 end
+        if parsed.progressValue > parsed.progressMax then parsed.progressValue = parsed.progressMax end
+
+        local cleanText = obj.text or ""
+        cleanText = cleanText:gsub("%s*%(%d+%%%)", "")
+        cleanText = cleanText:gsub("%s*%d+%%", "")
+        cleanText = cleanText:gsub("^%d+/%d+%s*", "")
+        cleanText = cleanText:gsub(":%s*$", "")
+        cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
+        if cleanText == "" and obj.text then
+            cleanText = obj.text:gsub("%s*%(%d+%%%)", "")
+        end
+        parsed.bodyText = (cleanText or "Progress")
+    elseif obj.quantityString and obj.quantityString ~= "" then
+        parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+        parsed.prefixText = obj.quantityString
+    elseif obj.numRequired and obj.numRequired > 0 then
+        parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+        parsed.prefixText = string.format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
+    else
+        local p, b = (obj.text or ""):match("^%s*([%d]+/[%d]+)%s+(.*)$")
+        if p then
+            parsed.prefixText = p
+            parsed.bodyText = b
+        else
+            parsed.bodyText = (obj.text or "")
+        end
+    end
+
+    if parsed.prefixText ~= "" and (not parsed.bodyText or parsed.bodyText == "") then
+        parsed.bodyText = " "
+    end
+
+    objectiveParseCache[cacheKey] = parsed
+    objectiveParseCacheCount = objectiveParseCacheCount + 1
+    if objectiveParseCacheCount > 4000 then
+        wipe(objectiveParseCache)
+        objectiveParseCacheCount = 0
+    end
+
+    return parsed
+end
 
 -- Update tracker display with trackables
 function addon:RenderTrackableItem(parent, item, yOffset, indent)
@@ -233,119 +371,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         local currentY = -(textHeight + 2)
         
         for objIndex, obj in ipairs(item.objectives) do
-            local prefixText = ""
-            local bodyText = ""
-            local isProgressBar = false
-            local progressValue = 0
-            local progressMax = 100
-            
-            -- Determine if this should be a progress bar
-            -- Only use progress bars if explicitly set or if text/quantity includes a percentage
-            if obj.type == "progressbar"
-                or (obj.text and string.find(obj.text, "%%"))
-                or (obj.quantityString and string.find(obj.quantityString, "%%")) then
-                 isProgressBar = true
-
-                 -- Prefer exact numeric objective values over parsed percentages.
-                 local required = tonumber(obj.numRequired)
-                 local fulfilled = tonumber(obj.numFulfilled)
-
-                 if required and required > 0 then
-                     progressValue = fulfilled or 0
-                     progressMax = required
-                 else
-                     -- Try ratio patterns first (more exact than percent-only)
-                     local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
-                     if not ratioFulfilled then
-                         ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
-                     end
-
-                     if ratioFulfilled and ratioRequired then
-                         progressValue = tonumber(ratioFulfilled) or 0
-                         progressMax = tonumber(ratioRequired) or 100
-                     else
-                         -- Fallback to percent parsing
-                         local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
-                         if not percentMatch then
-                             percentMatch = string.match(obj.text or "", "(%d+)%%")
-                         end
-
-                         if percentMatch then
-                             progressValue = tonumber(percentMatch) or 0
-                             progressMax = 100
-                         elseif obj.type == "progressbar" then
-                             progressValue = fulfilled or 0
-                             progressMax = 100
-                         end
-                     end
-                 end
-
-                 -- For generic "Progress" bars, sync to a concrete sibling objective (e.g. 7/10)
-                 -- so the bar always matches the displayed tracked value.
-                 if obj.type == "progressbar" and (obj.text == "Progress" or obj.text == nil) and item.objectives then
-                     for _, sibling in ipairs(item.objectives) do
-                         if sibling ~= obj then
-                             local sReq = tonumber(sibling.numRequired)
-                             if sReq and sReq > 0 then
-                                 local sFul = tonumber(sibling.numFulfilled) or 0
-                                 progressValue = sFul
-                                 progressMax = sReq
-                                 break
-                             else
-                                 -- Fallback: parse ratio directly from sibling text/quantity string
-                                 local ratioFulfilled, ratioRequired = string.match(sibling.quantityString or "", "(%d+)%s*/%s*(%d+)")
-                                 if not ratioFulfilled then
-                                     ratioFulfilled, ratioRequired = string.match(sibling.text or "", "(%d+)%s*/%s*(%d+)")
-                                 end
-                                 if ratioFulfilled and ratioRequired then
-                                     progressValue = tonumber(ratioFulfilled) or 0
-                                     progressMax = tonumber(ratioRequired) or 100
-                                     break
-                                 end
-                             end
-                         end
-                     end
-                 end
-
-                 if progressMax <= 0 then progressMax = 100 end
-                 if progressValue < 0 then progressValue = 0 end
-                 if progressValue > progressMax then progressValue = progressMax end
-
-                 -- Text Cleanup
-                 local cleanText = obj.text or ""
-                 cleanText = cleanText:gsub("%s*%(%d+%%%)", "") -- remove (45%)
-                 cleanText = cleanText:gsub("%s*%d+%%", "")      -- remove 45%
-                 cleanText = cleanText:gsub("^%d+/%d+%s*", "")   -- remove 0/100 at start
-                 cleanText = cleanText:gsub(":%s*$", "")
-                 cleanText = cleanText:gsub("^%s+", ""):gsub("%s+$", "")
-                 
-                 if cleanText == "" and obj.text then cleanText = obj.text:gsub("%s*%(%d+%%%)", "") end
-                 bodyText = (cleanText or "Progress")
-                 
-            elseif obj.quantityString and obj.quantityString ~= "" then
-                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
-                prefixText = obj.quantityString
-                bodyText = cleanText
-            elseif obj.numRequired and obj.numRequired > 0 then
-                local cleanText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
-                prefixText = string.format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
-                bodyText = cleanText
-            else
-                -- Try to detect prefix in raw text
-                local p, b = (obj.text or ""):match("^%s*([%d]+/[%d]+)%s+(.*)$")
-                if p then
-                    prefixText = p
-                    bodyText = b
-                else
-                    bodyText = (obj.text or "")
-                end
-            end
-
-            -- If this objective is prefix-only (e.g. "215/250"), keep one visual line
-            -- so height calculations include it and it won't overlap the next header.
-            if prefixText ~= "" and (not bodyText or bodyText == "") then
-                bodyText = " "
-            end
+            local parsed = ParseObjectiveDisplay(item, obj, objIndex)
+            local prefixText = parsed.prefixText
+            local bodyText = parsed.bodyText
+            local isProgressBar = parsed.isProgressBar
+            local progressValue = parsed.progressValue
+            local progressMax = parsed.progressMax
             
             -- Prepare Bullet
             if not button.objectiveBullets then button.objectiveBullets = {} end
@@ -462,25 +493,42 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     button.progressBars[objIndex] = bar
                 end
                 
-                -- Update Existing Manual Bars
+                -- Update bar style only when settings changed
                 if not bar.isTemplate then
                      local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
                      if LSM and db.barTexture then
                           barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
                      end
-                     bar:SetStatusBarTexture(barTex)
-                     
                      local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                     if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
-                     
-                     addon:CreateBorderLines(bar, db.barBorderSize)
+                     local styleSig = string.format("%s|%d|%.3f|%.3f|%.3f|%.3f",
+                         tostring(barTex),
+                         db.barBorderSize or 0,
+                         bgC.r or 0, bgC.g or 0, bgC.b or 0, bgC.a or 0
+                     )
+                     if bar._styleSig ~= styleSig then
+                         bar:SetStatusBarTexture(barTex)
+                         if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
+                         addon:CreateBorderLines(bar, db.barBorderSize)
+                         bar._styleSig = styleSig
+                     end
                 elseif bar.Bar then
-                     addon:CreateBorderLines(bar.Bar, db.barBorderSize)
+                     local borderSize = db.barBorderSize or 0
+                     if bar._borderSizeApplied ~= borderSize then
+                         addon:CreateBorderLines(bar.Bar, borderSize)
+                         bar._borderSizeApplied = borderSize
+                     end
                 end
-                
-                bar:ClearAllPoints()
-                bar:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY - padding)
-                bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -db.spacingProgressBarInset, currentY - padding)
+
+                local barLeft = leftPadding + db.spacingObjectiveIndent
+                local barTop = currentY - padding
+                local barRightInset = db.spacingProgressBarInset
+                local anchorKey = string.format("%d|%d|%d", barLeft, barTop, barRightInset)
+                if bar._anchorKey ~= anchorKey then
+                    bar:ClearAllPoints()
+                    bar:SetPoint("TOPLEFT", button, "TOPLEFT", barLeft, barTop)
+                    bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -barRightInset, barTop)
+                    bar._anchorKey = anchorKey
+                end
                 
                 local percent = 0
                 if progressMax > 0 then
@@ -520,17 +568,19 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     button:SetHeight(height)
     button:Show()
     button.trackableData = item
-    
-    button:SetScript("OnClick", function(self, mouseButton)
-        addon:OnTrackableClick(self.trackableData, mouseButton)
-    end)
-    button:SetScript("OnMouseUp", nil)
-    
-    if db.showTooltips then
+
+    if button._scriptMode ~= "trackable" then
+        button:SetScript("OnClick", function(self, mouseButton)
+            addon:OnTrackableClick(self.trackableData, mouseButton)
+        end)
+        button:SetScript("OnMouseUp", nil)
         button:SetScript("OnEnter", function(self)
-            addon:ShowTrackableTooltip(self, self.trackableData)
+            if addon.db and addon.db.showTooltips then
+                addon:ShowTrackableTooltip(self, self.trackableData)
+            end
         end)
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        button._scriptMode = "trackable"
     end
     
     return height
@@ -549,12 +599,26 @@ function addon:UpdateTrackerDisplay(trackables)
     local db = self.db
     
     -- Extract Scenarios and Super Tracked items first
-    local scenarios = {}
-    local autoQuests = {}
-    local superTrackedItems = {}
-    local bonusObjectives = {}
-    local worldQuestItems = {}
-    local remainingTrackables = {}
+    self._tmpScenarios = self._tmpScenarios or {}
+    self._tmpAutoQuests = self._tmpAutoQuests or {}
+    self._tmpSuperTrackedItems = self._tmpSuperTrackedItems or {}
+    self._tmpBonusObjectives = self._tmpBonusObjectives or {}
+    self._tmpWorldQuestItems = self._tmpWorldQuestItems or {}
+    self._tmpRemainingTrackables = self._tmpRemainingTrackables or {}
+
+    local scenarios = self._tmpScenarios
+    local autoQuests = self._tmpAutoQuests
+    local superTrackedItems = self._tmpSuperTrackedItems
+    local bonusObjectives = self._tmpBonusObjectives
+    local worldQuestItems = self._tmpWorldQuestItems
+    local remainingTrackables = self._tmpRemainingTrackables
+
+    ClearArray(scenarios)
+    ClearArray(autoQuests)
+    ClearArray(superTrackedItems)
+    ClearArray(bonusObjectives)
+    ClearArray(worldQuestItems)
+    ClearArray(remainingTrackables)
     
     for _, item in ipairs(trackables) do
         if item.type == "scenario" then
@@ -706,9 +770,15 @@ function addon:UpdateTrackerDisplay(trackables)
               
               -- Interaction
               button.trackableData = item
-              button:SetScript("OnClick", function(self, mouseButton)
-                  addon:OnTrackableClick(self.trackableData, mouseButton)
-              end)
+              if button._scriptMode ~= "autoquest" then
+                  button:SetScript("OnClick", function(self, mouseButton)
+                      addon:OnTrackableClick(self.trackableData, mouseButton)
+                  end)
+                  button:SetScript("OnMouseUp", nil)
+                  button:SetScript("OnEnter", nil)
+                  button:SetScript("OnLeave", nil)
+                  button._scriptMode = "autoquest"
+              end
               
               currentY = currentY + 70 + 5
          end
@@ -1043,17 +1113,16 @@ function addon:UpdateTrackerDisplay(trackables)
                             
                              objText = "  - " .. obj.text
                         elseif obj.numRequired and obj.numRequired > 0 then
-                             if not foundPercent then
-                                 local cur = obj.numFulfilled or 0
-                                 local req = obj.numRequired or 0
-                                 
-                                 if req > 0 then
-                                     percent = (cur / req) * 100
-                                 elseif cur <= 100 then
-                                     percent = cur
-                                 else
-                                     percent = 100
-                                 end
+                             local cur = obj.numFulfilled or 0
+                             local req = obj.numRequired or 0
+                             local percent
+
+                             if req > 0 then
+                                 percent = (cur / req) * 100
+                             elseif cur <= 100 then
+                                 percent = cur
+                             else
+                                 percent = 100
                              end
                              
                              -- 3. Clamp and Display
@@ -1126,25 +1195,39 @@ function addon:UpdateTrackerDisplay(trackables)
                                 button.progressBars[objIndex] = bar
                             end
                             
-                            -- Update Manual Scenarios (Important!)
+                            -- Update style only when settings changed
                             if not bar.isTemplate then
                                  local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
                                  if LSM and db.barTexture then
                                       barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
                                  end
-                                 bar:SetStatusBarTexture(barTex)
-                                 
                                  local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                                 if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
-                                 
-                                 addon:CreateBorderLines(bar, db.barBorderSize)
+                                 local styleSig = string.format("%s|%d|%.3f|%.3f|%.3f|%.3f",
+                                     tostring(barTex),
+                                     db.barBorderSize or 0,
+                                     bgC.r or 0, bgC.g or 0, bgC.b or 0, bgC.a or 0
+                                 )
+                                 if bar._styleSig ~= styleSig then
+                                     bar:SetStatusBarTexture(barTex)
+                                     if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
+                                     addon:CreateBorderLines(bar, db.barBorderSize)
+                                     bar._styleSig = styleSig
+                                 end
                             elseif bar.Bar then
-                                 addon:CreateBorderLines(bar.Bar, db.barBorderSize)
+                                 local borderSize = db.barBorderSize or 0
+                                 if bar._borderSizeApplied ~= borderSize then
+                                     addon:CreateBorderLines(bar.Bar, borderSize)
+                                     bar._borderSizeApplied = borderSize
+                                 end
                             end
-                            
-                            bar:ClearAllPoints()
-                            bar:SetPoint("TOPLEFT", 20, -height)
-                            bar:SetPoint("TOPRIGHT", -20, -height)
+
+                            local anchorKey = string.format("%d|%d|%d", 20, -height, 20)
+                            if bar._anchorKey ~= anchorKey then
+                                bar:ClearAllPoints()
+                                bar:SetPoint("TOPLEFT", 20, -height)
+                                bar:SetPoint("TOPRIGHT", -20, -height)
+                                bar._anchorKey = anchorKey
+                            end
                             
                             if bar.isTemplate and bar.Bar then
                                  bar.Bar:SetMinMaxValues(0, progressMax)
@@ -1637,8 +1720,8 @@ function addon:UpdateTrackerDisplay(trackables)
         end
     end
 
-    -- Update Scenario Frame Height & ScrollFrame Anchor
-    self.scrollFrame:ClearAllPoints()
+        -- Update Scenario Frame Height & ScrollFrame Anchor
+        local topParent, topPoint, topRelPoint, topX, topY
     if scenarioYOffset > 0 then
         self.scenarioFrame:SetHeight(scenarioYOffset)
         if addon.db.minimized then
@@ -1646,19 +1729,36 @@ function addon:UpdateTrackerDisplay(trackables)
         else
             self.scenarioFrame:Show()
         end
-        self.scrollFrame:SetPoint("TOPLEFT", self.scenarioFrame, "BOTTOMLEFT", 0, 0)
+           topParent, topPoint, topRelPoint, topX, topY = self.scenarioFrame, "TOPLEFT", "BOTTOMLEFT", 0, 0
     else
         self.scenarioFrame:Hide()
-        self.scrollFrame:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -25)
+           topParent, topPoint, topRelPoint, topX, topY = self.trackerFrame, "TOPLEFT", "TOPLEFT", 0, -25
     end
     
     -- Bottom Anchor Logic: Stack Scroll -> Bonus -> WQ -> Bottom
+        local bottomParent
     if bonusYOffset > 0 then
-         self.scrollFrame:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+            bottomParent = self.bonusFrame
     elseif wqYOffset > 0 and wqFrame then
-         self.scrollFrame:SetPoint("BOTTOMRIGHT", wqFrame, "TOPRIGHT", 0, 0)
+            bottomParent = wqFrame
     else
-         self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
+            bottomParent = self.trackerFrame
+        end
+
+        local anchorSignature = table.concat({
+           tostring(topParent), tostring(topPoint), tostring(topRelPoint), tostring(topX), tostring(topY),
+           tostring(bottomParent),
+        }, "|")
+
+        if self._scrollAnchorSignature ~= anchorSignature then
+            self.scrollFrame:ClearAllPoints()
+            self.scrollFrame:SetPoint(topPoint, topParent, topRelPoint, topX, topY)
+            if bottomParent == self.trackerFrame then
+                self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
+            else
+                self.scrollFrame:SetPoint("BOTTOMRIGHT", bottomParent, "TOPRIGHT", 0, 0)
+            end
+            self._scrollAnchorSignature = anchorSignature
     end
 
     --------------------------------------------------------------------------
@@ -1685,6 +1785,19 @@ function addon:UpdateTrackerDisplay(trackables)
             if not (not isMajor and currentMajorCollapsed) then
                 -- Zone/Category Header
                 local header = self:GetOrCreateButton(contentFrame) -- Use contentFrame
+            if header._scriptMode ~= "header" then
+                -- Invalidate cached header presentation when recycling a non-header frame.
+                -- Without this, stale cached anchors/atlas/text style can cause missing or malformed headers.
+                header._textStyleSignature = nil
+                header._textLayoutSignature = nil
+                header._bgSignature = nil
+                header._height = nil
+                header._titleText = nil
+                if header.expandBtn then
+                    header.expandBtn._styleSignature = nil
+                    header.expandBtn._iconPos = nil
+                end
+            end
             header:Show()
             
             -- Padding/Indentation
@@ -1705,15 +1818,6 @@ function addon:UpdateTrackerDisplay(trackables)
                 end
             end
             
-            -- Font Styling
-            if isMajor then
-                header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
-                header.text:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
-            else
-                header.text:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
-                header.text:SetTextColor(db.headerColor.r * 0.9, db.headerColor.g * 0.9, db.headerColor.b * 0.9, db.headerColor.a)
-            end
-            
             -- Collapse/Expand Icon
             if not header.expandBtn then
                 header.expandBtn = CreateFrame("Button", nil, header)
@@ -1726,164 +1830,202 @@ function addon:UpdateTrackerDisplay(trackables)
             local isCollapsed = item.collapsed
             
             -- Position Button (Left or Right)
-            header.expandBtn:ClearAllPoints()
-            if iconPos == "right" then
-                header.expandBtn:SetPoint("RIGHT", -8, 0)
-            else
-                header.expandBtn:SetPoint("LEFT", 8, 0)
+            if header.expandBtn._iconPos ~= iconPos then
+                header.expandBtn:ClearAllPoints()
+                if iconPos == "right" then
+                    header.expandBtn:SetPoint("RIGHT", -8, 0)
+                else
+                    header.expandBtn:SetPoint("LEFT", 8, 0)
+                end
+                header.expandBtn._iconPos = iconPos
             end
             
             -- Reset button state to prevent specific style overlapping (e.g. Text + Texture)
-            header.expandBtn:SetText("")
-            header.expandBtn:SetNormalTexture("")
-            header.expandBtn:SetPushedTexture("")
-            header.expandBtn:SetHighlightTexture("")
-            -- Note: Setting Texture to "" usually clears Atlas as well in WoW API
+            local styleSignature = table.concat({
+                tostring(iconStyle), tostring(iconPos), tostring(isCollapsed)
+            }, "|")
+            if header.expandBtn._styleSignature ~= styleSignature then
+                header.expandBtn:SetText("")
+                header.expandBtn:SetNormalTexture("")
+                header.expandBtn:SetPushedTexture("")
+                header.expandBtn:SetHighlightTexture("")
+                -- Note: Setting Texture to "" usually clears Atlas as well in WoW API
             
-            if iconStyle == "none" then
-                header.expandBtn:Hide()
-            else
-                header.expandBtn:Show()
-                if iconStyle == "standard" then
-                    header.expandBtn:SetSize(16, 16)
-                    header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
-                    header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
-                    header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
-                elseif iconStyle == "square" then
-                    -- Classic UI Square Buttons (Plus/Minus usually represented by Expand/Collapse textures)
-                    header.expandBtn:SetSize(16, 16)
-                    -- Note: ExpandButton-Up shows a Plus. CollapseButton-Up shows a Minus.
-                    header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
-                    header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
-                    -- header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight") -- Often doesn't exact match, skip or find better
-                elseif iconStyle == "text_brackets" then
-                    header.expandBtn:SetSize(24, 16)
-                    header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
-                    
-                    local fontString = header.expandBtn:GetFontString()
-                    if fontString then
-                        fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
-                        fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
-                        if iconPos == "right" then
-                            fontString:SetJustifyH("RIGHT")
-                        else
-                            fontString:SetJustifyH("LEFT")
+                if iconStyle == "none" then
+                    header.expandBtn:Hide()
+                else
+                    header.expandBtn:Show()
+                    if iconStyle == "standard" then
+                        header.expandBtn:SetSize(16, 16)
+                        header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+                        header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-PlusButton-Down" or "Interface\\Buttons\\UI-MinusButton-Down")
+                        header.expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
+                    elseif iconStyle == "square" then
+                        -- Classic UI Square Buttons (Plus/Minus usually represented by Expand/Collapse textures)
+                        header.expandBtn:SetSize(16, 16)
+                        -- Note: ExpandButton-Up shows a Plus. CollapseButton-Up shows a Minus.
+                        header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
+                        header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
+                    elseif iconStyle == "text_brackets" then
+                        header.expandBtn:SetSize(24, 16)
+                        header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
+                        
+                        local fontString = header.expandBtn:GetFontString()
+                        if fontString then
+                            fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
+                            fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
+                            if iconPos == "right" then
+                                fontString:SetJustifyH("RIGHT")
+                            else
+                                fontString:SetJustifyH("LEFT")
+                            end
                         end
+                    elseif iconStyle == "questlog" then
+                        header.expandBtn:SetSize(16, 16)
+                        
+                        local atlas = isCollapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
+                        
+                        -- Apply Atlas
+                        header.expandBtn:SetNormalAtlas(atlas)
+                        header.expandBtn:SetPushedAtlas(atlas)
+                        header.expandBtn:SetHighlightAtlas(atlas)
                     end
-                elseif iconStyle == "questlog" then
-                    header.expandBtn:SetSize(16, 16)
-                    
-                    -- Use Atlas for texture
-                    -- isCollapsed means "I am closed, show a Plus (Expand)"
-                    -- not isCollapsed means "I am open, show a Minus (Collapse)"
-                    
-                    -- User provided specific Atlas names:
-                    -- Expand:  "UI-QuestTrackerButton-Secondary-Expand"
-                    -- Collapse: "UI-QuestTrackerButton-Secondary-Collapse"
-                    
-                    local atlas = isCollapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
-                    
-                    -- Apply Atlas
-                    header.expandBtn:SetNormalAtlas(atlas)
-                    header.expandBtn:SetPushedAtlas(atlas)
-                    header.expandBtn:SetHighlightAtlas(atlas)
                 end
+                header.expandBtn._styleSignature = styleSignature
             end
             
-            -- Icon Tooltip & Click (Exclusive)
-            header.expandBtn:SetScript("OnClick", function(self)
-                 -- Trigger parental click logic or direct
-                 addon:ToggleHeader(item.key, IsShiftKeyDown())
-            end)
-            
-            header.expandBtn:SetScript("OnEnter", function(self)
-                 if isMajor or true then -- Show on all? or just Major? User said "Over the +"
+            header.expandBtn._headerKey = item.key
+            header.expandBtn._headerCollapsed = isCollapsed
+            if not header.expandBtn._handlersBound then
+                -- Icon Tooltip & Click (Exclusive)
+                header.expandBtn:SetScript("OnClick", function(self)
+                     addon:ToggleHeader(self._headerKey, IsShiftKeyDown())
+                end)
+                
+                header.expandBtn:SetScript("OnEnter", function(self)
                      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                     if item.collapsed then
+                     if self._headerCollapsed then
                          GameTooltip:SetText("Hold SHIFT to Expand All", 1, 1, 1)
                      else
                          GameTooltip:SetText("Hold SHIFT to Minimize All", 1, 1, 1)
                      end
                      GameTooltip:Show()
-                 end
-            end)
-            header.expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                end)
+                header.expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                header.expandBtn._handlersBound = true
+            end
 
             
             -- Title Text
-            header.text:SetText(item.title)
-            
-            -- RESET TEXT POINT for recycled headers
-            header.text:ClearAllPoints()
-            
-            if iconStyle == "none" then
-                 -- No icon: Text fills full width with small padding
-                header.text:SetPoint("LEFT", 5, 0)
-                header.text:SetPoint("RIGHT", -5, 0)
+            local headerFontSize = isMajor and (db.headerFontSize + 2) or db.headerFontSize
+            local headerColorR = isMajor and db.headerColor.r or (db.headerColor.r * 0.9)
+            local headerColorG = isMajor and db.headerColor.g or (db.headerColor.g * 0.9)
+            local headerColorB = isMajor and db.headerColor.b or (db.headerColor.b * 0.9)
+            local headerTextStyleSignature = table.concat({
+                tostring(db.headerFontFace),
+                tostring(headerFontSize),
+                tostring(db.headerFontOutline),
+                tostring(headerColorR),
+                tostring(headerColorG),
+                tostring(headerColorB),
+                tostring(db.headerColor.a)
+            }, ":")
+            if header._textStyleSignature ~= headerTextStyleSignature then
+                header.text:SetFont(db.headerFontFace, headerFontSize, db.headerFontOutline)
+                header.text:SetTextColor(headerColorR, headerColorG, headerColorB, db.headerColor.a)
                 header.text:SetJustifyH("LEFT")
-            elseif iconPos == "right" then
-                -- Icon on Right: Text starts Left, ends before icon
-                header.text:SetPoint("LEFT", 5, 0)
-                header.text:SetPoint("RIGHT", -22, 0)
-                header.text:SetJustifyH("LEFT")
-            else
-                -- Icon on Left (Default): Text starts after icon
-                header.text:SetPoint("LEFT", 22, 0)
-                header.text:SetPoint("RIGHT", -5, 0)
-                header.text:SetJustifyH("LEFT") 
+                header._textStyleSignature = headerTextStyleSignature
+            end
+
+            if header._titleText ~= item.title then
+                header.text:SetText(item.title)
+                header._titleText = item.title
+            end
+
+            local headerTextLayoutSignature = table.concat({iconStyle, iconPos}, ":")
+            if header._textLayoutSignature ~= headerTextLayoutSignature then
+                -- RESET TEXT POINT for recycled headers
+                header.text:ClearAllPoints()
+
+                if iconStyle == "none" then
+                     -- No icon: Text fills full width with small padding
+                    header.text:SetPoint("LEFT", 5, 0)
+                    header.text:SetPoint("RIGHT", -5, 0)
+                elseif iconPos == "right" then
+                    -- Icon on Right: Text starts Left, ends before icon
+                    header.text:SetPoint("LEFT", 5, 0)
+                    header.text:SetPoint("RIGHT", -22, 0)
+                else
+                    -- Icon on Left (Default): Text starts after icon
+                    header.text:SetPoint("LEFT", 22, 0)
+                    header.text:SetPoint("RIGHT", -5, 0)
+                end
+                header._textLayoutSignature = headerTextLayoutSignature
             end
             
             local bgStyle = db.headerBackgroundStyle or "tracker"
-            
-            header.bg:ClearAllPoints()
-            
-            if bgStyle == "none" then
-                header.bg:SetAllPoints(header)
-                header.bg:SetColorTexture(0, 0, 0, 0)
-            elseif bgStyle == "questlog" then
-                 -- Shrink by 2px on each side
-                 header.bg:SetPoint("TOPLEFT", header, "TOPLEFT", 2, 0)
-                 header.bg:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -2, 0)
-                 
-                 -- Use the texture identified from the Quest Log frame
-                 if header.bg.SetAtlas then
-                     header.bg:SetAtlas("QuestLog-tab")
+
+            local bgSignature = table.concat({bgStyle, tostring(isMajor and 1 or 0)}, ":")
+            if header._bgSignature ~= bgSignature then
+                header.bg:ClearAllPoints()
+
+                if bgStyle == "none" then
+                    header.bg:SetAllPoints(header)
+                    header.bg:SetColorTexture(0, 0, 0, 0)
+                elseif bgStyle == "questlog" then
+                     -- Shrink by 2px on each side
+                     header.bg:SetPoint("TOPLEFT", header, "TOPLEFT", 2, 0)
+                     header.bg:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -2, 0)
+
+                     -- Use the texture identified from the Quest Log frame
+                     if header.bg.SetAtlas then
+                         header.bg:SetAtlas("QuestLog-tab")
+                         header.bg:SetVertexColor(1, 1, 1, 1)
+                     else
+                         -- Fallback (though SetAtlas should exist in Retail)
+                         header.bg:SetTexture("Interface\\QuestFrame\\QuestLog-tab")
+                         header.bg:SetTexCoord(0, 1, 0, 1)
+                     end
                      header.bg:SetVertexColor(1, 1, 1, 1)
-                 else
-                     -- Fallback (though SetAtlas should exist in Retail)
-                     header.bg:SetTexture("Interface\\QuestFrame\\QuestLog-tab")
-                     header.bg:SetTexCoord(0, 1, 0, 1) 
-                 end
-                 header.bg:SetVertexColor(1, 1, 1, 1)
-            else
-                header.bg:SetAllPoints(header)
-                -- Tracker Default (Blizzard Style)
-                if header.bg.SetAtlas then
-                    -- Use Secondary for category headers (Quests, Achievements, etc.)
-                    header.bg:SetAtlas("UI-QuestTracker-Secondary-Objective-Header")
                 else
-                    header.bg:SetColorTexture(0, 0, 0, isMajor and 0.4 or 0.2)
+                    header.bg:SetAllPoints(header)
+                    -- Tracker Default (Blizzard Style)
+                    if header.bg.SetAtlas then
+                        -- Use Secondary for category headers (Quests, Achievements, etc.)
+                        header.bg:SetAtlas("UI-QuestTracker-Secondary-Objective-Header")
+                    else
+                        header.bg:SetColorTexture(0, 0, 0, isMajor and 0.4 or 0.2)
+                    end
+                    header.bg:SetVertexColor(1, 1, 1, 1)
                 end
-                header.bg:SetVertexColor(1, 1, 1, 1)
+                header._bgSignature = bgSignature
             end
-            
-            header:SetHeight(isMajor and 24 or 20)
+
+            local headerHeight = isMajor and 24 or 20
+            if header._height ~= headerHeight then
+                header:SetHeight(headerHeight)
+                header._height = headerHeight
+            end
             header:Show()
             
             -- Store header data for click handling
             header.trackableData = item
-            header:SetScript("OnClick", function(self, mouseButton)
-                if mouseButton == "LeftButton" then
-                    -- Pass IsShiftKeyDown() to support recursive toggle
-                    addon:ToggleHeader(item.key, IsShiftKeyDown())
-                end
-            end)
-            -- Clear other scripts that might conflict
-            header:SetScript("OnMouseUp", nil)
-            
-            -- Removed Tooltip from main header bar area per user request
-            header:SetScript("OnEnter", nil)
-            header:SetScript("OnLeave", nil)
+            header._headerKey = item.key
+            if header._scriptMode ~= "header" then
+                header:SetScript("OnClick", function(self, mouseButton)
+                    if mouseButton == "LeftButton" then
+                        -- Pass IsShiftKeyDown() to support recursive toggle
+                        addon:ToggleHeader(self._headerKey, IsShiftKeyDown())
+                    end
+                end)
+                -- Clear other scripts that might conflict
+                header:SetScript("OnMouseUp", nil)
+
+                -- Removed Tooltip from main header bar area per user request
+                header:SetScript("OnEnter", nil)
+                header:SetScript("OnLeave", nil)
+                header._scriptMode = "header"
+            end
             
             yOffset = yOffset + (isMajor and db.spacingMajorHeaderAfter or db.spacingMinorHeaderAfter)
             
@@ -1912,6 +2054,9 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Update content frame height
     contentFrame:SetHeight(math.max(yOffset, self.db.frameHeight))
+
+    -- Hide only unused pooled buttons after this frame has been fully rendered.
+    self:FinalizeButtonPool()
     
     -- Update tracker frame appearance
     self:UpdateTrackerAppearance()

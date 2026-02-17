@@ -153,23 +153,21 @@ function addon:OrganizeTrackables(trackables)
     return organized
 end
 
-local trackableButtons = {}
-local activeButtons = 0
-local secureButtons = {} -- Pool for SecureActionButtons
-local activeSecureButtons = 0
-
 function addon:ResetButtonPool()
     activeButtons = 0
-    -- Hide all buttons
-    for _, button in ipairs(trackableButtons) do
-        button:Hide()
+    activeSecureButtons = 0
+end
+
+function addon:FinalizeButtonPool()
+    -- Hide only unused regular pooled buttons.
+    for i = activeButtons + 1, #trackableButtons do
+        trackableButtons[i]:Hide()
     end
-    
-    -- Hide safe secure buttons (can only be done out of combat)
+
+    -- Hide unused secure pooled buttons only when safe.
     if not InCombatLockdown() then
-        activeSecureButtons = 0
-        for _, btn in ipairs(secureButtons) do
-            btn:Hide()
+        for i = activeSecureButtons + 1, #secureButtons do
+            secureButtons[i]:Hide()
         end
     end
 end

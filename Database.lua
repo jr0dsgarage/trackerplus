@@ -99,7 +99,7 @@ local DEFAULTS = {
     showTooltips = true,
     
     -- Performance
-    updateInterval = 0.1,
+    updateInterval = 0.15,
     
     -- Cache
     endeavorCache = {}, -- Stores last known tracked endeavors {id=true}

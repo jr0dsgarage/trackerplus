@@ -7,6 +7,8 @@ local frame = CreateFrame("Frame")
 local updateTimer = 0
 local requestedUpdate = false
 local pendingUpdate = false
+local lastRenderedDataVersion = -1
+local lastLayoutSignature = ""
 
 -- Dirty section tracking + cached buckets (high-impact perf)
 local dirtySections = { full = true }
@@ -70,6 +72,7 @@ function addon:Initialize()
     
     -- Initial update
     self:RequestUpdate()
+    self._layoutDirty = true
     
     -- Manage default Blizzard tracker
     if ObjectiveTrackerFrame then
@@ -297,6 +300,20 @@ function addon:OnUpdate(elapsed)
     
     updateTimer = updateTimer + elapsed
     local updateInterval = self:GetSetting("updateInterval") or 0.1
+    local now = GetTime and GetTime() or 0
+
+    -- Adaptive cadence: fast during active objective churn, slower when idle/minimized/hidden
+    if self.db and self.db.minimized then
+        updateInterval = math.max(updateInterval, 0.25)
+    elseif self._updateBurstUntil and now < self._updateBurstUntil then
+        updateInterval = math.min(updateInterval, 0.05)
+    else
+        updateInterval = math.max(updateInterval, 0.15)
+    end
+
+    if self.trackerFrame and not self.trackerFrame:IsShown() then
+        updateInterval = math.max(updateInterval, 0.25)
+    end
     
     if updateTimer >= updateInterval then
         updateTimer = 0
@@ -313,6 +330,15 @@ function addon:RequestUpdate(section)
         MarkDirty("full")
     end
     requestedUpdate = true
+
+    if section == "quests"
+        or section == "autoQuests"
+        or section == "superTracked"
+        or section == "scenarios"
+        or section == "achievements" then
+        local now = GetTime and GetTime() or 0
+        self._updateBurstUntil = now + 1.0
+    end
 end
 
 -- Main update function
@@ -334,11 +360,29 @@ function addon:UpdateTracker()
         return
     end
     
+    -- Track layout changes independently from data changes
+    local layoutSignature = string.format("%d|%d|%s|%s|%s", 
+        self.db.frameWidth or 0,
+        self.db.frameHeight or 0,
+        tostring(self.db.groupByZone),
+        tostring(self.db.groupByCategory),
+        tostring(self.db.frameScale or 1)
+    )
+    if layoutSignature ~= lastLayoutSignature then
+        lastLayoutSignature = layoutSignature
+        self._layoutDirty = true
+    end
+
     -- Collect all trackables (dirty-section aware)
     local trackables = self:CollectTrackables()
-    
-    -- Update the tracker frame with collected data
-    self:UpdateTrackerDisplay(trackables)
+
+    -- Paint only when data or layout changed
+    local dataVersion = self._dataVersion or 0
+    if self._layoutDirty or dataVersion ~= lastRenderedDataVersion then
+        self:UpdateTrackerDisplay(trackables)
+        lastRenderedDataVersion = dataVersion
+        self._layoutDirty = false
+    end
     
     -- Handle fade when empty
     -- If unlocked, always show so user can move it
@@ -363,8 +407,10 @@ function addon:CollectTrackables()
     local full = dirtySections.full
     local trackables = {}
     local db = self.db
+    local refreshedAny = false
 
     if full or dirtySections.quests then
+        refreshedAny = true
         if db.showQuests then
             RefreshBucket("quests", addon.CollectQuests, self)
         else
@@ -373,6 +419,7 @@ function addon:CollectTrackables()
     end
 
     if full or dirtySections.achievements then
+        refreshedAny = true
         if db.showAchievements then
             RefreshBucket("achievements", addon.CollectAchievements, self)
         else
@@ -381,6 +428,7 @@ function addon:CollectTrackables()
     end
 
     if full or dirtySections.scenarios then
+        refreshedAny = true
         if db.showScenarios or db.showDungeonObjectives then
             RefreshBucket("scenarios", addon.CollectScenarioObjectives, self)
         else
@@ -389,14 +437,17 @@ function addon:CollectTrackables()
     end
 
     if full or dirtySections.autoQuests then
+        refreshedAny = true
         RefreshBucket("autoQuests", addon.CollectAutoQuests, self)
     end
 
     if full or dirtySections.superTracked then
+        refreshedAny = true
         RefreshBucket("superTracked", addon.CollectSuperTrackedQuest, self)
     end
 
     if full or dirtySections.professions then
+        refreshedAny = true
         if db.showProfessions then
             RefreshBucket("professions", addon.CollectProfessionTracking, self)
         else
@@ -405,6 +456,7 @@ function addon:CollectTrackables()
     end
 
     if full or dirtySections.monthly then
+        refreshedAny = true
         if db.showMonthlyActivities then
             RefreshBucket("monthly", addon.CollectMonthlyActivities, self)
         else
@@ -413,6 +465,7 @@ function addon:CollectTrackables()
     end
 
     if full or dirtySections.endeavors then
+        refreshedAny = true
         if db.showEndeavors then
             RefreshBucket("endeavors", addon.CollectEndeavors, self)
         else
@@ -431,6 +484,10 @@ function addon:CollectTrackables()
     
     -- Sort trackables
     self:SortTrackables(trackables)
+
+    if refreshedAny then
+        self._dataVersion = (self._dataVersion or 0) + 1
+    end
 
     -- Done applying this dirty batch
     ClearDirty()
