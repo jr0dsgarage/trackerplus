@@ -142,6 +142,7 @@ end
 -- Event registration
 function addon:RegisterEvents()
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     
     -- Quest events
     frame:RegisterEvent("QUEST_ACCEPTED")
@@ -273,7 +274,8 @@ function addon:OnEvent(event, ...)
         elseif event == "SKILL_LINES_CHANGED"
             or event == "TRADE_SKILL_SHOW"
             or event == "TRADE_SKILL_LIST_UPDATE"
-            or event == "TRACKED_RECIPE_UPDATE" then
+            or event == "TRACKED_RECIPE_UPDATE"
+            or event == "GET_ITEM_INFO_RECEIVED" then
             self:RequestUpdate("professions")
         elseif event == "PERKS_PROGRAM_DATA_REFRESH" then
             self:RequestUpdate("monthly")
@@ -784,6 +786,177 @@ end
 
 -- Collect profession tracking
 function addon:CollectProfessionTracking(trackables)
+    self._professionReagentNameCache = self._professionReagentNameCache or {}
+    local reagentNameCache = self._professionReagentNameCache
+
+    local function GetReagentName(reagent)
+        if not reagent then return nil end
+
+        if reagent.name and reagent.name ~= "" then
+            return reagent.name
+        end
+        if reagent.itemName and reagent.itemName ~= "" then
+            return reagent.itemName
+        end
+        if reagent.slotText and reagent.slotText ~= "" then
+            return reagent.slotText
+        end
+
+        if reagent.itemID then
+            local cachedName = reagentNameCache[reagent.itemID]
+            if cachedName and cachedName ~= "" then
+                return cachedName
+            end
+
+            local itemName
+
+            local getItemNameByID = C_Item and C_Item.GetItemNameByID
+            if getItemNameByID then
+                local ok, resolvedName = pcall(getItemNameByID, reagent.itemID)
+                if ok and resolvedName and resolvedName ~= "" then
+                    itemName = resolvedName
+                end
+            end
+
+            if not itemName then
+                local resolvedName = GetItemInfo(reagent.itemID)
+                if resolvedName and resolvedName ~= "" then
+                    itemName = resolvedName
+                end
+            end
+
+            if not itemName then
+                local hyperlink = reagent.hyperlink or reagent.itemLink
+                if hyperlink then
+                    local linkName = hyperlink:match("%[(.+)%]")
+                    if linkName and linkName ~= "" then
+                        itemName = linkName
+                    end
+                end
+            end
+
+            if itemName and itemName ~= "" then
+                reagentNameCache[reagent.itemID] = itemName
+                return itemName
+            end
+
+            if C_Item and C_Item.RequestLoadItemDataByID then
+                pcall(C_Item.RequestLoadItemDataByID, reagent.itemID)
+            end
+
+            return "Item " .. tostring(reagent.itemID)
+        end
+
+        if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+            local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
+            if currencyInfo and currencyInfo.name and currencyInfo.name ~= "" then
+                return currencyInfo.name
+            end
+            return "Currency " .. tostring(reagent.currencyID)
+        end
+
+        if reagent.name and reagent.name ~= "" then
+            return reagent.name
+        end
+
+        return nil
+    end
+
+    local function GetReagentOwnedCount(reagent)
+        if not reagent then return 0 end
+
+        if reagent.itemID then
+            return GetItemCount(reagent.itemID) or 0
+        end
+
+        if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+            local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
+            return (currencyInfo and currencyInfo.quantity) or 0
+        end
+
+        return 0
+    end
+
+    local function GetSlotQuantityRequired(reagentSlotSchematic, reagent)
+        if reagentSlotSchematic and reagentSlotSchematic.GetQuantityRequired and reagent then
+            local ok, quantity = pcall(function()
+                return reagentSlotSchematic:GetQuantityRequired(reagent)
+            end)
+            if ok and quantity then
+                return quantity
+            end
+        end
+
+        return (reagentSlotSchematic and reagentSlotSchematic.quantityRequired) or 1
+    end
+
+    local function BuildRecipeObjectives(schematic)
+        local objectives = {}
+        local reagentTotals = {}
+
+        if not schematic or not schematic.reagentSlotSchematics then
+            return objectives
+        end
+
+        for _, reagentSlotSchematic in ipairs(schematic.reagentSlotSchematics) do
+            local isRequired = reagentSlotSchematic.required
+            if not isRequired and reagentSlotSchematic.quantityRequired and reagentSlotSchematic.quantityRequired > 0 then
+                isRequired = true
+            end
+
+            if isRequired and reagentSlotSchematic.reagents and #reagentSlotSchematic.reagents > 0 then
+                local reagent = reagentSlotSchematic.reagents[1]
+                local reagentName = GetReagentName(reagent)
+                local quantityRequired = GetSlotQuantityRequired(reagentSlotSchematic, reagent)
+
+                if reagentName and quantityRequired and quantityRequired > 0 then
+                    local reagentKey
+                    if reagent.itemID then
+                        reagentKey = "item:" .. reagent.itemID
+                    elseif reagent.currencyID then
+                        reagentKey = "currency:" .. reagent.currencyID
+                    else
+                        reagentKey = "name:" .. reagentName
+                    end
+
+                    if not reagentTotals[reagentKey] then
+                        reagentTotals[reagentKey] = {
+                            name = reagentName,
+                            required = 0,
+                            owned = GetReagentOwnedCount(reagent),
+                        }
+                    end
+
+                    reagentTotals[reagentKey].required = reagentTotals[reagentKey].required + quantityRequired
+                end
+            elseif isRequired and reagentSlotSchematic.slotInfo and reagentSlotSchematic.slotInfo.slotText then
+                local slotText = reagentSlotSchematic.slotInfo.slotText
+                local quantityRequired = reagentSlotSchematic.quantityRequired or 1
+                table.insert(objectives, {
+                    text = slotText,
+                    finished = false,
+                    numFulfilled = 0,
+                    numRequired = quantityRequired,
+                })
+            end
+        end
+
+        for _, data in pairs(reagentTotals) do
+            table.insert(objectives, {
+                text = data.name,
+                finished = data.owned >= data.required,
+                numFulfilled = data.owned,
+                numRequired = data.required,
+            })
+        end
+
+        table.sort(objectives, function(a, b)
+            return (a.text or "") < (b.text or "")
+        end)
+
+        return objectives
+    end
+
     -- Helper to add recipes
     local function AddRecipes(isRecraft)
         local trackedRecipes = C_TradeSkillUI.GetRecipesTracked(isRecraft)
@@ -793,6 +966,7 @@ function addon:CollectProfessionTracking(trackables)
             if schematic then
                 local professionInfo = C_TradeSkillUI.GetProfessionInfoByRecipeID(recipeID)
                 local professionName = professionInfo and professionInfo.professionName or "Professions"
+                local objectives = BuildRecipeObjectives(schematic)
                 
                 table.insert(trackables, {
                     type = "profession",
@@ -801,7 +975,7 @@ function addon:CollectProfessionTracking(trackables)
                     level = 0, -- Recipes don't really have levels like quests
                     zone = professionName,
                     isRecraft = isRecraft,
-                    objectives = {}, -- Could list reagents here if we wanted
+                    objectives = objectives,
                     color = self.db.professionColor
                 })
             end
