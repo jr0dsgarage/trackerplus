@@ -1899,15 +1899,25 @@ function addon:UpdateTrackerDisplay(trackables)
             if not header.expandBtn._handlersBound then
                 -- Icon Tooltip & Click (Exclusive)
                 header.expandBtn:SetScript("OnClick", function(self)
-                     addon:ToggleHeader(self._headerKey, IsShiftKeyDown())
+                     local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+                     addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
                 end)
                 
                 header.expandBtn:SetScript("OnEnter", function(self)
                      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                     if self._headerCollapsed then
-                         GameTooltip:SetText("Hold SHIFT to Expand All", 1, 1, 1)
+                     local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+                     if isMainHeader then
+                         if self._headerCollapsed then
+                             GameTooltip:SetText("Hold SHIFT to Expand All", 1, 1, 1)
+                         else
+                             GameTooltip:SetText("Hold SHIFT to Minimize All", 1, 1, 1)
+                         end
                      else
-                         GameTooltip:SetText("Hold SHIFT to Minimize All", 1, 1, 1)
+                         if self._headerCollapsed then
+                             GameTooltip:SetText("Click to Expand", 1, 1, 1)
+                         else
+                             GameTooltip:SetText("Click to Collapse", 1, 1, 1)
+                         end
                      end
                      GameTooltip:Show()
                 end)
@@ -2014,8 +2024,9 @@ function addon:UpdateTrackerDisplay(trackables)
             if header._scriptMode ~= "header" then
                 header:SetScript("OnClick", function(self, mouseButton)
                     if mouseButton == "LeftButton" then
-                        -- Pass IsShiftKeyDown() to support recursive toggle
-                        addon:ToggleHeader(self._headerKey, IsShiftKeyDown())
+                        local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+                        -- Shift recursive toggle is only for major/main headers
+                        addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
                     end
                 end)
                 -- Clear other scripts that might conflict
