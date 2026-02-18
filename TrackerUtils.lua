@@ -340,12 +340,22 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     AchievementFrame_SelectAchievement(trackable.id)
                 end
             elseif trackable.type == "profession" then
+                local info = C_TradeSkillUI.GetProfessionInfoByRecipeID(trackable.id)
+                if info and info.professionID and C_TradeSkillUI.OpenTradeSkill then
+                    C_TradeSkillUI.OpenTradeSkill(info.professionID)
+                end
+
                 if C_TradeSkillUI.OpenRecipe then
                     C_TradeSkillUI.OpenRecipe(trackable.id)
-                else
-                    local info = C_TradeSkillUI.GetProfessionInfoByRecipeID(trackable.id)
-                    if info and info.professionID then
-                        C_TradeSkillUI.OpenTradeSkill(info.professionID)
+
+                    local function TryOpenRecipe()
+                        C_TradeSkillUI.OpenRecipe(trackable.id)
+                    end
+
+                    if C_Timer and C_Timer.After then
+                        C_Timer.After(0, TryOpenRecipe)
+                        C_Timer.After(0.2, TryOpenRecipe)
+                        C_Timer.After(0.5, TryOpenRecipe)
                     end
                 end
             elseif trackable.type == "monthly" then

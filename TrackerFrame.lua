@@ -420,6 +420,12 @@ function addon:UpdateTrackerAppearance()
     if not trackerFrame then return end
     
     local db = self.db
+
+    if db.minimized then
+        trackerFrame:SetSize(34, 34)
+        trackerFrame:SetScale(db.frameScale)
+        return
+    end
     
     -- Update background
     if trackerFrame.bg then

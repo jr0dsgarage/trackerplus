@@ -188,6 +188,9 @@ function addon:RegisterEvents()
     frame:RegisterEvent("TRADE_SKILL_SHOW")
     frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
     frame:RegisterEvent("TRACKED_RECIPE_UPDATE")
+    pcall(function() frame:RegisterEvent("ITEM_COUNT_CHANGED") end)
+    pcall(function() frame:RegisterEvent("BAG_UPDATE_DELAYED") end)
+    pcall(function() frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE") end)
 
     -- Monthly Activities (Trading Post)
     if C_PerksProgram then
@@ -275,7 +278,10 @@ function addon:OnEvent(event, ...)
             or event == "TRADE_SKILL_SHOW"
             or event == "TRADE_SKILL_LIST_UPDATE"
             or event == "TRACKED_RECIPE_UPDATE"
-            or event == "GET_ITEM_INFO_RECEIVED" then
+            or event == "GET_ITEM_INFO_RECEIVED"
+            or event == "ITEM_COUNT_CHANGED"
+            or event == "BAG_UPDATE_DELAYED"
+            or event == "CURRENCY_DISPLAY_UPDATE" then
             self:RequestUpdate("professions")
         elseif event == "PERKS_PROGRAM_DATA_REFRESH" then
             self:RequestUpdate("monthly")
@@ -899,10 +905,7 @@ function addon:CollectProfessionTracking(trackables)
         end
 
         for _, reagentSlotSchematic in ipairs(schematic.reagentSlotSchematics) do
-            local isRequired = reagentSlotSchematic.required
-            if not isRequired and reagentSlotSchematic.quantityRequired and reagentSlotSchematic.quantityRequired > 0 then
-                isRequired = true
-            end
+            local isRequired = reagentSlotSchematic.required == true
 
             if isRequired and reagentSlotSchematic.reagents and #reagentSlotSchematic.reagents > 0 then
                 local reagent = reagentSlotSchematic.reagents[1]
