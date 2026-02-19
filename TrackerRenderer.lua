@@ -36,61 +36,68 @@ local function ParseObjectiveDisplay(item, obj, objIndex)
         progressMax = 100,
     }
 
-    if obj.type == "progressbar"
-        or (obj.text and string.find(obj.text, "%%"))
-        or (obj.quantityString and string.find(obj.quantityString, "%%")) then
+    local required = tonumber(obj.numRequired)
+    local fulfilled = tonumber(obj.numFulfilled)
+
+    if obj.type == "progressbar" then
         parsed.isProgressBar = true
 
-        local required = tonumber(obj.numRequired)
-        local fulfilled = tonumber(obj.numFulfilled)
-
-        if required and required > 0 then
-            parsed.progressValue = fulfilled or 0
-            parsed.progressMax = required
-        else
-            local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
-            if not ratioFulfilled then
-                ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
-            end
-
-            if ratioFulfilled and ratioRequired then
-                parsed.progressValue = tonumber(ratioFulfilled) or 0
-                parsed.progressMax = tonumber(ratioRequired) or 100
+        -- Follow Blizzard's task progress source when available.
+        if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo and item and item.id then
+            local taskProgress = C_TaskQuest.GetQuestProgressBarInfo(item.id)
+            if taskProgress ~= nil then
+                parsed.progressValue = tonumber(taskProgress) or 0
+                parsed.progressMax = 100
             else
+                -- Fallback to explicit objective percentage if provided by Blizzard objective text.
                 local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
                 if not percentMatch then
                     percentMatch = string.match(obj.text or "", "(%d+)%%")
                 end
-
                 if percentMatch then
                     parsed.progressValue = tonumber(percentMatch) or 0
                     parsed.progressMax = 100
-                elseif obj.type == "progressbar" then
+                elseif required and required > 0 then
                     parsed.progressValue = fulfilled or 0
-                    parsed.progressMax = 100
+                    parsed.progressMax = required
+                else
+                    local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
+                    if not ratioFulfilled then
+                        ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
+                    end
+                    if ratioFulfilled and ratioRequired then
+                        parsed.progressValue = tonumber(ratioFulfilled) or 0
+                        parsed.progressMax = tonumber(ratioRequired) or 100
+                    else
+                        parsed.progressValue = fulfilled or 0
+                        parsed.progressMax = 100
+                    end
                 end
             end
-        end
+        elseif required and required > 0 then
+            parsed.progressValue = fulfilled or 0
+            parsed.progressMax = required
+        else
+            local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
+            if not percentMatch then
+                percentMatch = string.match(obj.text or "", "(%d+)%%")
+            end
 
-        if obj.type == "progressbar" and (obj.text == "Progress" or obj.text == nil) and item.objectives then
-            for _, sibling in ipairs(item.objectives) do
-                if sibling ~= obj then
-                    local sReq = tonumber(sibling.numRequired)
-                    if sReq and sReq > 0 then
-                        parsed.progressValue = tonumber(sibling.numFulfilled) or 0
-                        parsed.progressMax = sReq
-                        break
-                    else
-                        local ratioFulfilled, ratioRequired = string.match(sibling.quantityString or "", "(%d+)%s*/%s*(%d+)")
-                        if not ratioFulfilled then
-                            ratioFulfilled, ratioRequired = string.match(sibling.text or "", "(%d+)%s*/%s*(%d+)")
-                        end
-                        if ratioFulfilled and ratioRequired then
-                            parsed.progressValue = tonumber(ratioFulfilled) or 0
-                            parsed.progressMax = tonumber(ratioRequired) or 100
-                            break
-                        end
-                    end
+            if percentMatch then
+                parsed.progressValue = tonumber(percentMatch) or 0
+                parsed.progressMax = 100
+            else
+                local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
+                if not ratioFulfilled then
+                    ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
+                end
+
+                if ratioFulfilled and ratioRequired then
+                    parsed.progressValue = tonumber(ratioFulfilled) or 0
+                    parsed.progressMax = tonumber(ratioRequired) or 100
+                else
+                    parsed.progressValue = fulfilled or 0
+                    parsed.progressMax = 100
                 end
             end
         end
@@ -336,7 +343,40 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     if db.showQuestLevel and item.level and item.level > 0 then
         titleText = string.format("[%d] %s", item.level, titleText)
     end
-    if item.questType then
+
+    local function NormalizeHeaderText(value)
+        if not value or value == "" then return "" end
+        local normalized = tostring(value):lower()
+        normalized = normalized:gsub("^%s+", ""):gsub("%s+$", "")
+        normalized = normalized:gsub("[^%w%s]", "")
+        normalized = normalized:gsub("%s+", " ")
+        return normalized
+    end
+
+    local function IsQuestTypeRedundant(typeText)
+        local qType = NormalizeHeaderText(typeText)
+        if qType == "" then return true end
+
+        local minorHeader = NormalizeHeaderText(item._minorHeaderTitle)
+        local majorHeader = NormalizeHeaderText(item._majorHeaderTitle)
+        local zoneHeader = NormalizeHeaderText(item.zone)
+
+        if qType == minorHeader or qType == majorHeader or qType == zoneHeader then
+            return true
+        end
+        if minorHeader ~= "" and (minorHeader:find(qType, 1, true) or qType:find(minorHeader, 1, true)) then
+            return true
+        end
+        if zoneHeader ~= "" and (zoneHeader:find(qType, 1, true) or qType:find(zoneHeader, 1, true)) then
+            return true
+        end
+        return false
+    end
+
+    if item.questType
+        and not item.isWorldQuest
+        and item.type ~= "worldquest"
+        and not IsQuestTypeRedundant(item.questType) then
         titleText = titleText .. " (" .. item.questType .. ")"
     end
     
@@ -597,6 +637,34 @@ function addon:UpdateTrackerDisplay(trackables)
     self:ResetButtonPool()
     
     local db = self.db
+
+    local function ApplyConfiguredHeaderBackground(header)
+        local bgStyle = db.headerBackgroundStyle or "tracker"
+        header.bg:ClearAllPoints()
+
+        if bgStyle == "none" then
+            header.bg:SetAllPoints(header)
+            header.bg:SetColorTexture(0, 0, 0, 0)
+        elseif bgStyle == "questlog" then
+            header.bg:SetPoint("TOPLEFT", header, "TOPLEFT", 2, 0)
+            header.bg:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", -2, 0)
+            if header.bg.SetAtlas then
+                header.bg:SetAtlas("QuestLog-tab")
+                header.bg:SetVertexColor(1, 1, 1, 1)
+            else
+                header.bg:SetTexture("Interface\\QuestFrame\\QuestLog-tab")
+                header.bg:SetTexCoord(0, 1, 0, 1)
+            end
+        else
+            header.bg:SetAllPoints(header)
+            if header.bg.SetAtlas then
+                header.bg:SetAtlas("UI-QuestTracker-Secondary-Objective-Header")
+                header.bg:SetVertexColor(1, 1, 1, 1)
+            else
+                header.bg:SetColorTexture(0, 0, 0, 0.2)
+            end
+        end
+    end
     
     -- Extract Scenarios and Super Tracked items first
     self._tmpScenarios = self._tmpScenarios or {}
@@ -620,13 +688,21 @@ function addon:UpdateTrackerDisplay(trackables)
     ClearArray(worldQuestItems)
     ClearArray(remainingTrackables)
     
+    local superTrackedQuestID = (C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()) or 0
+
     for _, item in ipairs(trackables) do
         if item.type == "scenario" then
             table.insert(scenarios, item)
         elseif item.type == "autoquest" then
             table.insert(autoQuests, item)
         elseif item.type == "supertrack" then
-            table.insert(superTrackedItems, item)
+            if superTrackedQuestID > 0
+                and item.id
+                and item.id == superTrackedQuestID
+                and item.title
+                and item.title ~= "" then
+                table.insert(superTrackedItems, item)
+            end
         elseif item.type == "bonus" then
             table.insert(bonusObjectives, item)
         elseif item.type == "worldquest" then
@@ -644,8 +720,6 @@ function addon:UpdateTrackerDisplay(trackables)
         trackables = self:OrganizeTrackables(trackables)
     end
     
-    local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
-
     -- Render Auto Quests with native Blizzard text when possible
     if #autoQuests > 0 then
          -- Determine vertical offset
@@ -865,7 +939,9 @@ function addon:UpdateTrackerDisplay(trackables)
     local scenarioHeight = 0
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
-    if useBlizzardScenario then
+        if useBlizzardScenario then
+            local scenarioTopInset = 5
+            local scenarioBottomPadding = 14
          -- We are using Blizzard's frame, so we hijack it.
          local contents = scenarioTracker.ContentsFrame
          
@@ -877,27 +953,27 @@ function addon:UpdateTrackerDisplay(trackables)
               contents:SetFrameStrata("HIGH") 
               contents:SetFrameLevel(100)
               
-              -- Create a solid opaque backdrop behind the hijacked scenario frame to hide content below it
+                -- Create a solid opaque backdrop behind the hijacked scenario frame to hide content below it
               if not self.scenarioFrame.bgMask then
                    self.scenarioFrame.bgMask = self.scenarioFrame:CreateTexture(nil, "BACKGROUND")
                    self.scenarioFrame.bgMask:SetColorTexture(0, 0, 0, 0.9) -- Dark opaque background
               end
-              -- Fix the mask size to cover the content strictly within the tracker frame width
-              self.scenarioFrame.bgMask:ClearAllPoints()
-              self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
-              self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-              self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -10)
-              self.scenarioFrame.bgMask:Show()
-         else
-              if self.scenarioFrame.bgMask then
-                   self.scenarioFrame.bgMask:Show()
-              end
          end
+
+            -- Keep mask anchors in sync every update (not only on first reparent),
+            -- so height changes from scenario criteria updates do not leave visual gaps.
+            if self.scenarioFrame.bgMask then
+                self.scenarioFrame.bgMask:ClearAllPoints()
+                self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
+                self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
+                self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -scenarioBottomPadding)
+                self.scenarioFrame.bgMask:Show()
+            end
 
             local scenarioWidth = self.db.frameWidth - 5
             if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
                 contents:ClearAllPoints()
-                contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -5)
+                 contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -scenarioTopInset)
                 -- Constrain width so it fits our frame (and forces word wrap if supported)
                 contents:SetWidth(scenarioWidth)
                 self._scenarioContentsAnchored = true
@@ -917,20 +993,26 @@ function addon:UpdateTrackerDisplay(trackables)
          end
 
          -- The height of the blizzard frame varies. We need to update our container to match it.
-         local blizzardHeight = contents:GetHeight()
+         local blizzardHeight = contents:GetHeight() or 0
+         if contents.WidgetContainer and contents.WidgetContainer.GetHeight then
+             blizzardHeight = math.max(blizzardHeight, contents.WidgetContainer:GetHeight() or 0)
+         end
          
          -- If height is 0 (collapsed/hidden), force a minimum reasonable height so widgets aren't crushed
          if not blizzardHeight or blizzardHeight < 40 then 
              blizzardHeight = 100 
              contents:SetHeight(blizzardHeight) -- Force the frame open
          end
-         
-         scenarioHeight = blizzardHeight
-         scenarioYOffset = scenarioHeight + 30 -- Increase padding to prevent overlap with headers
+
+         scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding
+         scenarioYOffset = scenarioHeight
          
     else
         self._scenarioContentsAnchored = false
         self._scenarioContentsWidth = nil
+        if self.scenarioFrame and self.scenarioFrame.bgMask then
+             self.scenarioFrame.bgMask:Hide()
+        end
     end
 
     if (not useBlizzardScenario) and self.currentScenarios and #self.currentScenarios > 0 then
@@ -1266,7 +1348,7 @@ function addon:UpdateTrackerDisplay(trackables)
     
     
     -- Render Super Tracked Items (Pinned)
-    if #superTrackedItems > 0 then
+        if superTrackedQuestID > 0 and #superTrackedItems > 0 then
          -- Add Header if scenarios exist or just to separate
          if scenarioYOffset > 0 then
               scenarioYOffset = scenarioYOffset + 10
@@ -1488,7 +1570,7 @@ function addon:UpdateTrackerDisplay(trackables)
          header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
          
          header.styledBackdrop:Show()
-         header.bg:SetColorTexture(0, 0, 0, 0) 
+         ApplyConfiguredHeaderBackground(header)
          header:SetHeight(30)
          header:Show()
          
@@ -1537,10 +1619,16 @@ function addon:UpdateTrackerDisplay(trackables)
     --------------------------------------------------------------------------
     local wqYOffset = 0
     local wqFrame = self.worldQuestFrame
+    local hasBlizzardWQContent = false
+    local manualWQRendered = 0
     
     -- Hijacking Strategy for World Quests
     local wqTracker = WorldQuestObjectiveTracker
     local useBlizzardWQ = (wqTracker and wqTracker.ContentsFrame)
+    local preferManualWQ = (#worldQuestItems > 0)
+    if preferManualWQ then
+        useBlizzardWQ = false
+    end
     
     if useBlizzardWQ then
          local contents = wqTracker.ContentsFrame
@@ -1551,21 +1639,28 @@ function addon:UpdateTrackerDisplay(trackables)
          local isHijacked = (contents:GetParent() == wqFrame)
          local isCollapsed = db.collapsedSections and db.collapsedSections["World Quests"]
          
-         local hasContent = (blizzardWQHeight > 1 and contents:IsShown())
+         local hasContent = false
          if isHijacked and isCollapsed then hasContent = true end
-         
-         if not hasContent then
-             -- Deep check for children
-             for _, child in pairs({contents:GetChildren()}) do
-                 if child:IsShown() and child:GetHeight() > 1 then
-                     hasContent = true
-                     blizzardWQHeight = math.max(blizzardWQHeight, 10)
-                     break
-                 end
+
+         -- Prefer concrete visible child rows over container size, since the Blizzard
+         -- frame can report non-zero height even when rows have not rendered yet.
+         for _, child in pairs({contents:GetChildren()}) do
+             if child:IsShown() and child:GetHeight() > 8 then
+                 hasContent = true
+                 blizzardWQHeight = math.max(blizzardWQHeight, child:GetHeight() or 10)
+             end
+         end
+
+         if not hasContent and contents.WidgetContainer and contents.WidgetContainer:IsShown() then
+             local widgetHeight = contents.WidgetContainer:GetHeight() or 0
+             if widgetHeight > 8 then
+                 hasContent = true
+                 blizzardWQHeight = math.max(blizzardWQHeight, widgetHeight)
              end
          end
          
          if hasContent then
+              hasBlizzardWQContent = true
               -- Hijack it!
                 pcall(function()
                   if contents:GetParent() ~= wqFrame then
@@ -1613,16 +1708,29 @@ function addon:UpdateTrackerDisplay(trackables)
               end
                 self._wqContentsAnchored = false
                 self._wqContentsWidth = nil
+                 hasBlizzardWQContent = false
          end
     end
 
         if not useBlizzardWQ then
+            -- Ensure Blizzard WQ frame is restored when we switch to manual mode.
+            if wqTracker and wqTracker.ContentsFrame then
+                local contents = wqTracker.ContentsFrame
+                if contents:GetParent() == wqFrame then
+                    pcall(function()
+                        contents:SetParent(wqTracker)
+                        contents:ClearAllPoints()
+                        contents:SetPoint("TOPLEFT", wqTracker, "TOPLEFT", 0, 0)
+                    end)
+                end
+            end
             self._wqContentsAnchored = false
             self._wqContentsWidth = nil
+            hasBlizzardWQContent = false
         end
 
     -- Render the Header container for World Quests (Either used by Hijacked frame or manual items)
-    if wqFrame and (wqYOffset > 0 or #worldQuestItems > 0) then
+    if wqFrame and (hasBlizzardWQContent or #worldQuestItems > 0) then
         if not db.collapsedSections then db.collapsedSections = {} end
         local collapsed = db.collapsedSections["World Quests"]
         
@@ -1660,7 +1768,7 @@ function addon:UpdateTrackerDisplay(trackables)
             addon:RequestUpdate()
         end)
         
-        header.bg:SetColorTexture(0, 0, 0, 0.8) -- Darker background to be visible
+        ApplyConfiguredHeaderBackground(header)
         
         -- Cleanup header recycling
         if header.poiButton then header.poiButton:Hide() end
@@ -1676,7 +1784,7 @@ function addon:UpdateTrackerDisplay(trackables)
         -- BUT if hijacked frame was found and YOffset > 0, we just set the header. 
         -- If we are collapsed, we need to hide the hijacked frame!
         
-        if useBlizzardWQ and wqYOffset > 0 then
+           if useBlizzardWQ and hasBlizzardWQContent and wqYOffset > 0 then
              local contents = wqTracker.ContentsFrame
              if collapsed then
                   contents:Hide()
@@ -1691,17 +1799,31 @@ function addon:UpdateTrackerDisplay(trackables)
                        contents.WidgetContainer:SetAlpha(1)
                   end
              end
-        elseif #worldQuestItems > 0 and wqYOffset == 0 then
-             -- Fallback: Manual render if Blizzard frame didn't produce content but we found items?
-             -- Actually, if wqYOffset is 0, it means Blizzard frame yielded nothing.
-             -- So we render manual items.
+           elseif #worldQuestItems > 0 and (wqYOffset == 0 or not hasBlizzardWQContent) then
+               -- Fallback: manual render when Blizzard WQ container is missing/empty.
              wqYOffset = 24 + 5
              
              if not collapsed then
                 for _, item in ipairs(worldQuestItems) do
                     local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
                     wqYOffset = wqYOffset + height + db.spacingItemVertical
+                    manualWQRendered = manualWQRendered + 1
                 end
+            end
+        end
+
+        if addon.Log then
+            local diagSig = table.concat({
+                tostring(useBlizzardWQ),
+                tostring(hasBlizzardWQContent),
+                tostring(#worldQuestItems),
+                tostring(manualWQRendered),
+                tostring(collapsed),
+                tostring(wqYOffset),
+            }, "|")
+            if self._wqDiagSig ~= diagSig then
+                addon:Log("WQ diag: useBlizz=%s hasBlizz=%s items=%d manual=%d collapsed=%s y=%d", tostring(useBlizzardWQ), tostring(hasBlizzardWQContent), #worldQuestItems, manualWQRendered, tostring(collapsed), wqYOffset)
+                self._wqDiagSig = diagSig
             end
         end
     end
@@ -1729,7 +1851,7 @@ function addon:UpdateTrackerDisplay(trackables)
         else
             self.scenarioFrame:Show()
         end
-           topParent, topPoint, topRelPoint, topX, topY = self.scenarioFrame, "TOPLEFT", "BOTTOMLEFT", 0, 0
+           topParent, topPoint, topRelPoint, topX, topY = self.scenarioFrame, "TOPLEFT", "BOTTOMLEFT", 0, -4
     else
         self.scenarioFrame:Hide()
            topParent, topPoint, topRelPoint, topX, topY = self.trackerFrame, "TOPLEFT", "TOPLEFT", 0, -25
@@ -1767,6 +1889,8 @@ function addon:UpdateTrackerDisplay(trackables)
     local yOffset = 5  -- Start near top of content frame
     local currentMajorCollapsed = false
     local currentMinorCollapsed = false
+    local currentMajorHeaderTitle = nil
+    local currentMinorHeaderTitle = nil
     
     -- Display trackables
     for _, item in ipairs(trackables) do
@@ -1777,8 +1901,11 @@ function addon:UpdateTrackerDisplay(trackables)
             if isMajor then
                 currentMajorCollapsed = item.collapsed
                 currentMinorCollapsed = false -- Reset minor scope when entering new major section
+                currentMajorHeaderTitle = item.title
+                currentMinorHeaderTitle = nil
             else
                 currentMinorCollapsed = item.collapsed
+                currentMinorHeaderTitle = item.title
             end
 
             -- Skip rendering minor headers if the major section is collapsed
@@ -2057,6 +2184,8 @@ function addon:UpdateTrackerDisplay(trackables)
             -- Trackable item (quest, achievement, etc.)
             -- Only render if neither the major nor minor header is collapsed
             if not currentMajorCollapsed and not currentMinorCollapsed then
+                item._majorHeaderTitle = currentMajorHeaderTitle
+                item._minorHeaderTitle = currentMinorHeaderTitle
                 local height = self:RenderTrackableItem(contentFrame, item, yOffset, db.spacingTrackableIndent)
                 yOffset = yOffset + height + db.spacingItemVertical
             end

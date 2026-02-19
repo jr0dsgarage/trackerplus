@@ -419,7 +419,7 @@ function addon:CollectTrackables()
 
     if full or dirtySections.quests then
         refreshedAny = true
-        if db.showQuests then
+        if db.showQuests or db.showWorldQuests then
             RefreshBucket("quests", addon.CollectQuests, self)
         else
             wipe(sectionCache.quests)
@@ -551,8 +551,9 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
 
-    -- Check for Task/Bonus Objective Progress Bar
-    if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
+    -- Check for Task/Bonus/World Quest progress bars only
+    local canUseTaskProgress = C_QuestLog.IsQuestTask(questID) or isWorldQuest or isBonusObjective
+    if canUseTaskProgress and C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
         
         -- DEBUG: Log progress bar info
@@ -621,13 +622,23 @@ function addon:CollectQuests(trackables)
             if info.isHeader then
                 currentZone = info.title
             else
+                local isWorldQuest = C_QuestLog.IsWorldQuest(info.questID)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
                 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
-                
-                if (not info.isHidden or allowHidden) and isWatched then
+
+                local shouldInclude = false
+                if isWorldQuest then
+                    -- World quests are rendered in their own pinned section.
+                    -- Do not require the watch flag; quest-log tracking can be transient.
+                    shouldInclude = self.db.showWorldQuests
+                else
+                    shouldInclude = self.db.showQuests and isWatched
+                end
+
+                if (not info.isHidden or allowHidden) and shouldInclude then
                     local questInfo = self:GetQuestData(i, nil, currentZone)
                     if questInfo then
                         table.insert(trackables, questInfo)
