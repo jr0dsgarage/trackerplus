@@ -106,6 +106,14 @@ local function ParseObjectiveDisplay(item, obj, objIndex)
         if parsed.progressValue < 0 then parsed.progressValue = 0 end
         if parsed.progressValue > parsed.progressMax then parsed.progressValue = parsed.progressMax end
 
+        -- Follow Blizzard completion state for visibility, not just computed percentage.
+        -- If Blizzard marks objective or quest complete, hide the progress bar row.
+        local objectiveFinished = (obj.finished == true)
+        local questFinished = (item and (item.isComplete == true or item.isFinished == true))
+        if objectiveFinished or questFinished then
+            parsed.isProgressBar = false
+        end
+
         local cleanText = obj.text or ""
         cleanText = cleanText:gsub("%s*%(%d+%%%)", "")
         cleanText = cleanText:gsub("%s*%d+%%", "")
