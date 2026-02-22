@@ -326,6 +326,36 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         if button.icon then button.icon:Hide() end
     end
     
+    -- Group Finder Button
+    local showGroupButton = (item.isWorldQuest or item.type == "bonus") and C_LFGList.CanCreateQuestGroup(item.id)
+    
+    if showGroupButton then
+        if not button.groupButton then
+            button.groupButton = CreateFrame("Button", nil, button)
+            button.groupButton:SetSize(16, 16)
+            
+            button.groupButton:SetNormalAtlas("socialqueuing-icon-eye")
+            button.groupButton:SetHighlightAtlas("socialqueuing-icon-eye")
+            button.groupButton:GetHighlightTexture():SetAlpha(0.5)
+            
+            button.groupButton:SetScript("OnClick", function(self)
+                LFGListUtil_FindQuestGroup(self.questID)
+            end)
+            
+            button.groupButton:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(OBJECTIVES_FIND_GROUP, 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            button.groupButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+        
+        button.groupButton.questID = item.id
+        button.groupButton:Show()
+    else
+        if button.groupButton then button.groupButton:Hide() end
+    end
+
     if not isQuest then
          leftPadding = db.spacingMinorHeaderIndent
     else
@@ -341,6 +371,25 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         else
              rightPadding = -22 -- Make room for item button
         end
+    end
+    
+    -- Adjust for Group Button
+    if showGroupButton then
+         button.groupButton:ClearAllPoints()
+         if item.item and button.itemButton then
+              -- Place to the left of the item button
+              if item.type == "supertrack" then
+                   button.groupButton:SetPoint("RIGHT", button, "RIGHT", -45, 0)
+                   rightPadding = rightPadding - 18
+              else
+                   button.groupButton:SetPoint("RIGHT", button.itemButton, "LEFT", -2, 0)
+                   rightPadding = rightPadding - 18
+              end
+         else
+              -- No item button, place at right edge
+              button.groupButton:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, -2)
+              rightPadding = -20
+         end
     end
 
     button.text:ClearAllPoints()
