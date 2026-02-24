@@ -1010,22 +1010,9 @@ function addon:UpdateTrackerDisplay(trackables)
               contents:SetFrameStrata("HIGH") 
               contents:SetFrameLevel(100)
               
-                -- Create a solid opaque backdrop behind the hijacked scenario frame to hide content below it
-              if not self.scenarioFrame.bgMask then
-                   self.scenarioFrame.bgMask = self.scenarioFrame:CreateTexture(nil, "BACKGROUND")
-                   self.scenarioFrame.bgMask:SetColorTexture(0, 0, 0, 0.9) -- Dark opaque background
-              end
+              -- Disabled background mask as per request, just pure frame now.
+              if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
          end
-
-            -- Keep mask anchors in sync every update (not only on first reparent),
-            -- so height changes from scenario criteria updates do not leave visual gaps.
-            if self.scenarioFrame.bgMask then
-                self.scenarioFrame.bgMask:ClearAllPoints()
-                self.scenarioFrame.bgMask:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, 0)
-                self.scenarioFrame.bgMask:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-                self.scenarioFrame.bgMask:SetPoint("BOTTOM", contents, "BOTTOM", 0, -scenarioBottomPadding)
-                self.scenarioFrame.bgMask:Show()
-            end
 
             local scenarioWidth = self.db.frameWidth - 5
             if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
@@ -1050,18 +1037,45 @@ function addon:UpdateTrackerDisplay(trackables)
          end
 
          -- The height of the blizzard frame varies. We need to update our container to match it.
-         local blizzardHeight = contents:GetHeight() or 0
-         if contents.WidgetContainer and contents.WidgetContainer.GetHeight then
-             blizzardHeight = math.max(blizzardHeight, contents.WidgetContainer:GetHeight() or 0)
-         end
+         -- Use robust child-scanning to determine true content height, as GetHeight() on the container 
+         -- is often unreliable during objective updates or animations.
+         local blizzardHeight = 0
          
-         -- If height is 0 (collapsed/hidden), force a minimum reasonable height so widgets aren't crushed
-         if not blizzardHeight or blizzardHeight < 40 then 
-             blizzardHeight = 100 
-             contents:SetHeight(blizzardHeight) -- Force the frame open
+         -- Method 1: Check standard GetHeight
+         local rawHeight = contents:GetHeight() or 0
+         if rawHeight > blizzardHeight then blizzardHeight = rawHeight end
+
+         -- Method 2: Check WidgetContainer
+         if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
+             local wH = contents.WidgetContainer:GetHeight() or 0
+             if wH > blizzardHeight then blizzardHeight = wH end
          end
 
-         scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding
+         -- Method 3: Scan all visible children for the lowest bottom edge
+         -- This catches dynamically added progress bars or bonus objectives within the scenario block
+         if contents.GetNumChildren then
+             local parentTop = contents:GetTop()
+             if parentTop then
+                 for _, child in pairs({contents:GetChildren()}) do
+                     if child:IsShown() and child:GetBottom() then
+                         local childBottom = child:GetBottom()
+                         local relativeHeight = parentTop - childBottom
+                         if relativeHeight > blizzardHeight then
+                             blizzardHeight = relativeHeight
+                         end
+                     end
+                 end
+             end
+         end
+         
+         -- If height is suspiciously small (collapsed/hidden), force a minimum reasonable height
+         if blizzardHeight < 40 then 
+             blizzardHeight = 100 
+             -- Only force height on the container if we are synthesizing it
+             if rawHeight < 100 then contents:SetHeight(blizzardHeight) end
+         end
+
+         scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding + 10 -- Extra padding for safety
          scenarioYOffset = scenarioHeight
          
     else
@@ -1461,6 +1475,9 @@ function addon:UpdateTrackerDisplay(trackables)
          
          header:SetHeight(30)
          header:Show()
+         
+         -- Flag this button usage so subsequent reuses invalidate cached properties
+         header._scriptMode = "activeQuestHeader"
          
          -- Cleanup header parts
          if header.poiButton then header.poiButton:Hide() end
@@ -1989,6 +2006,9 @@ function addon:UpdateTrackerDisplay(trackables)
             
             header:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", xOffset, -yOffset)
             header:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", 0, -yOffset)
+            
+            -- Ensure any hijacked "Active Quest" artifacts are hidden
+            if header.styledBackdrop then header.styledBackdrop:Hide() end
             
             -- Compatibility: Auctionator Crafting Search Button
             if isMajor and item.key == "MAJOR_profession" then
