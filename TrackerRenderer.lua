@@ -221,6 +221,17 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         button:SetClipsChildren(false) -- Allow button to extend outside (for supertrack)
         secureBtn:SetAttribute("type", "item")
         secureBtn:SetAttribute("item", item.item.link)
+        secureBtn.itemLink = item.item.link
+
+        secureBtn:SetScript("OnEnter", function(self)
+            if not self.itemLink then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(self.itemLink)
+            GameTooltip:Show()
+        end)
+        secureBtn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
         
         -- Robust Icon handling
         local texture = item.item.texture
@@ -272,7 +283,10 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         
         -- leftPadding is handled separately now as item is on the right
     else
-        if button.itemButton then button.itemButton:Hide() end
+        if button.itemButton then
+            button.itemButton.itemLink = nil
+            button.itemButton:Hide()
+        end
     end
 
     -- Configure POI Button Appearance
