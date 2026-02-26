@@ -234,6 +234,21 @@ function addon:GetOrCreateButton(parent)
     if btn.stageBox then btn.stageBox:Hide() end
     if btn.styledBackdrop then btn.styledBackdrop:Hide() end
     if btn.SetBackdrop then btn:SetBackdrop(nil) end
+
+    -- Reset quest-specific child controls so pooled buttons don't leak icons
+    if btn.poiButton then
+        btn.poiButton.questID = nil
+        btn.poiButton:Hide()
+    end
+    if btn.itemButton then
+        btn.itemButton.itemLink = nil
+        btn.itemButton:Hide()
+    end
+    if btn.groupButton then
+        btn.groupButton.questID = nil
+        btn.groupButton:Hide()
+        btn.groupButton:ClearAllPoints()
+    end
     
     return btn
 end
@@ -313,8 +328,8 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 elseif trackable.popUpType == "OFFER" then
                      if ShowQuestOffer then ShowQuestOffer(trackable.questID) end
                 end
-            elseif trackable.type == "quest" then
-                local questID = trackable.id
+            elseif trackable.type == "quest" or trackable.type == "supertrack" then
+                local questID = trackable.id or trackable.questID
                 if questID then
                     -- Show on map
                     if QuestMapFrame and QuestMapFrame.GetDetailQuestID and QuestMapFrame:GetDetailQuestID() == questID and QuestMapFrame:IsVisible() then
@@ -375,38 +390,40 @@ function addon:OnTrackableClick(trackable, mouseButton)
         end
     elseif mouseButton == "RightButton" then
         -- Right click: Context Menu
-        if trackable.type == "quest" then
+        if trackable.type == "quest" or trackable.type == "supertrack" then
+            local questID = trackable.id or trackable.questID
+            if not questID then return end
             MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
                 rootDescription:CreateTitle(trackable.title)
                 
                 -- Focus (Super Track)
                 rootDescription:CreateButton("Focus Quest", function()
-                    C_SuperTrack.SetSuperTrackedQuestID(trackable.id)
+                    C_SuperTrack.SetSuperTrackedQuestID(questID)
                 end)
                 
                 -- Stop Tracking
                 rootDescription:CreateButton("Stop Tracking", function()
-                    C_QuestLog.RemoveQuestWatch(trackable.id)
+                    C_QuestLog.RemoveQuestWatch(questID)
                     addon:RequestUpdate()
                 end)
                 
                 -- Open Quest Log (Show in Map)
                 rootDescription:CreateButton("Show in Quest Log", function()
                      if not WorldMapFrame or not WorldMapFrame:IsShown() then ToggleWorldMap() end
-                     QuestMapFrame_ShowQuestDetails(trackable.id)
+                     QuestMapFrame_ShowQuestDetails(questID)
                 end)
                 
                 -- Share
                 if IsInGroup() then
                     rootDescription:CreateButton("Share Quest", function()
-                        C_QuestLog.SetSelectedQuest(trackable.id)
+                        C_QuestLog.SetSelectedQuest(questID)
                         QuestLogPushQuest()
                     end)
                 end
                 
                 -- Link to Chat
                 rootDescription:CreateButton("Link to Chat", function()
-                    local link = GetQuestLink(trackable.id)
+                    local link = GetQuestLink(questID)
                     if link then
                         ChatEdit_InsertLink(link)
                     end
@@ -414,9 +431,9 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 
                 -- Abandon (Cautious)
                 rootDescription:CreateButton("Abandon Quest", function()
-                    C_QuestLog.SetSelectedQuest(trackable.id)
+                    C_QuestLog.SetSelectedQuest(questID)
                     C_QuestLog.SetAbandonQuest()
-                    local title = C_QuestLog.GetTitleForQuestID(trackable.id)
+                    local title = C_QuestLog.GetTitleForQuestID(questID)
                     StaticPopup_Show("ABANDON_QUEST", title)
                 end)
             end)

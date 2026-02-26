@@ -791,148 +791,85 @@ function addon:UpdateTrackerDisplay(trackables)
         trackables = self:OrganizeTrackables(trackables)
     end
     
-    -- Render Auto Quests with native Blizzard text when possible
-    if #autoQuests > 0 then
-         -- Determine vertical offset
-         local autoQuestFrame = self.autoQuestFrame
-         local currentY = 0
-         
-         for _, item in ipairs(autoQuests) do
-              local button = self:GetOrCreateButton(autoQuestFrame)
-              
-              -- Reset
-              button:ClearAllPoints()
-              button:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -currentY)
-              button:SetPoint("TOPRIGHT", autoQuestFrame, "TOPRIGHT", -5, -currentY)
-              button:Show()
-              
-              -- Hide unnecessary components
-              if button.poiButton then button.poiButton:Hide() end
-              if button.itemButton then button.itemButton:Hide() end
-              if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
-              if button.objectiveBullets then for _, obj in ipairs(button.objectiveBullets) do obj:Hide() end end
-              if button.objectivePrefixes then for _, obj in ipairs(button.objectivePrefixes) do obj:Hide() end end
-              if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
-              if button.expandBtn then button.expandBtn:Hide() end
-              if button.stageBox then button.stageBox:Hide() end
-              if button.distance then button.distance:Hide() end
-              button.bg:SetColorTexture(0, 0, 0, 0)
-              
-              -- Styled Backdrop (Gold/Yellow Border)
-              if not button.popupBackdrop then
-                   button.popupBackdrop = CreateFrame("Frame", nil, button, "BackdropTemplate")
-                   button.popupBackdrop:SetBackdrop({
-                        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-                        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                        tile = true, tileSize = 16, edgeSize = 16,
-                        insets = { left = 4, right = 4, top = 4, bottom = 4 }
-                   })
-                   button.popupBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-                   button.popupBackdrop:SetBackdropBorderColor(1, 0.8, 0, 1) -- Gold Border
-                   button.popupBackdrop:SetPoint("TOPLEFT", 0, 0)
-                   button.popupBackdrop:SetPoint("BOTTOMRIGHT", 0, 0)
-                   button.popupBackdrop:SetFrameLevel(button:GetFrameLevel()+1) 
-              end
-              button.popupBackdrop:Show()
-              
-              -- 3. Icon (Large, Left)
-              if not button.largeIcon then
-                   -- Container
-                   button.largeIcon = CreateFrame("Frame", nil, button)
-                   button.largeIcon:SetSize(60, 60)
-                   button.largeIcon:SetPoint("LEFT", 0, 0)
-                   
-                   -- 3a. Background
-                   button.largeIcon.Bg = button.largeIcon:CreateTexture(nil, "BACKGROUND")
-                   button.largeIcon.Bg:SetTexture(404985)
-                   button.largeIcon.Bg:SetTexCoord(0.302734375, 0.419921875, 0.015625, 0.953125)
-                   button.largeIcon.Bg:SetAllPoints()
+    -- Render Auto Quest Completion using Blizzard's default popup contents.
+    -- This replaces TrackerPlus' custom popup styling for quest completion/offer.
+    local autoQuestFrame = self.autoQuestFrame
+    local autoQuestTracker = AutoQuestPopUpTracker
+    local useBlizzardAutoQuest = (autoQuestTracker and autoQuestTracker.ContentsFrame and #autoQuests > 0)
 
-                   -- 3b. Symbol (! or ?)
-                   button.largeIcon.Symbol = button.largeIcon:CreateTexture(nil, "ARTWORK")
-                   button.largeIcon.Symbol:SetSize(19, 33)
-                   button.largeIcon.Symbol:SetPoint("CENTER", 0, 0)
-                   button.largeIcon.Symbol:SetTexture(404985)
-                   
-                   -- 3c. Shine
-                   button.largeIcon.Shine = button.largeIcon:CreateTexture(nil, "OVERLAY")
-                   button.largeIcon.Shine:SetTexture("Interface\\ItemSocketingFrame\\UI-ItemSockets-GoldShine")
-                   button.largeIcon.Shine:SetBlendMode("ADD")
-                   button.largeIcon.Shine:SetAllPoints()
-                   button.largeIcon.Shine:SetAlpha(0.8)
+    if useBlizzardAutoQuest then
+        local contents = autoQuestTracker.ContentsFrame
+        local autoQuestHeight = contents:GetHeight() or 0
+        local hasContent = autoQuestHeight > 1 and contents:IsShown()
 
-                   -- 3d. Red Flash
-                   button.largeIcon.Flash = button.largeIcon:CreateTexture(nil, "OVERLAY")
-                   button.largeIcon.Flash:SetTexture(404985)
-                   button.largeIcon.Flash:SetTexCoord(0.216796875, 0.298828125, 0.015625, 0.671875)
-                   button.largeIcon.Flash:SetVertexColor(1, 0, 0, 0.498) 
-                   button.largeIcon.Flash:SetBlendMode("ADD")
-                   button.largeIcon.Flash:SetSize(42, 42)
-                   button.largeIcon.Flash:SetPoint("CENTER", 0, 0)
-                   
-                   -- 3e. Pulse Animation
-                   button.largeIcon.Flash.AnimGroup = button.largeIcon.Flash:CreateAnimationGroup()
-                   button.largeIcon.Flash.AnimGroup:SetLooping("BOUNCE")
-                   local alphaAnim = button.largeIcon.Flash.AnimGroup:CreateAnimation("Alpha")
-                   alphaAnim:SetFromAlpha(0.1)
-                   alphaAnim:SetToAlpha(1)
-                   alphaAnim:SetDuration(1.0)
-                   alphaAnim:SetSmoothing("IN_OUT")
-              end
-              button.largeIcon:Show()
-              button.largeIcon.Flash.AnimGroup:Play()
-              
-              if item.popUpType == "COMPLETE" then
-                   button.largeIcon.Symbol:SetTexCoord(0.17578125, 0.212890625, 0.015625, 0.53125)
-              else
-                   button.largeIcon.Symbol:SetTexCoord(0.134765625, 0.171875, 0.015625, 0.53125)
-              end
-              
-              -- 4. Text (Two lines)
-              button.text:ClearAllPoints()
-              button.text:SetPoint("TOPLEFT", button.largeIcon, "TOPRIGHT", 10, -18)
-              button.text:SetPoint("TOPRIGHT", -5, -18)
-              button.text:SetFont(db.fontFace, db.fontSize + 1, db.fontOutline)
-              button.text:SetTextColor(1, 0.82, 0, 1) -- Gold
-              
-              local topText = (item.popUpType == "COMPLETE") and "Click to complete quest" or "New Quest Available"
-              button.text:SetText(topText)
-              button.text:SetJustifyH("LEFT")
-              
-              if not button.subText then
-                   button.subText = button:CreateFontString(nil, "OVERLAY")
-              end
-              button.subText:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline)
-              button.subText:SetTextColor(1, 1, 1, 1)
-              button.subText:SetPoint("TOPLEFT", button.text, "BOTTOMLEFT", 0, -2)
-              button.subText:SetPoint("TOPRIGHT", button.text, "BOTTOMRIGHT", 0, -2)
-              button.subText:SetText(item.title)
-              button.subText:SetJustifyH("LEFT")
-              button.subText:Show()
-              
-              button.height = 70 -- Larger hit area
-              button:SetHeight(70)
-              
-              -- Interaction
-              button.trackableData = item
-              if button._scriptMode ~= "autoquest" then
-                  button:SetScript("OnClick", function(self, mouseButton)
-                      addon:OnTrackableClick(self.trackableData, mouseButton)
-                  end)
-                  button:SetScript("OnMouseUp", nil)
-                  button:SetScript("OnEnter", nil)
-                  button:SetScript("OnLeave", nil)
-                  button._scriptMode = "autoquest"
-              end
-              
-              currentY = currentY + 70 + 5
-         end
-         
-         autoQuestFrame:SetHeight(currentY)
-         autoQuestFrame:Show()
+        if not hasContent and contents.GetNumChildren then
+            for _, child in pairs({contents:GetChildren()}) do
+                if child:IsShown() and (child:GetHeight() or 0) > 1 then
+                    hasContent = true
+                    break
+                end
+            end
+        end
+
+        if hasContent then
+            pcall(function()
+                if contents:GetParent() ~= autoQuestFrame then
+                    contents:SetParent(autoQuestFrame)
+                    contents:SetFrameStrata("HIGH")
+                    contents:SetFrameLevel(100)
+                    self._autoQuestContentsAnchored = false
+                    self._autoQuestContentsWidth = nil
+                end
+
+                local autoWidth = self.db.frameWidth - 10
+                if not self._autoQuestContentsAnchored or self._autoQuestContentsWidth ~= autoWidth then
+                    contents:ClearAllPoints()
+                    contents:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -5)
+                    contents:SetWidth(autoWidth)
+                    self._autoQuestContentsAnchored = true
+                    self._autoQuestContentsWidth = autoWidth
+                end
+
+                contents:Show()
+                contents:SetAlpha(1)
+                if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
+            end)
+
+            autoQuestHeight = contents:GetHeight() or autoQuestHeight
+            if autoQuestHeight < 20 then autoQuestHeight = 70 end
+            autoQuestFrame:SetHeight(autoQuestHeight + 5)
+            autoQuestFrame:Show()
+        else
+            autoQuestFrame:SetHeight(1)
+            autoQuestFrame:Hide()
+        end
     else
-         self.autoQuestFrame:SetHeight(1)
-         self.autoQuestFrame:Hide()
+        if autoQuestTracker and autoQuestTracker.ContentsFrame then
+            local contents = autoQuestTracker.ContentsFrame
+            if contents:GetParent() == autoQuestFrame then
+                pcall(function()
+                    contents:SetParent(autoQuestTracker)
+                    contents:ClearAllPoints()
+                    contents:SetPoint("TOPLEFT", autoQuestTracker, "TOPLEFT", 0, 0)
+                end)
+            end
+        end
+        -- Safety restore in case an older build parented QuestObjectiveTracker.ContentsFrame
+        -- into autoQuestFrame by mistake.
+        if QuestObjectiveTracker and QuestObjectiveTracker.ContentsFrame then
+            local questContents = QuestObjectiveTracker.ContentsFrame
+            if questContents:GetParent() == autoQuestFrame then
+                pcall(function()
+                    questContents:SetParent(QuestObjectiveTracker)
+                    questContents:ClearAllPoints()
+                    questContents:SetPoint("TOPLEFT", QuestObjectiveTracker, "TOPLEFT", 0, 0)
+                end)
+            end
+        end
+        self._autoQuestContentsAnchored = false
+        self._autoQuestContentsWidth = nil
+        autoQuestFrame:SetHeight(1)
+        autoQuestFrame:Hide()
     end
 
     --------------------------------------------------------------------------
@@ -1015,6 +952,7 @@ function addon:UpdateTrackerDisplay(trackables)
             local scenarioBottomPadding = 14
          -- We are using Blizzard's frame, so we hijack it.
          local contents = scenarioTracker.ContentsFrame
+         local hasScenarioContent = false
          
          -- Parent it to our frame
          if contents:GetParent() ~= self.scenarioFrame then
@@ -1058,11 +996,15 @@ function addon:UpdateTrackerDisplay(trackables)
          -- Method 1: Check standard GetHeight
          local rawHeight = contents:GetHeight() or 0
          if rawHeight > blizzardHeight then blizzardHeight = rawHeight end
+         if rawHeight > 1 and contents:IsShown() then
+             hasScenarioContent = true
+         end
 
          -- Method 2: Check WidgetContainer
          if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
              local wH = contents.WidgetContainer:GetHeight() or 0
              if wH > blizzardHeight then blizzardHeight = wH end
+             if wH > 1 then hasScenarioContent = true end
          end
 
          -- Method 3: Scan all visible children for the lowest bottom edge
@@ -1077,22 +1019,45 @@ function addon:UpdateTrackerDisplay(trackables)
                          if relativeHeight > blizzardHeight then
                              blizzardHeight = relativeHeight
                          end
+                         if relativeHeight > 1 then
+                             hasScenarioContent = true
+                         end
                      end
                  end
              end
          end
          
-         -- If height is suspiciously small (collapsed/hidden), force a minimum reasonable height
-         if blizzardHeight < 40 then 
-             blizzardHeight = 100 
-             -- Only force height on the container if we are synthesizing it
-             if rawHeight < 100 then contents:SetHeight(blizzardHeight) end
-         end
+         if hasScenarioContent then
+             -- If height is suspiciously small while content exists, enforce a modest floor.
+             if blizzardHeight < 30 then
+                 blizzardHeight = 60
+             end
 
-         scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding + 10 -- Extra padding for safety
-         scenarioYOffset = scenarioHeight
+             scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding + 10 -- Extra padding for safety
+             scenarioYOffset = scenarioHeight
+         else
+             if contents:GetParent() == self.scenarioFrame then
+                 pcall(function()
+                     contents:SetParent(scenarioTracker)
+                     contents:ClearAllPoints()
+                     contents:SetPoint("TOPLEFT", scenarioTracker, "TOPLEFT", 0, 0)
+                 end)
+             end
+             self._scenarioContentsAnchored = false
+             self._scenarioContentsWidth = nil
+         end
          
     else
+        if scenarioTracker and scenarioTracker.ContentsFrame then
+            local contents = scenarioTracker.ContentsFrame
+            if contents:GetParent() == self.scenarioFrame then
+                pcall(function()
+                    contents:SetParent(scenarioTracker)
+                    contents:ClearAllPoints()
+                    contents:SetPoint("TOPLEFT", scenarioTracker, "TOPLEFT", 0, 0)
+                end)
+            end
+        end
         self._scenarioContentsAnchored = false
         self._scenarioContentsWidth = nil
         if self.scenarioFrame and self.scenarioFrame.bgMask then
