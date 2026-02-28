@@ -1219,7 +1219,8 @@ function addon:UpdateTrackerDisplay(trackables)
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
         if useBlizzardScenario then
-            local scenarioTopInset = 0
+            local scenarioTopInset = -10 -- Native blizzard headers have a ~10-15px top blank gap; pull it UP
+            local scenarioLeftInset = 15 -- Indent to the right so it aligns better with TrackerPlus style
             local scenarioBottomPadding = 24
          -- We are using Blizzard's frame, so we hijack it.
          local hostFrame = scenarioTracker
@@ -1238,23 +1239,19 @@ function addon:UpdateTrackerDisplay(trackables)
             local scenarioWidth = self.db.frameWidth - 10
             if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
                 hostFrame:ClearAllPoints()
-                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioTopInset)
-                hostFrame:SetWidth(scenarioWidth)
+                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, -scenarioTopInset)
+                hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
 
-                -- Tighten the stolen Blizzard contents to the top of the host frame.
-                -- Some Delve/Scenario modules retain legacy top offsets that create
-                -- a blank strip above the first visible row when reparented.
+                -- Stop breaking Blizzard's internal relative anchors.
+                -- We only restrict width here so progress bars/text warp correctly, 
+                -- but let Blizzard maintain vertical headers vs body stacking.
                 if contents and contents:GetParent() == hostFrame then
-                    contents:ClearAllPoints()
-                    contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
-                    contents:SetWidth(scenarioWidth)
+                    contents:SetWidth(scenarioWidth - scenarioLeftInset)
                 end
 
                 if hostFrame.Header then
-                    hostFrame.Header:ClearAllPoints()
-                    hostFrame.Header:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
-                    hostFrame.Header:SetWidth(scenarioWidth)
-                    
+                    hostFrame.Header:SetWidth(scenarioWidth - scenarioLeftInset)
+
                     if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
                         local function TrackerPlus_UpdateScenarioHeader(textStr)
                             if textStr._tpUpdating then return end
