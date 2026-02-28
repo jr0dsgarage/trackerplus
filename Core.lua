@@ -49,6 +49,61 @@ local function AppendBucket(dest, source)
     end
 end
 
+local function SaveObjectiveTrackerPoint(owner)
+    if not ObjectiveTrackerFrame then return end
+    local point, relativeTo, relativePoint, x, y = ObjectiveTrackerFrame:GetPoint(1)
+    owner._objectiveTrackerRestorePoint = {
+        point = point,
+        relativeTo = relativeTo,
+        relativePoint = relativePoint,
+        x = x,
+        y = y,
+    }
+end
+
+local function MoveObjectiveTrackerOffscreen(owner)
+    if not ObjectiveTrackerFrame then return end
+
+    local _, _, _, x = ObjectiveTrackerFrame:GetPoint(1)
+    if not x or x < 5000 then
+        SaveObjectiveTrackerPoint(owner)
+    end
+
+    ObjectiveTrackerFrame:ClearAllPoints()
+    ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+    ObjectiveTrackerFrame:SetAlpha(0)
+    ObjectiveTrackerFrame:EnableMouse(false)
+end
+
+function addon:IsAnyScenarioTrackerActive()
+    if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
+        return true
+    end
+    -- In War Within/Dragonflight, delves and some other scenarios might not return true above.
+    -- Check if the actual UI modules are active.
+    local trackers = { "DelvesObjectiveTracker", "DelveObjectiveTracker", "ScenarioObjectiveTracker" }
+    for _, name in ipairs(trackers) do
+        local t = _G[name]
+        -- If it exists, is shown, and has an active UI inside it
+        if t and t:IsShown() and t.ContentsFrame then
+            local hasContent = t.ContentsFrame:GetNumChildren() > 0
+            if not hasContent then
+                for _, child in pairs({t.ContentsFrame:GetChildren()}) do
+                    if child:IsShown() and child:GetHeight() > 5 then
+                        hasContent = true
+                        break
+                    end
+                end
+            end
+            local hasHeight = math.max(t:GetHeight() or 0, t.ContentsFrame:GetHeight() or 0) > 10
+            if hasContent or hasHeight then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 -- Print helper
 local function Print(...)
     print("|cff00ff00TrackerPlus:|r", ...)
@@ -82,10 +137,7 @@ function addon:Initialize()
                 if addon:GetSetting("enabled") then
                     -- Instead of Hide(), move it offscreen so we can still hijack its children (Bonus Frames)
                     -- If we Hide() it, its children (BonusObjectiveTracker) are also hidden and inactive.
-                    self:ClearAllPoints()
-                    self:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
-                    self:SetAlpha(0) -- Visual hide
-                    self:EnableMouse(false) -- No interaction
+                    MoveObjectiveTrackerOffscreen(addon)
                 end
             end)
             
@@ -95,8 +147,7 @@ function addon:Initialize()
                       -- If it tries to move back, force it away
                       local point, _, _, x, _ = self:GetPoint()
                       if x < 5000 then -- If it's on screen
-                           self:ClearAllPoints()
-                           self:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+                          MoveObjectiveTrackerOffscreen(addon)
                       end
                  end
             end)
@@ -115,26 +166,26 @@ end
 function addon:UpdateDefaultTrackerVisibility()
     if not ObjectiveTrackerFrame then return end
     
-    if addon.Log then addon:Log("UpdateDefaultTrackerVisibility called. Enabled: %s", tostring(self:GetSetting("enabled"))) end
+    if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self:GetSetting("enabled"))) end
     
     if self:GetSetting("enabled") then
         -- Offscreen Mode
-        ObjectiveTrackerFrame:ClearAllPoints()
-        ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
-        ObjectiveTrackerFrame:SetAlpha(0)
-        ObjectiveTrackerFrame:EnableMouse(false)
+        MoveObjectiveTrackerOffscreen(self)
         if ObjectiveTrackerFrame.Show then ObjectiveTrackerFrame:Show() end
-        if addon.Log then addon:Log("ObjectiveTrackerFrame Moved Offscreen (x=10000, Alpha=0)") end
+        if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame moved offscreen") end
     else
         -- Restore (This might need a ReloadUI to perfect, but we try)
         if ObjectiveTrackerFrame.Show then
             ObjectiveTrackerFrame:SetAlpha(1)
             ObjectiveTrackerFrame:EnableMouse(true)
-            ObjectiveTrackerFrame:ClearAllPoints()
-            -- Let Blizzard layout handle the rest or EditMode
-            ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -180) 
+            local restore = self._objectiveTrackerRestorePoint
+            if restore and restore.point and restore.relativePoint then
+                ObjectiveTrackerFrame:ClearAllPoints()
+                local relativeTo = restore.relativeTo or UIParent
+                ObjectiveTrackerFrame:SetPoint(restore.point, relativeTo, restore.relativePoint, restore.x or 0, restore.y or 0)
+            end
             ObjectiveTrackerFrame:Show()
-            if addon.Log then addon:Log("ObjectiveTrackerFrame Restored") end
+            if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame restored") end
         end
     end
 end
@@ -360,7 +411,7 @@ function addon:UpdateTracker()
     if not self.trackerFrame then
         return
     end
-    
+
     -- Check if we should hide
     local inInstance = IsInInstance()
     if self:GetSetting("hideInInstance") and inInstance then
@@ -384,12 +435,49 @@ function addon:UpdateTracker()
     -- Collect all trackables (dirty-section aware)
     local trackables = self:CollectTrackables()
 
-    -- Paint only when data or layout changed
+    -- Paint when data/layout changed, and always refresh while in scenarios.
+    -- Scenario/Delve visuals are hijacked from Blizzard frames and may change without
+    -- mutating our collected dataVersion, so skipping paint can leave stale/empty UI.
+    local forceDisplayRefresh = false
+    if addon:IsAnyScenarioTrackerActive() then
+        local now = GetTime and GetTime() or 0
+        local interval = 2.0
+        if self._nextScenarioRefreshAt == nil or now >= self._nextScenarioRefreshAt then
+            forceDisplayRefresh = true
+            self._nextScenarioRefreshAt = now + interval
+        end
+    else
+        self._nextScenarioRefreshAt = nil
+    end
+
+    -- Paint only when data/layout changed (or forced refresh)
     local dataVersion = self._dataVersion or 0
-    if self._layoutDirty or dataVersion ~= lastRenderedDataVersion then
-        self:UpdateTrackerDisplay(trackables)
-        lastRenderedDataVersion = dataVersion
-        self._layoutDirty = false
+    if forceDisplayRefresh or self._layoutDirty or dataVersion ~= lastRenderedDataVersion then
+        local ok, err = xpcall(function()
+            self:UpdateTrackerDisplay(trackables)
+        end, function(message)
+            if debugstack then
+                return string.format("%s\n%s", tostring(message), tostring(debugstack()))
+            end
+            return tostring(message)
+        end)
+
+        if ok then
+            lastRenderedDataVersion = dataVersion
+            self._layoutDirty = false
+        else
+            if self.LogAt then
+                self:LogAt("error", "Render error: %s", tostring(err))
+            elseif self.Log then
+                self:Log("Render error: %s", tostring(err))
+            end
+
+            local now = GetTime and GetTime() or 0
+            if not self._lastRenderErrorPrintAt or (now - self._lastRenderErrorPrintAt) > 5 then
+                self._lastRenderErrorPrintAt = now
+                Print("Render error captured. Use /tpdebug to inspect details.")
+            end
+        end
     end
     
     -- Handle fade when empty
@@ -556,12 +644,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     if canUseTaskProgress and C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
         
-        -- DEBUG: Log progress bar info
-        if addon.Log and (isBonusObjective or type == "bonus" or type == "supertrack" or type == "quest") then
-             local isTask = C_QuestLog.IsQuestTask(questID)
-             addon:Log("Quest [%d] '%s' IsTask=%s IsBonus=%s Progress=%s", questID, info.title, tostring(isTask), tostring(isBonusObjective), tostring(progress))
-        end
-        
         if progress then
              hasObjectives = true
              table.insert(questInfo.objectives, {
@@ -614,18 +696,20 @@ end
 function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
     local currentZone = GetRealZoneText() or "Unknown Zone"
-    
+    local currentHeaderIsCampaign = false
+
     for i = 1, numQuests do
         local info = C_QuestLog.GetInfo(i)
-        
+
         if info then
             if info.isHeader then
                 currentZone = info.title
+                currentHeaderIsCampaign = (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory
             else
                 local isWorldQuest = C_QuestLog.IsWorldQuest(info.questID)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
-                
+
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
 
@@ -634,12 +718,21 @@ function addon:CollectQuests(trackables)
                     -- World quests are rendered in their own pinned section.
                     -- Do not require the watch flag; quest-log tracking can be transient.
                     shouldInclude = self.db.showWorldQuests
+                elseif isTask then
+                    -- Bonus objectives are rendered in their own pinned section.
+                    -- Do not require watch state; these are often hidden/unwatched in the quest log.
+                    shouldInclude = self.db.showBonusObjectives
                 else
                     shouldInclude = self.db.showQuests and isWatched
                 end
 
                 if (not info.isHidden or allowHidden) and shouldInclude then
-                    local questInfo = self:GetQuestData(i, nil, currentZone)
+                    local isCamp = currentHeaderIsCampaign or (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory
+                    local questType = nil
+                    if isCamp and not isWorldQuest and not isTask then
+                        questType = "campaign"
+                    end
+                    local questInfo = self:GetQuestData(i, questType, currentZone)
                     if questInfo then
                         table.insert(trackables, questInfo)
                     end
@@ -781,7 +874,7 @@ end
 function addon:CollectScenarioObjectives(trackables)
     -- If we are using the Blizzard frame (which is the plan now), we don't need to manually collect items
     -- However, we still need to detect attendance so the core loop knows we have "scenarios" to trigger the layout logic.
-    if not C_Scenario.IsInScenario() then
+    if not self:IsAnyScenarioTrackerActive() then
         return
     end
     

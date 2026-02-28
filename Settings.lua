@@ -5,6 +5,7 @@ local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 -- Settings panel using manual frame construction for maximum control
 local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
 panel.name = "TrackerPlus"
+local refreshDebugControlsUI = nil
 
 -- Modern scroll frame setup
 local scrollFrame = CreateFrame("ScrollFrame", addonName .. "SettingsScrollFrame", panel, "UIPanelScrollFrameTemplate")
@@ -51,6 +52,24 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             addon:RefreshDisplay()
         elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
             addon:RequestUpdate()
+        elseif dbKey == "layoutDebug" then
+            if addon.LogAt then
+                addon:LogAt("info", "Layout debug %s", checked and "enabled" or "disabled")
+            end
+        elseif dbKey == "debugEnabled" then
+            if addon.UpdateSectionDebugBoxes then
+                addon:UpdateSectionDebugBoxes()
+            end
+            addon:RequestUpdate("full")
+            if refreshDebugControlsUI then
+                refreshDebugControlsUI()
+            end
+            print("|cff00ff00TrackerPlus:|r Debugging " .. (checked and "enabled" or "disabled") .. ".")
+        elseif dbKey == "debugSectionBoxes" then
+            if addon.UpdateSectionDebugBoxes then
+                addon:UpdateSectionDebugBoxes()
+            end
+            addon:RequestUpdate("full")
         elseif dbKey == "showTooltips" then
             -- These take effect on next interaction
         end
@@ -146,6 +165,10 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
                 -- Trigger updates
                 if dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then 
                     addon:RefreshDisplay() 
+                elseif dbKey == "debugLevel" then
+                    if addon.LogAt then
+                        addon:LogAt("info", "Debug level set to %s", tostring(self.value))
+                    end
                 end
             end
             info.checked = (addon.db[dbKey] == opt.value)
@@ -258,6 +281,18 @@ local function CreateColorPicker(parent, text, dbKey, callback, yOffset)
     end)
     
     return yOffset - 30
+end
+
+-- Helper: Create Button
+local function CreateButton(parent, text, width, onClick, yOffset)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(width or 150, 25)
+    btn:SetPoint("TOPLEFT", 16, yOffset)
+    btn:SetText(text)
+    btn:SetScript("OnClick", function()
+        if onClick then onClick() end
+    end)
+    return yOffset - 35, btn
 end
 
 -- Helper: Start a Boxed Section
@@ -375,7 +410,7 @@ local function InitUI()
     end
     
     local function CreateTabs(parent)
-        local tabNames = {"General", "Appearance", "Layout", "Tracking"}
+        local tabNames = {"General", "Appearance", "Layout", "Tracking", "Debug"}
         local prevTab
         
         for i, name in ipairs(tabNames) do
@@ -625,6 +660,92 @@ local function InitUI()
     y = y - EndSection(s, sy)
     
     p4.finalHeight = math.abs(y) + 20
+
+    -- Page 5: Debug
+    local p5 = CreatePage()
+    y = -5
+
+    s, sy = StartSection(p5, "Debug Options", y)
+    sy = CreateCheckbox(s, "Enable Debugging", "debugEnabled", "Master switch for all TrackerPlus debugging features.", sy)
+    local debugEnabledCheck = _G[addonName .. "debugEnabledCheck"]
+
+    sy = CreateDropdown(s, "Debug Log Level", "debugLevel", {
+        {text = "Off", value = "off"},
+        {text = "Errors", value = "error"},
+        {text = "Warnings", value = "warn"},
+        {text = "Info", value = "info"},
+        {text = "Trace", value = "trace"},
+    }, "Controls verbosity for TrackerPlus debug logging.", sy)
+    local debugLevelDropdown = _G[addonName .. "debugLevelDropdown"]
+
+    sy = CreateCheckbox(s, "Layout Debug Logging", "layoutDebug", "Logs detailed layout snapshots (use with Trace level).", sy)
+    local layoutDebugCheck = _G[addonName .. "layoutDebugCheck"]
+    sy = CreateCheckbox(s, "Section Box Overlays", "debugSectionBoxes", "Draw labeled rectangles around tracker sections.", sy)
+    local sectionBoxesCheck = _G[addonName .. "debugSectionBoxesCheck"]
+
+    local openDebugBtn
+    sy, openDebugBtn = CreateButton(s, "Open Debug Window", 170, function()
+        if addon.ShowDebug then
+            addon:ShowDebug()
+        else
+            print("|cff00ff00TrackerPlus:|r Debug window is not available yet.")
+        end
+    end, sy)
+
+    local clearDebugBtn
+    sy, clearDebugBtn = CreateButton(s, "Clear Debug Log", 170, function()
+        if addon.ClearDebug then
+            addon:ClearDebug()
+            print("|cff00ff00TrackerPlus:|r Debug log cleared.")
+        end
+    end, sy)
+
+    local function SetCheckEnabled(check, enabled)
+        if not check then return end
+        if enabled then
+            check:Enable()
+        else
+            check:Disable()
+        end
+        local text = _G[check:GetName() .. "Text"]
+        if text then
+            if enabled then
+                text:SetTextColor(1, 1, 1, 1)
+            else
+                text:SetTextColor(0.55, 0.55, 0.55, 1)
+            end
+        end
+    end
+
+    refreshDebugControlsUI = function()
+        local enabled = addon.db and addon.db.debugEnabled == true
+
+        if debugLevelDropdown then
+            if enabled then
+                UIDropDownMenu_EnableDropDown(debugLevelDropdown)
+            else
+                UIDropDownMenu_DisableDropDown(debugLevelDropdown)
+            end
+        end
+
+        SetCheckEnabled(layoutDebugCheck, enabled)
+        SetCheckEnabled(sectionBoxesCheck, enabled)
+
+        if openDebugBtn then
+            if enabled then openDebugBtn:Enable() else openDebugBtn:Disable() end
+        end
+        if clearDebugBtn then
+            if enabled then clearDebugBtn:Enable() else clearDebugBtn:Disable() end
+        end
+
+        -- Master toggle remains enabled.
+        SetCheckEnabled(debugEnabledCheck, true)
+    end
+
+    refreshDebugControlsUI()
+
+    y = y - EndSection(s, sy)
+    p5.finalHeight = math.abs(y) + 20
 
     SelectTab(1)
 end

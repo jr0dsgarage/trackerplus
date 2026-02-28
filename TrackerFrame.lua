@@ -5,6 +5,7 @@ local addonName, addon = ...
 local trackerFrame = nil
 local scrollFrame = nil
 local contentFrame = nil
+local completedQuestFrame = nil
 
 
 -- Create the main tracker frame
@@ -143,31 +144,28 @@ function addon:CreateTrackerFrame()
         end
     end)
     
-    -- Auto Quest Frame (Pinned to top, below title)
-    -- This resides outside the scroll frame so it doesn't scroll
-    local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
-    autoQuestFrame:SetPoint("TOPLEFT", 5, -25)
-    autoQuestFrame:SetPoint("TOPRIGHT", -5, -25)
-    autoQuestFrame:SetHeight(1) -- Will be dynamic
-    self.autoQuestFrame = autoQuestFrame
-
-    -- Widget Frame (For Progress Bars / Power Bars)
-    -- Resides between Auto Quest and Scenario
-    local widgetFrame = CreateFrame("Frame", nil, trackerFrame)
-    widgetFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, -5)
-    widgetFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, -5)
-    widgetFrame:SetHeight(1) -- Will be dynamic
-    self.widgetFrame = widgetFrame
-
-    -- Scenario Frame (Pinned to Widget Frame)
-    -- This resides outside the scroll frame so it doesn't scroll
+    -- Scenario Frame (Top-pinned, outside scroll frame, anchored dynamically by layout)
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
     scenarioFrame:SetFrameStrata("HIGH") -- Ensure it sits above scrolling content
-    scenarioFrame:SetPoint("TOPLEFT", widgetFrame, "BOTTOMLEFT", 0, -5)
-    scenarioFrame:SetPoint("TOPRIGHT", widgetFrame, "BOTTOMRIGHT", 0, -5)
-    scenarioFrame:SetHeight(1) -- Will be dynamic
+    scenarioFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
+    scenarioFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
+    scenarioFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     self.scenarioFrame = scenarioFrame
+
+    -- Auto Quest Frame (Below scenario if visible, outside scroll frame)
+    local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
+    autoQuestFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0)
+    autoQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "BOTTOMRIGHT", 0, 0)
+    autoQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
+    self.autoQuestFrame = autoQuestFrame
     
+    -- Completed Quest Frame (Below auto/active quest if visible, outside scroll frame)
+    completedQuestFrame = CreateFrame("Frame", nil, trackerFrame)
+    completedQuestFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, 0)
+    completedQuestFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, 0)
+    completedQuestFrame:SetHeight(1)
+    self.completedQuestFrame = completedQuestFrame
+
     -- World Quest Frame (Pinned to absolute bottom)
     local worldQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     worldQuestFrame:SetPoint("BOTTOMLEFT", 5, 5)
@@ -184,11 +182,10 @@ function addon:CreateTrackerFrame()
     bonusFrame:Hide()
     self.bonusFrame = bonusFrame
     
-    -- Create scroll frame (Between Scenario and Bonus)
+    -- Create scroll frame (fills middle area, anchored dynamically by layout)
     scrollFrame = CreateFrame("ScrollFrame", nil, trackerFrame)
-    -- Initial anchor (will be updated in Renderer based on BonusFrame existence)
-    scrollFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", bonusFrame, "TOPRIGHT", 0, 0) 
+    scrollFrame:SetPoint("TOPLEFT", completedQuestFrame, "BOTTOMLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", bonusFrame, "TOPRIGHT", 0, 0)
     scrollFrame:EnableMouse(false)
     scrollFrame:EnableMouseWheel(false)
     
@@ -398,6 +395,88 @@ function addon:UpdateTrackerLock()
         trackerFrame:EnableMouse(true)
         if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
         if trackerFrame.resizeBL then trackerFrame.resizeBL:Show() end
+    end
+end
+
+------------------------------------------------------------------------------
+-- Dynamic Layout Engine
+-- Call this after setting section heights and visibility in the render cycle.
+-- Order: ScenarioFrame -> AutoQuestFrame -> CompletedQuestFrame -> ScrollFrame
+-- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
+------------------------------------------------------------------------------
+function addon:UpdateLayoutAnchors()
+    if not self.trackerFrame then return end
+
+    local HEADER_H = 25   -- pixels reserved for the title bar
+    local PAD      = 4    -- vertical gap between sections
+    local SIDE     = 5    -- horizontal inset from tracker edges
+
+    -- Determine section visibility
+    local scenVisible  = self.scenarioFrame  and self.scenarioFrame:IsShown()  and self.scenarioFrame:GetHeight()  > 1
+    local aqVisible    = self.autoQuestFrame and self.autoQuestFrame:IsShown() and self.autoQuestFrame:GetHeight() > 1
+    local cqVisible    = self.completedQuestFrame and self.completedQuestFrame:IsShown() and self.completedQuestFrame:GetHeight() > 1
+    local bonusVisible = self.bonusFrame     and self.bonusFrame:IsShown()     and self.bonusFrame:GetHeight()     > 1
+    local wqVisible    = self.worldQuestFrame and self.worldQuestFrame:IsShown() and self.worldQuestFrame:GetHeight() > 1
+
+    -- Build a change-detection signature so we only touch anchors when needed.
+    local sig = string.format("%s|%s|%s|%.0f|%.0f|%.0f|%s|%s",
+        tostring(scenVisible),
+        tostring(aqVisible),
+        tostring(cqVisible),
+        scenVisible  and self.scenarioFrame:GetHeight()  or 0,
+        aqVisible    and self.autoQuestFrame:GetHeight() or 0,
+        cqVisible    and self.completedQuestFrame:GetHeight() or 0,
+        tostring(bonusVisible),
+        tostring(wqVisible))
+
+    if self._layoutSignature == sig then return end
+    self._layoutSignature = sig
+
+    ---------------------------------------------------------------------------
+    -- Top-anchored sections, chained in order
+    ---------------------------------------------------------------------------
+    local topSections = {}
+    if scenVisible then topSections[#topSections + 1] = self.scenarioFrame  end
+    if aqVisible   then topSections[#topSections + 1] = self.autoQuestFrame end
+    if cqVisible   then topSections[#topSections + 1] = self.completedQuestFrame end
+
+    local prevFrame  = self.trackerFrame
+    local prevPoint  = "TOPLEFT"
+    local prevPointR = "TOPRIGHT"
+    local yOff       = -HEADER_H
+    local xL, xR     = SIDE, -SIDE
+
+    for _, section in ipairs(topSections) do
+        section:ClearAllPoints()
+        section:SetPoint("TOPLEFT",  prevFrame, prevPoint,  xL, yOff)
+        section:SetPoint("TOPRIGHT", prevFrame, prevPointR, xR, yOff)
+        prevFrame  = section
+        prevPoint  = "BOTTOMLEFT"
+        prevPointR = "BOTTOMRIGHT"
+        yOff       = -PAD
+        xL, xR     = 0, 0
+    end
+
+    ---------------------------------------------------------------------------
+    -- ScrollFrame — fills between last top section and first bottom section
+    ---------------------------------------------------------------------------
+    if self.scrollFrame then
+        self.scrollFrame:ClearAllPoints()
+
+        if prevFrame == self.trackerFrame then
+            -- No top sections visible; scroll starts right below the header
+            self.scrollFrame:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -HEADER_H)
+        else
+            self.scrollFrame:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -PAD)
+        end
+
+        if bonusVisible then
+            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+        elseif wqVisible then
+            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.worldQuestFrame, "TOPRIGHT", 0, 0)
+        else
+            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -SIDE, SIDE)
+        end
     end
 end
 

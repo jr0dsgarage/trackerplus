@@ -3,9 +3,160 @@ local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 local objectiveParseCache = {}
 local objectiveParseCacheCount = 0
 
+local function GetScenarioTrackerSource()
+    local candidates = {
+        "DelvesObjectiveTracker",
+        "DelveObjectiveTracker",
+        "ScenarioObjectiveTracker",
+    }
+
+    local fallback = nil
+    for _, name in ipairs(candidates) do
+        local tracker = _G and _G[name]
+        if tracker and tracker.ContentsFrame then
+            -- Prefer a tracker that is currently visible/active AND has actual content
+            if (tracker:IsShown() or tracker.ContentsFrame:IsShown()) and (math.max(tracker.ContentsFrame:GetHeight() or 0, tracker:GetHeight() or 0) > 10 or tracker.ContentsFrame:GetNumChildren() > 0) then
+                return tracker
+            end
+            
+            if not fallback then
+                fallback = tracker
+            elseif (tracker:IsShown() or tracker.ContentsFrame:IsShown()) then
+                -- Override fallback if we found one that is at least shown
+                fallback = tracker
+            end
+        end
+    end
+
+    -- If none are actively shown, return the first one found so we have something to hook
+    return fallback
+end
+
+local function EnsureFrameVisible(frame)
+    if not frame then return end
+    frame:Show()
+    frame:SetAlpha(1)
+    if frame.SetIgnoreParentAlpha then
+        frame:SetIgnoreParentAlpha(true)
+    end
+end
+
+local function EnsureHijackedParent(owner, frame, targetParent, originalParentKey, strata, frameLevel)
+    if not frame or not targetParent then return end
+    if frame:GetParent() ~= targetParent then
+        owner[originalParentKey] = frame:GetParent() or owner[originalParentKey]
+        frame:SetParent(targetParent)
+    end
+    if strata then frame:SetFrameStrata(strata) end
+    if frameLevel then frame:SetFrameLevel(frameLevel) end
+end
+
+local function RestoreHijackedParent(owner, frame, hijackParent, fallbackParent, originalParentKey)
+    if not frame then return end
+    if frame:GetParent() == hijackParent then
+        frame:SetParent(owner[originalParentKey] or fallbackParent)
+    end
+end
+
+local function ResetAnchorState(owner, anchoredKey, widthKey)
+    owner[anchoredKey] = false
+    owner[widthKey] = nil
+end
+
+local function DebugLayout(owner, fmt, ...)
+    if not owner then return end
+    local enabled = owner.db and owner.db.debugEnabled == true and owner.db.layoutDebug == true
+    if not enabled then return end
+
+    if owner.LogAt then
+        owner:LogAt("trace", "[LAYOUT] " .. tostring(fmt), ...)
+    end
+end
+
 local function ClearArray(t)
     for i = #t, 1, -1 do
         t[i] = nil
+    end
+end
+
+local function EnsureSectionDebugOverlay(owner, key, parentFrame, displayLabel, color, labelAnchor)
+    owner._sectionDebugOverlays = owner._sectionDebugOverlays or {}
+    local overlay = owner._sectionDebugOverlays[key]
+    if not overlay then
+        overlay = CreateFrame("Frame", nil, parentFrame, "BackdropTemplate")
+        overlay:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+        })
+        overlay:SetFrameStrata("FULLSCREEN_DIALOG")
+        overlay:SetFrameLevel(500)
+        overlay.label = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        overlay.label:SetPoint("TOPLEFT", overlay, "TOPLEFT", 3, -3)
+        overlay.label:SetJustifyH("LEFT")
+        overlay.label:SetTextColor(1, 1, 1, 0.95)
+        owner._sectionDebugOverlays[key] = overlay
+    end
+
+    if overlay:GetParent() ~= parentFrame then
+        overlay:SetParent(parentFrame)
+    end
+
+    overlay:ClearAllPoints()
+    overlay:SetAllPoints(parentFrame)
+    overlay:SetBackdropBorderColor(color[1], color[2], color[3], 0.95)
+    if labelAnchor then
+        overlay.label:ClearAllPoints()
+        overlay.label:SetPoint(labelAnchor.point, overlay, labelAnchor.relPoint or labelAnchor.point, labelAnchor.x or 3, labelAnchor.y or -3)
+    end
+    local h = parentFrame.GetHeight and (parentFrame:GetHeight() or 0) or 0
+    overlay.label:SetText(string.format("%s (%.0f)", displayLabel, h))
+
+    -- very light tint so hidden/1px sections are still visible without obscuring content
+    if not overlay._fill then
+        overlay._fill = overlay:CreateTexture(nil, "BACKGROUND")
+        overlay._fill:SetAllPoints(overlay)
+    end
+    overlay._fill:SetColorTexture(color[1], color[2], color[3], 0.06)
+
+    overlay:Show()
+end
+
+function addon:UpdateSectionDebugBoxes()
+    if not self._sectionDebugOverlays then
+        self._sectionDebugOverlays = {}
+    end
+
+    local enabled = self.db and self.db.debugEnabled == true and self.db.debugSectionBoxes == true
+    if not enabled then
+        for _, overlay in pairs(self._sectionDebugOverlays) do
+            overlay:Hide()
+        end
+        return
+    end
+
+    local sections = {
+        { key = "tracker", frame = self.trackerFrame, label = "trackerFrame", color = {1.0, 0.35, 0.35}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "autoquest", frame = self.autoQuestFrame, label = "autoQuestFrame", color = {1.0, 0.65, 0.25}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
+        { key = "completedquest", frame = self.completedQuestFrame, label = "completedQuestFrame", color = {0.8, 0.8, 0.2}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
+        { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -20 } },
+        { key = "scroll", frame = self.scrollFrame, label = "scrollFrame", color = {0.4, 1.0, 0.45}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "content", frame = self.contentFrame, label = "contentFrame", color = {0.3, 0.7, 1.0}, anchor = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -3, y = 3 } },
+        { key = "bonus", frame = self.bonusFrame, label = "bonusFrame", color = {0.85, 0.45, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "wq", frame = self.worldQuestFrame, label = "worldQuestFrame", color = {1.0, 0.35, 0.9}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+    }
+
+    local seen = {}
+    for _, section in ipairs(sections) do
+        if section.frame then
+            EnsureSectionDebugOverlay(self, section.key, section.frame, section.label, section.color, section.anchor)
+            seen[section.key] = true
+        end
+    end
+
+    for key, overlay in pairs(self._sectionDebugOverlays) do
+        if not seen[key] then
+            overlay:Hide()
+        end
     end
 end
 
@@ -154,6 +305,35 @@ local function ParseObjectiveDisplay(item, obj, objIndex)
     return parsed
 end
 
+local function ResolveTrackableItemData(item)
+    if not item then return nil end
+
+    local itemData = item.item
+    if itemData and (itemData.link or itemData.texture) then
+        return itemData
+    end
+
+    local logIndex = item.logIndex
+    if (not logIndex or logIndex <= 0) and item.id and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        logIndex = C_QuestLog.GetLogIndexForQuestID(item.id)
+        if logIndex and logIndex > 0 then
+            item.logIndex = logIndex
+        end
+    end
+
+    if logIndex and logIndex > 0 then
+        local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
+        if itemLink or itemTexture then
+            itemData = itemData or {}
+            itemData.link = itemLink or itemData.link
+            itemData.texture = itemTexture or itemData.texture
+            item.item = itemData
+        end
+    end
+
+    return item.item
+end
+
 -- Update tracker display with trackables
 function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local db = self.db
@@ -200,7 +380,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     -- Quest Item Button
-    if item.item then
+    local itemData = ResolveTrackableItemData(item)
+    if itemData then
         local secureBtn = self:GetOrCreateSecureButton(button)
         secureBtn:ClearAllPoints()
         
@@ -220,8 +401,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         secureBtn:SetSize(btnSize, btnSize) 
         button:SetClipsChildren(false) -- Allow button to extend outside (for supertrack)
         secureBtn:SetAttribute("type", "item")
-        secureBtn:SetAttribute("item", item.item.link)
-        secureBtn.itemLink = item.item.link
+        secureBtn:SetAttribute("item", itemData.link)
+        secureBtn.itemLink = itemData.link
 
         secureBtn:SetScript("OnEnter", function(self)
             if not self.itemLink then return end
@@ -234,15 +415,15 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         end)
         
         -- Robust Icon handling
-        local texture = item.item.texture
+        local texture = itemData.texture
         
         -- Try to fetch via API if missing
-        if not texture and item.item.link then
-             texture = GetItemIcon(item.item.link)
+           if not texture and itemData.link then
+               texture = GetItemIcon(itemData.link)
              
              -- If GetItemIcon fails (returns nil), try Instant info which is cache-independent for icons
              if not texture then
-                  local _, _, _, _, iconID = GetItemInfoInstant(item.item.link)
+                   local _, _, _, _, iconID = GetItemInfoInstant(itemData.link)
                   if iconID then texture = iconID end
              end
         end
@@ -267,8 +448,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
             
             -- Fallback to standard item cooldown if needed
-            if not start and item.item.link then
-                local itemID = GetItemInfoInstant(item.item.link)
+            if not start and itemData.link then
+                local itemID = GetItemInfoInstant(itemData.link)
                 if itemID then
                      start, duration, enable = C_Container.GetItemCooldown(itemID)
                 end
@@ -290,7 +471,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
 
     -- Configure POI Button Appearance
-    local isQuest = (item.type == "quest" or item.isWorldQuest or item.type == "supertrack")
+    local isQuest = (item.type == "quest" or item.type == "campaign" or item.isWorldQuest or item.type == "supertrack")
     local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
     
     if isQuest and POIButtonUtil then
@@ -377,7 +558,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     local rightPadding = -2
-    if item.item then
+    if itemData then
         if item.type == "supertrack" then
              -- Icon is 36px wide and sits at -5px from right. Left edge is at -41px.
              -- Add padding so text doesn't overlap (approx -45px)
@@ -390,7 +571,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- Adjust for Group Button
     if showGroupButton then
          button.groupButton:ClearAllPoints()
-         if item.item and button.itemButton then
+            if itemData and button.itemButton then
               -- Place to the left of the item button
               if item.type == "supertrack" then
                    button.groupButton:SetPoint("RIGHT", button, "RIGHT", -45, 0)
@@ -704,10 +885,18 @@ function addon:UpdateTrackerDisplay(trackables)
     if not trackerFrame or not contentFrame then
         return
     end
+
+    -- Invalidate layout signature so anchors are always recalculated this frame.
+    -- Sections change height/visibility during this render pass and the layout
+    -- engine at the end must pick up on every change.
+    self._layoutSignature = nil
     
     self:ResetButtonPool()
     
     local db = self.db
+    local incomingCount = #trackables
+    local renderedNormalItems = 0
+    local renderedHeaders = 0
 
     local function ApplyConfiguredHeaderBackground(header)
         local bgStyle = db.headerBackgroundStyle or "tracker"
@@ -793,199 +982,197 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Render Auto Quest Completion using Blizzard's default popup contents.
     -- This replaces TrackerPlus' custom popup styling for quest completion/offer.
+    local completedQuestFrame = self.completedQuestFrame
     local autoQuestFrame = self.autoQuestFrame
     local autoQuestTracker = AutoQuestPopUpTracker
-    local useBlizzardAutoQuest = (autoQuestTracker and autoQuestTracker.ContentsFrame and #autoQuests > 0)
+    
+    -- We do not use the old autoQuestFrame logic anymore, but keep it hidden
+    autoQuestFrame:SetHeight(1)
+    autoQuestFrame:Hide()
 
-    if useBlizzardAutoQuest then
-        local contents = autoQuestTracker.ContentsFrame
-        local autoQuestHeight = contents:GetHeight() or 0
-        local hasContent = autoQuestHeight > 1 and contents:IsShown()
+    local stolenPopups = {}
 
-        if not hasContent and contents.GetNumChildren then
-            for _, child in pairs({contents:GetChildren()}) do
-                if child:IsShown() and (child:GetHeight() or 0) > 1 then
-                    hasContent = true
-                    break
-                end
-            end
-        end
-
-        if hasContent then
-            pcall(function()
-                if contents:GetParent() ~= autoQuestFrame then
-                    contents:SetParent(autoQuestFrame)
-                    contents:SetFrameStrata("HIGH")
-                    contents:SetFrameLevel(100)
-                    self._autoQuestContentsAnchored = false
-                    self._autoQuestContentsWidth = nil
-                end
-
-                local autoWidth = self.db.frameWidth - 10
-                if not self._autoQuestContentsAnchored or self._autoQuestContentsWidth ~= autoWidth then
-                    contents:ClearAllPoints()
-                    contents:SetPoint("TOPLEFT", autoQuestFrame, "TOPLEFT", 5, -5)
-                    contents:SetWidth(autoWidth)
-                    self._autoQuestContentsAnchored = true
-                    self._autoQuestContentsWidth = autoWidth
-                end
-
-                contents:Show()
-                contents:SetAlpha(1)
-                if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
-            end)
-
-            autoQuestHeight = contents:GetHeight() or autoQuestHeight
-            if autoQuestHeight < 20 then autoQuestHeight = 70 end
-            autoQuestFrame:SetHeight(autoQuestHeight + 5)
-            autoQuestFrame:Show()
-        else
-            autoQuestFrame:SetHeight(1)
-            autoQuestFrame:Hide()
-        end
-    else
-        if autoQuestTracker and autoQuestTracker.ContentsFrame then
-            local contents = autoQuestTracker.ContentsFrame
-            if contents:GetParent() == autoQuestFrame then
-                pcall(function()
-                    contents:SetParent(autoQuestTracker)
-                    contents:ClearAllPoints()
-                    contents:SetPoint("TOPLEFT", autoQuestTracker, "TOPLEFT", 0, 0)
-                end)
-            end
-        end
-        -- Safety restore in case an older build parented QuestObjectiveTracker.ContentsFrame
-        -- into autoQuestFrame by mistake.
-        if QuestObjectiveTracker and QuestObjectiveTracker.ContentsFrame then
-            local questContents = QuestObjectiveTracker.ContentsFrame
-            if questContents:GetParent() == autoQuestFrame then
-                pcall(function()
-                    questContents:SetParent(QuestObjectiveTracker)
-                    questContents:ClearAllPoints()
-                    questContents:SetPoint("TOPLEFT", QuestObjectiveTracker, "TOPLEFT", 0, 0)
-                end)
-            end
-        end
-        self._autoQuestContentsAnchored = false
-        self._autoQuestContentsWidth = nil
-        autoQuestFrame:SetHeight(1)
-        autoQuestFrame:Hide()
+    -- Legacy support (BfA/Shadowlands) for AutoQuestPopUpTracker
+    if autoQuestTracker and autoQuestTracker.ContentsFrame and #autoQuests > 0 then
+        table.insert(stolenPopups, autoQuestTracker.ContentsFrame)
     end
 
-    --------------------------------------------------------------------------
-    -- 0. Render Widgets (Power Bars, PvP Bars)
-    --------------------------------------------------------------------------
-    local widgetContainer = ObjectiveTrackerUIWidgetContainer
-    local widgetHeight = 0
-    
-    if self.widgetFrame then  -- Safety Check
-        if widgetContainer then
-             -- Use pcall to prevent taint/secure errors from crashing execution
-             pcall(function()
-                -- Reparent to our dedicated frame
-                if widgetContainer:GetParent() ~= self.widgetFrame then
-                    widgetContainer:SetParent(self.widgetFrame)
-                    widgetContainer:SetFrameStrata("HIGH")
-                    self._widgetContainerAnchored = false
+    -- Modern support (Dragonflight / The War Within) for popups inside QuestObjectiveTracker
+    if QuestObjectiveTracker and QuestObjectiveTracker.ContentsFrame and QuestObjectiveTracker.ContentsFrame.GetNumChildren then
+        for _, child in ipairs({QuestObjectiveTracker.ContentsFrame:GetChildren()}) do
+            if child and child.Contents and (child.Contents.QuestIconBg or child.Contents.QuestionMark or child.Contents.Exclamation) then
+                if child:IsShown() and (child:GetHeight() or 0) > 1 then
+                    table.insert(stolenPopups, child.Contents)
                 end
+            end
+        end
+    end
 
-                if not self._widgetContainerAnchored then
-                    widgetContainer:ClearAllPoints()
-                    widgetContainer:SetPoint("TOP", self.widgetFrame, "TOP", 0, -5)
-                    self._widgetContainerAnchored = true
+    self._stolenPopups = self._stolenPopups or {}
+    
+    -- Restore popups that are no longer active
+    for stolenFrame, _ in pairs(self._stolenPopups) do
+        local stillActive = false
+        for _, activePopup in ipairs(stolenPopups) do
+            if activePopup == stolenFrame then
+                stillActive = true
+                break
+            end
+        end
+        if not stillActive then
+            pcall(function()
+                if stolenFrame._trackerPlusOriginalParent then
+                    stolenFrame:SetParent(stolenFrame._trackerPlusOriginalParent)
+                    stolenFrame:ClearAllPoints()
+                    stolenFrame:SetPoint("TOPLEFT", stolenFrame._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
+                    stolenFrame._trackerPlusOriginalParent = nil
+                elseif autoQuestTracker and stolenFrame == autoQuestTracker.ContentsFrame then
+                    stolenFrame:SetParent(autoQuestTracker)
+                    stolenFrame:ClearAllPoints()
+                    stolenFrame:SetPoint("TOPLEFT", autoQuestTracker, "TOPLEFT", 0, 0)
+                end
+            end)
+            self._stolenPopups[stolenFrame] = nil
+        end
+    end
+
+    if #stolenPopups > 0 then
+        local totalHeight = 0
+        local yOff = -5
+        local autoWidth = self.db.frameWidth - 10
+        
+        for _, popup in ipairs(stolenPopups) do
+            pcall(function()
+                if popup:GetParent() ~= completedQuestFrame then
+                    -- Save original parent so we can restore it easily, handle both legacy and modern
+                    popup._trackerPlusOriginalParent = popup._trackerPlusOriginalParent or popup:GetParent()
+                    popup:SetParent(completedQuestFrame)
+                    popup:SetFrameStrata("HIGH")
+                    popup:SetFrameLevel(100)
                 end
                 
-                widgetContainer:Show()
-             end)
+                popup:ClearAllPoints()
+                popup:SetPoint("TOPLEFT", completedQuestFrame, "TOPLEFT", -10, yOff)
+                popup:SetWidth(autoWidth)
+                popup:Show()
+                popup:SetAlpha(1)
+                
+                if popup.SetIgnoreParentAlpha then popup:SetIgnoreParentAlpha(true) end
+            end)
+            self._stolenPopups[popup] = true
             
-            -- Calculate height
-            widgetHeight = widgetContainer:GetHeight() or 0
-            
-            -- Ignore negligible height (often ghost frames)
-            if widgetHeight < 2 then widgetHeight = 0 end
+            local h = popup:GetHeight() or 0
+            if h < 20 then h = 70 end
+            totalHeight = totalHeight + h + 5
+            yOff = yOff - h - 5
         end
-        
-        -- Exact height if content exists, otherwise 1px
-        local finalWidgetH = (widgetHeight > 0) and (widgetHeight + 5) or 1
-        self.widgetFrame:SetHeight(finalWidgetH)
 
-        -- Dynamic Anchoring to remove gaps
-        if self.autoQuestFrame then
-             local aqVisible = (self.autoQuestFrame:GetHeight() > 10)
-             -- Use 0 padding if not visible, standard -5 if visible
-             local padding = aqVisible and -5 or 0
-               if self._widgetFramePadding ~= padding then
-                  self.widgetFrame:ClearAllPoints()
-                  self.widgetFrame:SetPoint("TOPLEFT", self.autoQuestFrame, "BOTTOMLEFT", 0, padding)
-                  self.widgetFrame:SetPoint("TOPRIGHT", self.autoQuestFrame, "BOTTOMRIGHT", 0, padding)
-                  self._widgetFramePadding = padding
-               end
+        completedQuestFrame:SetHeight(totalHeight + 10)
+        completedQuestFrame:Show()
+    else
+        -- If no popups, ensure we restore anything we had
+        for popup, _ in pairs(self._stolenPopups) do
+            pcall(function()
+                if popup._trackerPlusOriginalParent then
+                    popup:SetParent(popup._trackerPlusOriginalParent)
+                    popup:ClearAllPoints()
+                    popup:SetPoint("TOPLEFT", popup._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
+                    popup._trackerPlusOriginalParent = nil
+                end
+            end)
         end
-        else
-            self._widgetContainerAnchored = false
-            self._widgetFramePadding = nil
+        wipe(self._stolenPopups)
+        
+        self._autoQuestContentsAnchored = false
+        self._autoQuestContentsWidth = nil
+        completedQuestFrame:SetHeight(1)
+        completedQuestFrame:Hide()
     end
     
-    -- Dynamic Anchoring for Scenario Frame
-    if self.scenarioFrame and self.widgetFrame then
-          local widgetVisible = (self.widgetFrame:GetHeight() > 2)
-          local padding = widgetVisible and -5 or 0
-          self.scenarioFrame:ClearAllPoints()
-          -- Use a tighter anchor
-          self.scenarioFrame:SetPoint("TOPLEFT", self.widgetFrame, "BOTTOMLEFT", 0, padding)
-          self.scenarioFrame:SetPoint("TOPRIGHT", self.widgetFrame, "BOTTOMRIGHT", 0, padding)
-     end
-    
+    -- Legacy safety cleanup
+    if QuestObjectiveTracker and QuestObjectiveTracker.ContentsFrame then
+        local questContents = QuestObjectiveTracker.ContentsFrame
+        if questContents:GetParent() == autoQuestFrame then
+            pcall(function()
+                questContents:SetParent(QuestObjectiveTracker)
+                questContents:ClearAllPoints()
+                questContents:SetPoint("TOPLEFT", QuestObjectiveTracker, "TOPLEFT", 0, 0)
+            end)
+        end
+    end
+
     --------------------------------------------------------------------------
     -- 1. Render Scenarios (Sticky Header) - USING BLIZZARD FRAME
     --------------------------------------------------------------------------
     
     -- Check if we are in a Scenario and have the Blizzard frame available
-    local scenarioTracker = ScenarioObjectiveTracker
-    local useBlizzardScenario = (C_Scenario.IsInScenario() and scenarioTracker and scenarioTracker.ContentsFrame)
+    local scenarioTracker = GetScenarioTrackerSource()
+    local isInScenario = (C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario()) or false
+    
+    local forceManualScenario = false
+    local hasManualScenarioData = false
+    if self.currentScenarios and #self.currentScenarios > 0 then
+        for _, scenarioItem in ipairs(self.currentScenarios) do
+            if not scenarioItem.isDummy then
+                hasManualScenarioData = true
+                break
+            end
+        end
+    end
+
+    local isScenarioActive = isInScenario or hasManualScenarioData
+    local useBlizzardScenario = not not (isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame)
     
     local scenarioHeight = 0
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
         if useBlizzardScenario then
-            local scenarioTopInset = 5
-            local scenarioBottomPadding = 14
+            local scenarioTopInset = 0
+            local scenarioBottomPadding = 24
          -- We are using Blizzard's frame, so we hijack it.
+         local hostFrame = scenarioTracker
          local contents = scenarioTracker.ContentsFrame
          local hasScenarioContent = false
+         local rawHeight = 0
+         local widgetHeight = 0
+         local visibleChildren = 0
+         local maxVisibleChildHeight = 0
          
-         -- Parent it to our frame
-         if contents:GetParent() ~= self.scenarioFrame then
-              contents:SetParent(self.scenarioFrame)
-              -- FORCE STRATA: The user screenshot showed LOW, but our frame is MEDIUM.
-              -- We must bring it up to at least MEDIUM or HIGH to be seen on top of our bg.
-              contents:SetFrameStrata("HIGH") 
-              contents:SetFrameLevel(100)
-              
-              -- Disabled background mask as per request, just pure frame now.
-              if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
-         end
+            -- Parent the full tracker frame so Delve/Scenario visuals outside ContentsFrame also render.
+                local wasHijacked = (hostFrame:GetParent() ~= self.scenarioFrame)
+                EnsureHijackedParent(self, hostFrame, self.scenarioFrame, "_scenarioOriginalParent", "HIGH", 100)
+            if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
-            local scenarioWidth = self.db.frameWidth - 5
+            local scenarioWidth = self.db.frameWidth - 10
             if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
-                contents:ClearAllPoints()
-                 contents:SetPoint("TOP", self.scenarioFrame, "TOP", -20, -scenarioTopInset)
-                -- Constrain width so it fits our frame (and forces word wrap if supported)
-                contents:SetWidth(scenarioWidth)
+                hostFrame:ClearAllPoints()
+                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioTopInset)
+                hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -5, -scenarioTopInset)
+
+                -- Tighten the stolen Blizzard contents to the top of the host frame.
+                -- Some Delve/Scenario modules retain legacy top offsets that create
+                -- a blank strip above the first visible row when reparented.
+                if contents and contents:GetParent() == hostFrame then
+                    contents:ClearAllPoints()
+                    contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
+                    contents:SetPoint("TOPRIGHT", hostFrame, "TOPRIGHT", 0, 0)
+                end
+
                 self._scenarioContentsAnchored = true
                 self._scenarioContentsWidth = scenarioWidth
             end
          
-         contents:Show()
+         EnsureFrameVisible(hostFrame)
+         EnsureFrameVisible(contents)
          
          -- Attempt to find internal WidgetContainer and force show it
          if contents.WidgetContainer then
-             contents.WidgetContainer:Show()
+             EnsureFrameVisible(contents.WidgetContainer)
          end
          
-         -- Try to force update safely
-         if scenarioTracker.Update then
-                pcall(function() scenarioTracker:Update() end)
+         -- Let Blizzard drive scenario updates; only nudge once when we first hijack.
+         if wasHijacked and scenarioTracker.Update then
+             pcall(function() scenarioTracker:Update() end)
          end
 
          -- The height of the blizzard frame varies. We need to update our container to match it.
@@ -993,79 +1180,132 @@ function addon:UpdateTrackerDisplay(trackables)
          -- is often unreliable during objective updates or animations.
          local blizzardHeight = 0
          
-         -- Method 1: Check standard GetHeight
-         local rawHeight = contents:GetHeight() or 0
-         if rawHeight > blizzardHeight then blizzardHeight = rawHeight end
-         if rawHeight > 1 and contents:IsShown() then
-             hasScenarioContent = true
-         end
+         -- Capture raw heights but do not trust them first: collapsed scenario modules can
+         -- keep stale expanded values for several frames.
+         rawHeight = math.max(contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
 
          -- Method 2: Check WidgetContainer
          if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
              local wH = contents.WidgetContainer:GetHeight() or 0
+             widgetHeight = wH
              if wH > blizzardHeight then blizzardHeight = wH end
-             if wH > 1 then hasScenarioContent = true end
+             if wH > 8 then hasScenarioContent = true end
          end
 
-         -- Method 3: Scan all visible children for the lowest bottom edge
-         -- This catches dynamically added progress bars or bonus objectives within the scenario block
-         if contents.GetNumChildren then
-             local parentTop = contents:GetTop()
-             if parentTop then
-                 for _, child in pairs({contents:GetChildren()}) do
-                     if child:IsShown() and child:GetBottom() then
-                         local childBottom = child:GetBottom()
-                         local relativeHeight = parentTop - childBottom
-                         if relativeHeight > blizzardHeight then
-                             blizzardHeight = relativeHeight
+         -- Method 3: Scan visible children and compute vertical extent (stacked rows).
+         local minBottom = nil
+         local maxChildTop = nil
+         local scenFrameHasPosition = (self.scenarioFrame:GetTop() ~= nil)
+         local function AccumulateChildExtent(parentFrame)
+             if not parentFrame or not parentFrame.GetNumChildren then return end
+             for _, child in pairs({parentFrame:GetChildren()}) do
+                 if child:IsShown() then
+                     visibleChildren = visibleChildren + 1
+                     local childHeight = child:GetHeight() or 0
+                     if childHeight > maxVisibleChildHeight then
+                         maxVisibleChildHeight = childHeight
+                     end
+                     if childHeight > 8 then
+                         hasScenarioContent = true
+                     end
+
+                     -- Only read screen coordinates when our parent has a valid position
+                     if scenFrameHasPosition then
+                         local childTop = child:GetTop()
+                         if childTop and (not maxChildTop or childTop > maxChildTop) then
+                             maxChildTop = childTop
                          end
-                         if relativeHeight > 1 then
-                             hasScenarioContent = true
+
+                         local childBottom = child:GetBottom()
+                         if childBottom then
+                             if not minBottom or childBottom < minBottom then
+                                 minBottom = childBottom
+                             end
                          end
                      end
                  end
              end
          end
+
+         local maxTop = nil
+         local hostTop = hostFrame:GetTop()
+         local contentsTop = contents:GetTop()
+         if hostTop and contentsTop then
+             maxTop = math.max(hostTop, contentsTop)
+         else
+             maxTop = hostTop or contentsTop
+         end
+
+         AccumulateChildExtent(contents)
+         AccumulateChildExtent(hostFrame)
+
+         if maxChildTop and minBottom then
+             local extentHeight = maxChildTop - minBottom
+             if extentHeight > blizzardHeight then
+                 blizzardHeight = extentHeight
+             end
+         end
+
+         -- When extent scanning worked we already have a good value.
+         -- Otherwise prefer rawHeight (container's own reported size) over
+         -- maxVisibleChildHeight (single tallest child) which under-counts
+         -- stacked rows.
+         if blizzardHeight < 1 then
+             if rawHeight > 1 and (contents:IsShown() or hostFrame:IsShown()) then
+                 blizzardHeight = rawHeight
+                 hasScenarioContent = true
+             elseif maxVisibleChildHeight > 0 then
+                 blizzardHeight = maxVisibleChildHeight
+             end
+         end
+
+         -- Fail-safe: Blizzard can report transient zero sizes during scenario transitions.
+         -- If we are in a scenario and have a hijacked host frame, keep the section alive.
+         if not hasScenarioContent and isScenarioActive and (hostFrame:IsShown() or contents:IsShown()) then
+             hasScenarioContent = true
+             blizzardHeight = math.max(blizzardHeight, self._lastScenarioBlizzardHeight or 90)
+         end
          
          if hasScenarioContent then
              -- If height is suspiciously small while content exists, enforce a modest floor.
              if blizzardHeight < 30 then
-                 blizzardHeight = 60
+                 blizzardHeight = math.max(self._lastScenarioBlizzardHeight or 60, 60)
              end
 
-             scenarioHeight = blizzardHeight + scenarioTopInset + scenarioBottomPadding + 10 -- Extra padding for safety
+             self._lastScenarioBlizzardHeight = blizzardHeight
+
+             -- When Blizzard scenario is collapsed, we typically only have header-level content.
+             -- Reduce reserved bottom padding so Active Quest snaps closer to Delves header.
+             local effectiveBottomPadding = scenarioBottomPadding
+             if blizzardHeight <= 36 then
+                 effectiveBottomPadding = 8
+             end
+
+             scenarioHeight = blizzardHeight + scenarioTopInset + effectiveBottomPadding + 10 -- Extra padding for safety
              scenarioYOffset = scenarioHeight
          else
-             if contents:GetParent() == self.scenarioFrame then
-                 pcall(function()
-                     contents:SetParent(scenarioTracker)
-                     contents:ClearAllPoints()
-                     contents:SetPoint("TOPLEFT", scenarioTracker, "TOPLEFT", 0, 0)
-                 end)
+             RestoreHijackedParent(self, hostFrame, self.scenarioFrame, ObjectiveTrackerFrame or UIParent, "_scenarioOriginalParent")
+             if hasManualScenarioData then
+                 -- Blizzard scenario frame exists but did not render visible rows; use manual fallback.
+                 forceManualScenario = true
              end
-             self._scenarioContentsAnchored = false
-             self._scenarioContentsWidth = nil
+                ResetAnchorState(self, "_scenarioContentsAnchored", "_scenarioContentsWidth")
+             self._lastScenarioBlizzardHeight = nil
          end
-         
+
     else
         if scenarioTracker and scenarioTracker.ContentsFrame then
-            local contents = scenarioTracker.ContentsFrame
-            if contents:GetParent() == self.scenarioFrame then
-                pcall(function()
-                    contents:SetParent(scenarioTracker)
-                    contents:ClearAllPoints()
-                    contents:SetPoint("TOPLEFT", scenarioTracker, "TOPLEFT", 0, 0)
-                end)
-            end
+            local hostFrame = scenarioTracker
+            RestoreHijackedParent(self, hostFrame, self.scenarioFrame, ObjectiveTrackerFrame or UIParent, "_scenarioOriginalParent")
         end
-        self._scenarioContentsAnchored = false
-        self._scenarioContentsWidth = nil
+           ResetAnchorState(self, "_scenarioContentsAnchored", "_scenarioContentsWidth")
+           self._lastScenarioBlizzardHeight = nil
         if self.scenarioFrame and self.scenarioFrame.bgMask then
              self.scenarioFrame.bgMask:Hide()
         end
     end
 
-    if (not useBlizzardScenario) and self.currentScenarios and #self.currentScenarios > 0 then
+    if ((not useBlizzardScenario) or forceManualScenario) and hasManualScenarioData then
         -- Manual rendering fallback
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
@@ -1492,10 +1732,11 @@ function addon:UpdateTrackerDisplay(trackables)
     -- 1.5 Render Bonus Objectives (Pinned to Bottom)
     --------------------------------------------------------------------------
     local bonusYOffset = 0
+    local preferManualBonus = (#bonusObjectives > 0)
     
     -- Strategy: Hijack Blizzard's BonusObjectiveTracker frame if it exists and has content
     local bonusTracker = BonusObjectiveTracker
-    local useBlizzardBonus = (bonusTracker and bonusTracker.ContentsFrame)
+    local useBlizzardBonus = (bonusTracker and bonusTracker.ContentsFrame and not preferManualBonus)
     
     if useBlizzardBonus then
          local contents = bonusTracker.ContentsFrame
@@ -1520,12 +1761,9 @@ function addon:UpdateTrackerDisplay(trackables)
          if hasContent then
               -- Reparent to our bonusFrame
                 pcall(function()
-                  if contents:GetParent() ~= self.bonusFrame then
-                       contents:SetParent(self.bonusFrame)
-                       contents:SetFrameStrata("HIGH")
-                       contents:SetFrameLevel(100)
-                       self._bonusContentsAnchored = false
-                       self._bonusContentsWidth = nil
+                   if contents:GetParent() ~= self.bonusFrame then
+                       EnsureHijackedParent(self, contents, self.bonusFrame, "_bonusOriginalParent", "HIGH", 100)
+                       ResetAnchorState(self, "_bonusContentsAnchored", "_bonusContentsWidth")
                   end
 
                     local bonusWidth = self.db.frameWidth - 10
@@ -1537,19 +1775,11 @@ function addon:UpdateTrackerDisplay(trackables)
                         self._bonusContentsWidth = bonusWidth
                     end
 
-                   contents:Show()
-                   contents:SetAlpha(1) -- Force visibility even if parent OTF is Alpha 0
-                   
-                   -- Recursively set alpha on children to override parent fade?
-                   -- Frames inherit Alpha by default (use SetIgnoreParentAlpha if available)
-                   if contents.SetIgnoreParentAlpha then
-                        contents:SetIgnoreParentAlpha(true)
-                   end
+                    EnsureFrameVisible(contents)
 
                    -- Ensure children are shown (some instances hide children but show parent)
                    if contents.WidgetContainer then 
-                        contents.WidgetContainer:Show() 
-                        contents.WidgetContainer:SetAlpha(1)
+                        EnsureFrameVisible(contents.WidgetContainer)
                    end
               end)
               
@@ -1561,21 +1791,17 @@ function addon:UpdateTrackerDisplay(trackables)
               
          else
               -- No bonus content - restore to its original parent if we stole it
-              if contents:GetParent() == self.bonusFrame then
-                   pcall(function()
-                       contents:SetParent(bonusTracker)
-                       contents:ClearAllPoints()
-                       contents:SetPoint("TOPLEFT", bonusTracker, "TOPLEFT", 0, 0)
-                   end)
-              end
-                self._bonusContentsAnchored = false
-                self._bonusContentsWidth = nil
+              RestoreHijackedParent(self, contents, self.bonusFrame, bonusTracker, "_bonusOriginalParent")
+                 ResetAnchorState(self, "_bonusContentsAnchored", "_bonusContentsWidth")
          end
     end
 
         if not useBlizzardBonus then
-            self._bonusContentsAnchored = false
-            self._bonusContentsWidth = nil
+            if bonusTracker and bonusTracker.ContentsFrame then
+                local contents = bonusTracker.ContentsFrame
+                RestoreHijackedParent(self, contents, self.bonusFrame, bonusTracker, "_bonusOriginalParent")
+            end
+            ResetAnchorState(self, "_bonusContentsAnchored", "_bonusContentsWidth")
         end
     
     -- Fallback: Manually render bonus items if we collected any and Blizzard frame isn't available
@@ -1623,7 +1849,9 @@ function addon:UpdateTrackerDisplay(trackables)
          header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
          
          header.styledBackdrop:Show()
-         ApplyConfiguredHeaderBackground(header)
+         if header.bg then
+             header.bg:SetColorTexture(0, 0, 0, 0) -- No header fill behind text
+         end
          header:SetHeight(30)
          header:Show()
          
@@ -1642,9 +1870,11 @@ function addon:UpdateTrackerDisplay(trackables)
             bonusYOffset = bonusYOffset + height + db.spacingItemVertical
          end
 
-         local totalHeight = bonusYOffset - bonusStartY
-         if totalHeight < 30 then totalHeight = 30 end
-         header.styledBackdrop:SetHeight(totalHeight + 5)
+             local totalHeight = bonusYOffset - bonusStartY
+             if totalHeight < 30 then totalHeight = 30 end
+             local backdropPadding = 10
+             header.styledBackdrop:SetHeight(totalHeight + backdropPadding)
+             bonusYOffset = bonusYOffset + backdropPadding
     end
     
     -- Update Bonus Frame Height
@@ -1654,15 +1884,6 @@ function addon:UpdateTrackerDisplay(trackables)
              self.bonusFrame:Hide()
         else
              self.bonusFrame:Show()
-        
-             -- DEBUG: If logic says we are showing it, but it's invisible, force visibility on children
-             if useBlizzardBonus and self.bonusFrame:GetNumChildren() > 0 then
-                  local kids = {self.bonusFrame:GetChildren()}
-                  for _, kid in ipairs(kids) do
-                       kid:Show()
-                       kid:SetAlpha(1)
-                  end
-             end
         end
     else
         self.bonusFrame:Hide()
@@ -1673,7 +1894,6 @@ function addon:UpdateTrackerDisplay(trackables)
     local wqYOffset = 0
     local wqFrame = self.worldQuestFrame
     local hasBlizzardWQContent = false
-    local manualWQRendered = 0
     
     -- Hijacking Strategy for World Quests
     local wqTracker = WorldQuestObjectiveTracker
@@ -1716,12 +1936,9 @@ function addon:UpdateTrackerDisplay(trackables)
               hasBlizzardWQContent = true
               -- Hijack it!
                 pcall(function()
-                  if contents:GetParent() ~= wqFrame then
-                       contents:SetParent(wqFrame)
-                       contents:SetFrameStrata("HIGH")
-                       contents:SetFrameLevel(100)
-                       self._wqContentsAnchored = false
-                       self._wqContentsWidth = nil
+                   if contents:GetParent() ~= wqFrame then
+                       EnsureHijackedParent(self, contents, wqFrame, "_wqOriginalParent", "HIGH", 100)
+                       ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
                    end
 
                    local wqWidth = self.db.frameWidth - 10
@@ -1734,13 +1951,10 @@ function addon:UpdateTrackerDisplay(trackables)
                       self._wqContentsWidth = wqWidth
                    end
 
-                   contents:Show()
-                   contents:SetAlpha(1)
-                   if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
+                   EnsureFrameVisible(contents)
               
                    if contents.WidgetContainer then
-                       contents.WidgetContainer:Show()
-                       contents.WidgetContainer:SetAlpha(1)
+                       EnsureFrameVisible(contents.WidgetContainer)
                    end
               
                    -- Try to trigger internal update
@@ -1752,15 +1966,8 @@ function addon:UpdateTrackerDisplay(trackables)
               wqYOffset = blizzardWQHeight + 35 
          else
               -- Restore if empty
-              if contents:GetParent() == wqFrame then
-                   pcall(function()
-                       contents:SetParent(wqTracker)
-                       contents:ClearAllPoints()
-                       contents:SetPoint("TOPLEFT", wqTracker, "TOPLEFT", 0, 0)
-                   end)
-              end
-                self._wqContentsAnchored = false
-                self._wqContentsWidth = nil
+                RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
+                ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
                  hasBlizzardWQContent = false
          end
     end
@@ -1769,16 +1976,9 @@ function addon:UpdateTrackerDisplay(trackables)
             -- Ensure Blizzard WQ frame is restored when we switch to manual mode.
             if wqTracker and wqTracker.ContentsFrame then
                 local contents = wqTracker.ContentsFrame
-                if contents:GetParent() == wqFrame then
-                    pcall(function()
-                        contents:SetParent(wqTracker)
-                        contents:ClearAllPoints()
-                        contents:SetPoint("TOPLEFT", wqTracker, "TOPLEFT", 0, 0)
-                    end)
-                end
+                RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
             end
-            self._wqContentsAnchored = false
-            self._wqContentsWidth = nil
+            ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
             hasBlizzardWQContent = false
         end
 
@@ -1843,13 +2043,10 @@ function addon:UpdateTrackerDisplay(trackables)
                   contents:Hide()
                   wqYOffset = 24
              else
-                  contents:Show()
-                  contents:SetAlpha(1)
-                   if contents.SetIgnoreParentAlpha then contents:SetIgnoreParentAlpha(true) end
+               EnsureFrameVisible(contents)
                   
                   if contents.WidgetContainer then
-                       contents.WidgetContainer:Show()
-                       contents.WidgetContainer:SetAlpha(1)
+                   EnsureFrameVisible(contents.WidgetContainer)
                   end
              end
            elseif #worldQuestItems > 0 and (wqYOffset == 0 or not hasBlizzardWQContent) then
@@ -1860,25 +2057,10 @@ function addon:UpdateTrackerDisplay(trackables)
                 for _, item in ipairs(worldQuestItems) do
                     local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
                     wqYOffset = wqYOffset + height + db.spacingItemVertical
-                    manualWQRendered = manualWQRendered + 1
                 end
             end
         end
 
-        if addon.Log then
-            local diagSig = table.concat({
-                tostring(useBlizzardWQ),
-                tostring(hasBlizzardWQContent),
-                tostring(#worldQuestItems),
-                tostring(manualWQRendered),
-                tostring(collapsed),
-                tostring(wqYOffset),
-            }, "|")
-            if self._wqDiagSig ~= diagSig then
-                addon:Log("WQ diag: useBlizz=%s hasBlizz=%s items=%d manual=%d collapsed=%s y=%d", tostring(useBlizzardWQ), tostring(hasBlizzardWQContent), #worldQuestItems, manualWQRendered, tostring(collapsed), wqYOffset)
-                self._wqDiagSig = diagSig
-            end
-        end
     end
     
     if wqFrame then
@@ -1895,8 +2077,7 @@ function addon:UpdateTrackerDisplay(trackables)
         end
     end
 
-        -- Update Scenario Frame Height & ScrollFrame Anchor
-        local topParent, topPoint, topRelPoint, topX, topY
+        -- Update Scenario Frame Height
     if scenarioYOffset > 0 then
         self.scenarioFrame:SetHeight(scenarioYOffset)
         if addon.db.minimized then
@@ -1904,37 +2085,23 @@ function addon:UpdateTrackerDisplay(trackables)
         else
             self.scenarioFrame:Show()
         end
-           topParent, topPoint, topRelPoint, topX, topY = self.scenarioFrame, "TOPLEFT", "BOTTOMLEFT", 0, -4
+           -- scenarioFrame height/visibility set; layout will handle anchoring
     else
         self.scenarioFrame:Hide()
-           topParent, topPoint, topRelPoint, topX, topY = self.trackerFrame, "TOPLEFT", "TOPLEFT", 0, -25
     end
-    
-    -- Bottom Anchor Logic: Stack Scroll -> Bonus -> WQ -> Bottom
-        local bottomParent
-    if bonusYOffset > 0 then
-            bottomParent = self.bonusFrame
-    elseif wqYOffset > 0 and wqFrame then
-            bottomParent = wqFrame
-    else
-            bottomParent = self.trackerFrame
-        end
 
-        local anchorSignature = table.concat({
-           tostring(topParent), tostring(topPoint), tostring(topRelPoint), tostring(topX), tostring(topY),
-           tostring(bottomParent),
-        }, "|")
+    ---------------------------------------------------------------------------
+    -- Update layout anchors (scenario, autoquest, scroll, bonus, wq)
+    ---------------------------------------------------------------------------
+    self:UpdateLayoutAnchors()
 
-        if self._scrollAnchorSignature ~= anchorSignature then
-            self.scrollFrame:ClearAllPoints()
-            self.scrollFrame:SetPoint(topPoint, topParent, topRelPoint, topX, topY)
-            if bottomParent == self.trackerFrame then
-                self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -5, 5)
-            else
-                self.scrollFrame:SetPoint("BOTTOMRIGHT", bottomParent, "TOPRIGHT", 0, 0)
-            end
-            self._scrollAnchorSignature = anchorSignature
-    end
+    DebugLayout(self,
+        "anchors scenY=%d bonusY=%d wqY=%d autoQH=%.1f",
+        tonumber(scenarioYOffset or 0),
+        tonumber(bonusYOffset or 0),
+        tonumber(wqYOffset or 0),
+        tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0)
+    )
 
     --------------------------------------------------------------------------
     -- 2. Render Normal Trackables (In ScrollFrame)
@@ -1965,6 +2132,7 @@ function addon:UpdateTrackerDisplay(trackables)
             if not (not isMajor and currentMajorCollapsed) then
                 -- Zone/Category Header
                 local header = self:GetOrCreateButton(contentFrame) -- Use contentFrame
+                renderedHeaders = renderedHeaders + 1
             if header._scriptMode ~= "header" then
                 -- Invalidate cached header presentation when recycling a non-header frame.
                 -- Without this, stale cached anchors/atlas/text style can cause missing or malformed headers.
@@ -2244,7 +2412,30 @@ function addon:UpdateTrackerDisplay(trackables)
                 item._minorHeaderTitle = currentMinorHeaderTitle
                 local height = self:RenderTrackableItem(contentFrame, item, yOffset, db.spacingTrackableIndent)
                 yOffset = yOffset + height + db.spacingItemVertical
+                renderedNormalItems = renderedNormalItems + 1
             end
+        end
+    end
+
+    local bodyAppearsBlank = (renderedNormalItems == 0 and renderedHeaders == 0 and yOffset <= 7)
+    if bodyAppearsBlank then
+        local now = GetTime and GetTime() or 0
+        if not self._lastBlankLayoutLogAt or (now - self._lastBlankLayoutLogAt) > 0.75 then
+            self._lastBlankLayoutLogAt = now
+            DebugLayout(self,
+                "BLANK body incoming=%d organized=%d scenData=%d scenY=%d bonus=%d bonusY=%d wq=%d wqY=%d autoQ=%d scrollShown=%s contentH=%.1f",
+                tonumber(incomingCount or 0),
+                tonumber(#trackables or 0),
+                tonumber((self.currentScenarios and #self.currentScenarios) or 0),
+                tonumber(scenarioYOffset or 0),
+                tonumber(#bonusObjectives or 0),
+                tonumber(bonusYOffset or 0),
+                tonumber(#worldQuestItems or 0),
+                tonumber(wqYOffset or 0),
+                tonumber(#autoQuests or 0),
+                tostring(self.scrollFrame and self.scrollFrame:IsShown()),
+                tonumber((contentFrame and contentFrame.GetHeight and contentFrame:GetHeight()) or 0)
+            )
         end
     end
     
@@ -2256,6 +2447,9 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Update tracker frame appearance
     self:UpdateTrackerAppearance()
+
+    -- Optional visual debug overlays for section layout troubleshooting
+    self:UpdateSectionDebugBoxes()
 end
 
 -- Show trackable tooltip
@@ -2263,8 +2457,8 @@ function addon:ShowTrackableTooltip(button, trackable)
     if not trackable then return end
     
     GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
-    
-    if trackable.type == "quest" then
+
+    if trackable.type == "quest" or trackable.type == "campaign" then
         GameTooltip:SetQuestLogItem("quest", trackable.id)
     elseif trackable.type == "achievement" then
         GameTooltip:SetText(trackable.title)

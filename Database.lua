@@ -100,6 +100,12 @@ local DEFAULTS = {
     
     -- Performance
     updateInterval = 0.15,
+
+    -- Debug
+    debugEnabled = false,
+    debugLevel = "error", -- off | error | warn | info | trace
+    layoutDebug = false,
+    debugSectionBoxes = false,
     
     -- Cache
     endeavorCache = {}, -- Stores last known tracked endeavors {id=true}

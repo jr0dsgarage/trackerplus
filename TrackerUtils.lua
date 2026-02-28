@@ -143,6 +143,7 @@ function addon:OrganizeTrackables(trackables)
     end
     
     -- Add in desired order
+    AddBucket("campaign", "Campaign")
     AddBucket("quest", "Quests")
     -- AddBucket("scenario", "Dungeons & Scenarios") -- Scenarios handled separately
     AddBucket("achievement", "Achievements")
@@ -300,7 +301,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
              -- Shift+Left: Stop Tracking
-            if trackable.type == "quest" then
+            if trackable.type == "quest" or trackable.type == "campaign" then
                 C_QuestLog.RemoveQuestWatch(trackable.id)
             elseif trackable.type == "achievement" then
                 if C_ContentTracking and C_ContentTracking.StopTracking then
@@ -328,7 +329,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 elseif trackable.popUpType == "OFFER" then
                      if ShowQuestOffer then ShowQuestOffer(trackable.questID) end
                 end
-            elseif trackable.type == "quest" or trackable.type == "supertrack" then
+            elseif trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" then
                 local questID = trackable.id or trackable.questID
                 if questID then
                     -- Show on map
@@ -390,7 +391,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
         end
     elseif mouseButton == "RightButton" then
         -- Right click: Context Menu
-        if trackable.type == "quest" or trackable.type == "supertrack" then
+        if trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" then
             local questID = trackable.id or trackable.questID
             if not questID then return end
             MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
