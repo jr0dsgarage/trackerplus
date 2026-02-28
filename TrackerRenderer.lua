@@ -1239,7 +1239,7 @@ function addon:UpdateTrackerDisplay(trackables)
             if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
                 hostFrame:ClearAllPoints()
                 hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioTopInset)
-                hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -5, -scenarioTopInset)
+                hostFrame:SetWidth(scenarioWidth)
 
                 -- Tighten the stolen Blizzard contents to the top of the host frame.
                 -- Some Delve/Scenario modules retain legacy top offsets that create
@@ -1247,7 +1247,38 @@ function addon:UpdateTrackerDisplay(trackables)
                 if contents and contents:GetParent() == hostFrame then
                     contents:ClearAllPoints()
                     contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
-                    contents:SetPoint("TOPRIGHT", hostFrame, "TOPRIGHT", 0, 0)
+                    contents:SetWidth(scenarioWidth)
+                end
+
+                if hostFrame.Header then
+                    hostFrame.Header:ClearAllPoints()
+                    hostFrame.Header:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
+                    hostFrame.Header:SetWidth(scenarioWidth)
+                    
+                    if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
+                        local function TrackerPlus_UpdateScenarioHeader(textStr)
+                            if textStr._tpUpdating then return end
+                            textStr._tpUpdating = true
+                            
+                            local inInstance, instanceType = IsInInstance()
+                            if inInstance then
+                                if instanceType == "party" then
+                                    textStr:SetText(TRACKER_HEADER_DUNGEON or "Dungeon")
+                                elseif instanceType == "scenario" then
+                                    local name = GetInstanceInfo()
+                                    if name and name ~= "" then
+                                        textStr:SetText(name)
+                                    else
+                                        textStr:SetText("Delve / Scenario")
+                                    end
+                                end
+                            end
+                            textStr._tpUpdating = false
+                        end
+                        hooksecurefunc(hostFrame.Header.Text, "SetText", TrackerPlus_UpdateScenarioHeader)
+                        TrackerPlus_UpdateScenarioHeader(hostFrame.Header.Text)
+                        hostFrame._trackerPlusHeaderHooked = true
+                    end
                 end
 
                 self._scenarioContentsAnchored = true
