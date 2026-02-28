@@ -639,11 +639,40 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
 
-    -- Check for Task/Bonus/World Quest progress bars only
+-- Get objectives
+    local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
+    local hasObjectives = false
+    local hasProgressBarObj = false
+
+    if objectives then
+        for _, obj in ipairs(objectives) do
+            -- Dont add redundant "0/1" objectives if we have a progress bar for the whole quest
+            -- But usually tasks have "Assault X" as text and the bar is separate.
+            -- Keeping the text is useful for context.
+            hasObjectives = true
+            
+            local flags = obj.flags or 0
+            local isFlagged = bit.band(flags, 1) == 1
+            if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
+                hasProgressBarObj = true
+            end
+            
+            table.insert(questInfo.objectives, {
+                text = obj.text,
+                type = obj.type,
+                finished = obj.finished,
+                numFulfilled = obj.numFulfilled,
+                numRequired = obj.numRequired,
+                flags = obj.flags,
+            })
+        end
+    end
+
+    -- Check for Task/Bonus/World Quest progress bars only if we lack a native one
     local canUseTaskProgress = C_QuestLog.IsQuestTask(questID) or isWorldQuest or isBonusObjective
-    if canUseTaskProgress and C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
+    if not hasProgressBarObj and canUseTaskProgress and C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
-        
+
         if progress then
              hasObjectives = true
              table.insert(questInfo.objectives, {
@@ -653,23 +682,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
                  numFulfilled = progress,
                  numRequired = 100,
              })
-
-        end
-    end
-
-    if objectives then
-        for _, obj in ipairs(objectives) do
-            -- Dont add redundant "0/1" objectives if we have a progress bar for the whole quest
-            -- But usually tasks have "Assault X" as text and the bar is separate. 
-            -- Keeping the text is useful for context.
-            hasObjectives = true
-            table.insert(questInfo.objectives, {
-                text = obj.text,
-                type = obj.type,
-                finished = obj.finished,
-                numFulfilled = obj.numFulfilled,
-                numRequired = obj.numRequired,
-            })
         end
     end
     

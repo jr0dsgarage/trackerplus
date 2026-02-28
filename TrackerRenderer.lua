@@ -1056,8 +1056,100 @@ function addon:UpdateTrackerDisplay(trackables)
                 popup:SetWidth(autoWidth)
                 popup:Show()
                 popup:SetAlpha(1)
-                
+
                 if popup.SetIgnoreParentAlpha then popup:SetIgnoreParentAlpha(true) end
+
+                -- Create a transparent overlay button to catch and forward clicks to the hidden parent block
+                if not popup._tplusClicker then
+                    popup._tplusClicker = CreateFrame("Button", nil, popup)
+                    popup._tplusClicker:SetAllPoints(popup)
+                    popup._tplusClicker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    popup._tplusClicker:SetScript("OnClick", function(self, btn)
+                        print("|cff00ccff[TrackerPlus]|r Clicked popup!")
+                        local orig = popup._trackerPlusOriginalParent
+                        
+                        if not orig then
+                            print("|cffff0000[TrackerPlus]|r ERROR: original parent missing!")
+                            return
+                        end
+                        
+                        print("|cff00ccff[TrackerPlus]|r Found orig: " .. tostring(orig:GetName() or "Anonymous"))
+
+                        -- The hidden container logic usually attaches scripts specifically to `orig` or `orig:GetParent()`
+                        -- Let's trace it and dump exactly what it contains
+                        local target = orig
+                        if orig.Contents == popup then
+                            print("|cff00ccff[TrackerPlus]|r Debug: Orig is direct parent.")
+                            target = orig
+                        elseif orig:GetParent() and orig:GetParent().Contents == popup then
+                            print("|cff00ccff[TrackerPlus]|r Debug: Orig is grandparent.")
+                            target = orig:GetParent()
+                        else
+                             print("|cff00ccff[TrackerPlus]|r Debug: Structure unknown, using Orig directly.")
+                        end
+
+                        -- Attempt manual data pull first to guarantee a result instead of hoping a script works through a mask
+                        local questID = target.questID or target.id
+                        if not questID and target:GetParent() then
+                            questID = target:GetParent().questID or target:GetParent().id
+                        end
+                        
+                        -- If we found an ID, directly trigger the blizzard API methods
+                        if questID then
+                            print("|cff00ccff[TrackerPlus]|r Found QuestID via data: " .. tostring(questID))
+                            if ShowQuestComplete and ShowQuestOffer then
+                                local isComplete = target.popUpType == "COMPLETE" or (target:GetParent() and target:GetParent().popUpType == "COMPLETE") or C_QuestLog.IsComplete(questID)
+                                print("|cff00ccff[TrackerPlus]|r Quest is complete state: " .. tostring(isComplete))
+                                
+                                if isComplete then
+                                    ShowQuestComplete(questID)
+                                else
+                                    ShowQuestOffer(questID)
+                                end
+                            else
+                                print("|cffff0000[TrackerPlus]|r Blizzard global functions ShowQuestComplete/ShowQuestOffer missing!")
+                            end
+                            return
+                        end
+
+                        print("|cff00ccff[TrackerPlus]|r No QuestID found, attempting script execution fallback.")
+
+                        if target.Click then
+                            print("|cff00ccff[TrackerPlus]|r Firing native target:Click()")
+                            target:Click(btn)
+                        elseif target:HasScript("OnClick") and target:GetScript("OnClick") then
+                            print("|cff00ccff[TrackerPlus]|r Firing native target:GetScript(OnClick)")
+                            target:GetScript("OnClick")(target, btn)
+                        elseif target:HasScript("OnMouseUp") and target:GetScript("OnMouseUp") then
+                            print("|cff00ccff[TrackerPlus]|r Firing native target:GetScript(OnMouseUp)")
+                            target:GetScript("OnMouseUp")(target, btn)
+                        else
+                            print("|cffff0000[TrackerPlus]|r Target has NO interactive scripts!")
+                            
+                            -- Explore children just in case Blizzard buried a button one level lower inside `child` rather than on `child`
+                            if target.GetNumChildren then
+                                for i, c in ipairs({target:GetChildren()}) do
+                                    if c.GetScript and (c:GetScript("OnClick") or c:GetScript("OnMouseUp")) then
+                                        print("|cff00ccff[TrackerPlus]|r Found a child button: " .. tostring(c:GetName() or i) .. " | Attempting invoke!")
+                                        if c:GetScript("OnClick") then c:GetScript("OnClick")(c, btn)
+                                        elseif c:GetScript("OnMouseUp") then c:GetScript("OnMouseUp")(c, btn) end
+                                        return
+                                    end
+                                end
+                            end
+                            print("|cffff0000[TrackerPlus]|r Completely failed to invoke popup click. No valid data or script found.")
+                        end
+                    end)
+                    -- Optional: Provide hover highlighting to make it clear it's clickable
+                    if popup._tplusClicker.SetHighlightTexture then
+                        popup._tplusClicker:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
+                        local hl = popup._tplusClicker:GetHighlightTexture()
+                        if hl then
+                            hl:SetBlendMode("ADD")
+                            hl:SetAlpha(0.25)
+                        end
+                    end
+                end
             end)
             self._stolenPopups[popup] = true
             
@@ -2471,3 +2563,6 @@ function addon:ShowTrackableTooltip(button, trackable)
     
     GameTooltip:Show()
 end
+
+
+
