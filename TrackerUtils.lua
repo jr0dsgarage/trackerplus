@@ -1,5 +1,10 @@
 local addonName, addon = ...
 
+-- Localize hot-path globals
+local pairs, ipairs, next = pairs, ipairs, next
+local floor, max = math.floor, math.max
+local InCombatLockdown = InCombatLockdown
+
 -- Pools
 local trackableButtons = {}
 local secureButtons = {}
@@ -10,7 +15,7 @@ local activeSecureButtons = 0
 function addon:CreateBorderLines(bar, size)
     size = tonumber(size) or 1
     if size < 0 then size = 0 end
-    local pixelSize = math.floor(size + 0.5)
+    local pixelSize = floor(size + 0.5)
     
     -- Create border frame if it doesn't exist
     if not bar.border then
@@ -73,29 +78,29 @@ function addon:OrganizeTrackables(trackables)
     
     -- Bucketing
     for _, item in ipairs(trackables) do
-        local type = item.type
-        if type ~= "scenario" then
-            if not buckets[type] then buckets[type] = {} end
-            table.insert(buckets[type], item)
+        local itemType = item.type
+        if itemType ~= "scenario" then
+            if not buckets[itemType] then buckets[itemType] = {} end
+            buckets[itemType][#buckets[itemType] + 1] = item
         end
     end
     
     -- Function to sort and add buckets
-    local function AddBucket(type, title)
-        local items = buckets[type]
+    local function AddBucket(bucketType, title)
+        local items = buckets[bucketType]
         if items and #items > 0 then
             -- Major Header
-            local majorKey = "MAJOR_" .. type
+            local majorKey = "MAJOR_" .. bucketType
             self.knownMinorKeys[majorKey] = {} -- Init cache for this header
             local majorCollapsed = self.db.collapsedHeaders[majorKey]
             
-            table.insert(organized, {
+            organized[#organized + 1] = {
                 isHeader = true,
                 headerType = "major",
                 title = title,
                 key = majorKey,
                 collapsed = majorCollapsed
-            })
+            }
             
             if not majorCollapsed then
                 -- Group by Minor (Zone or Category)
@@ -106,35 +111,32 @@ function addon:OrganizeTrackables(trackables)
                     if item.isWorldQuest then zone = "World Quests - " .. zone end
                     
                     if not zones[zone] then zones[zone] = {} end
-                    table.insert(zones[zone], item)
+                    zones[zone][#zones[zone] + 1] = item
                 end
                 
                 -- Sort Zones
                 local sortedZones = {}
-                for zoneName, _ in pairs(zones) do table.insert(sortedZones, zoneName) end
+                for zoneName, _ in pairs(zones) do sortedZones[#sortedZones + 1] = zoneName end
                 table.sort(sortedZones)
                 
                 for _, zoneName in ipairs(sortedZones) do
                     local zoneItems = zones[zoneName]
-                    local minorKey = "MINOR_" .. type .. "_" .. zoneName
-                    table.insert(self.knownMinorKeys[majorKey], minorKey) -- Cache minor key
+                    local minorKey = "MINOR_" .. bucketType .. "_" .. zoneName
+                    self.knownMinorKeys[majorKey][#self.knownMinorKeys[majorKey] + 1] = minorKey
                     local minorCollapsed = self.db.collapsedHeaders[minorKey]
                     
                     -- Minor Header
-                    table.insert(organized, {
+                    organized[#organized + 1] = {
                         isHeader = true,
                         headerType = "minor",
                         title = zoneName,
                         key = minorKey,
                         collapsed = minorCollapsed
-                    })
+                    }
                     
                     if not minorCollapsed then
-                        -- Sort items inside zone
-                        -- (Uses existing sorting logic if previously sorted, otherwise re-sort)
-                        -- For now, just add them
                         for _, item in ipairs(zoneItems) do
-                            table.insert(organized, item)
+                            organized[#organized + 1] = item
                         end
                     end
                 end
@@ -142,8 +144,8 @@ function addon:OrganizeTrackables(trackables)
         end
     end
     
-    -- Add in desired order
-    AddBucket("campaign", "Campaign")
+    -- Add in desired order (campaign items are typed as "quest" with questType="campaign",
+    -- so they naturally fall into the quest bucket)
     AddBucket("quest", "Quests")
     -- AddBucket("scenario", "Dungeons & Scenarios") -- Scenarios handled separately
     AddBucket("achievement", "Achievements")

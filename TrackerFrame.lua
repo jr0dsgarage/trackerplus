@@ -1,5 +1,7 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
+local format = string.format
+local max, min = math.max, math.min
 
 -- Tracker frame UI with scrollable content (no visible scrollbar)
 local trackerFrame = nil
@@ -139,7 +141,7 @@ function addon:CreateTrackerFrame()
         if scrollFrame then
             local current = scrollFrame:GetVerticalScroll()
             local maxScroll = scrollFrame:GetVerticalScrollRange()
-            local newScroll = math.max(0, math.min(maxScroll, current - (delta * 20)))
+            local newScroll = max(0, min(maxScroll, current - (delta * 20)))
             scrollFrame:SetVerticalScroll(newScroll)
         end
     end)
@@ -419,7 +421,7 @@ function addon:UpdateLayoutAnchors()
     local wqVisible    = self.worldQuestFrame and self.worldQuestFrame:IsShown() and self.worldQuestFrame:GetHeight() > 1
 
     -- Build a change-detection signature so we only touch anchors when needed.
-    local sig = string.format("%s|%s|%s|%.0f|%.0f|%.0f|%s|%s",
+    local sig = format("%s|%s|%s|%.0f|%.0f|%.0f|%s|%s",
         tostring(scenVisible),
         tostring(aqVisible),
         tostring(cqVisible),
@@ -479,20 +481,6 @@ function addon:UpdateLayoutAnchors()
         end
     end
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 -- Update tracker appearance (colors, fonts, etc.)
 function addon:UpdateTrackerAppearance()

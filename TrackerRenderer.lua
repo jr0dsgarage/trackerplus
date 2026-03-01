@@ -3,6 +3,17 @@ local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 local objectiveParseCache = {}
 local objectiveParseCacheCount = 0
 
+-- Localize hot-path globals
+local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
+local format, match, gsub = string.format, string.match, string.gsub
+local max, min, floor = math.max, math.min, math.floor
+local band = bit.band
+local GetTime = GetTime
+local InCombatLockdown = InCombatLockdown
+local C_SuperTrack = C_SuperTrack
+local C_Scenario = C_Scenario
+local C_QuestLog = C_QuestLog
+
 local function GetScenarioTrackerSource()
     local candidates = {
         "DelvesObjectiveTracker",
@@ -15,7 +26,7 @@ local function GetScenarioTrackerSource()
         local tracker = _G and _G[name]
         if tracker and tracker.ContentsFrame then
             -- Prefer a tracker that is currently visible/active AND has actual content
-            if (tracker:IsShown() or tracker.ContentsFrame:IsShown()) and (math.max(tracker.ContentsFrame:GetHeight() or 0, tracker:GetHeight() or 0) > 10 or tracker.ContentsFrame:GetNumChildren() > 0) then
+            if (tracker:IsShown() or tracker.ContentsFrame:IsShown()) and (max(tracker.ContentsFrame:GetHeight() or 0, tracker:GetHeight() or 0) > 10 or tracker.ContentsFrame:GetNumChildren() > 0) then
                 return tracker
             end
             
@@ -109,7 +120,7 @@ local function EnsureSectionDebugOverlay(owner, key, parentFrame, displayLabel, 
         overlay.label:SetPoint(labelAnchor.point, overlay, labelAnchor.relPoint or labelAnchor.point, labelAnchor.x or 3, labelAnchor.y or -3)
     end
     local h = parentFrame.GetHeight and (parentFrame:GetHeight() or 0) or 0
-    overlay.label:SetText(string.format("%s (%.0f)", displayLabel, h))
+    overlay.label:SetText(format("%s (%.0f)", displayLabel, h))
 
     -- very light tint so hidden/1px sections are still visible without obscuring content
     if not overlay._fill then
@@ -280,7 +291,7 @@ local function ParseObjectiveDisplay(item, obj, objIndex)
         parsed.prefixText = obj.quantityString
     elseif obj.numRequired and obj.numRequired > 0 then
         parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
-        parsed.prefixText = string.format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
+        parsed.prefixText = format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
     else
         local p, b = (obj.text or ""):match("^%s*([%d]+/[%d]+)%s+(.*)$")
         if p then
@@ -297,7 +308,7 @@ local function ParseObjectiveDisplay(item, obj, objIndex)
 
     objectiveParseCache[cacheKey] = parsed
     objectiveParseCacheCount = objectiveParseCacheCount + 1
-    if objectiveParseCacheCount > 4000 then
+    if objectiveParseCacheCount > 2000 then
         wipe(objectiveParseCache)
         objectiveParseCacheCount = 0
     end
@@ -340,11 +351,23 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local button = self:GetOrCreateButton(parent)
     if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
     
-    -- Cleanup recycled elements
-    if button.objectiveBullets then for _, v in ipairs(button.objectiveBullets) do v:Hide() end end
-    if button.objectives then for _, v in ipairs(button.objectives) do v:Hide() end end
-    if button.objectivePrefixes then for _, v in ipairs(button.objectivePrefixes) do v:Hide() end end
-    if button.progressBars then for _, v in ipairs(button.progressBars) do v:Hide() end end
+    -- Cleanup recycled elements (use numeric for loops - faster than ipairs)
+    if button.objectiveBullets then
+        local arr = button.objectiveBullets
+        for i = 1, #arr do arr[i]:Hide() end
+    end
+    if button.objectives then
+        local arr = button.objectives
+        for i = 1, #arr do arr[i]:Hide() end
+    end
+    if button.objectivePrefixes then
+        local arr = button.objectivePrefixes
+        for i = 1, #arr do arr[i]:Hide() end
+    end
+    if button.progressBars then
+        local arr = button.progressBars
+        for i = 1, #arr do arr[i]:Hide() end
+    end
 
     button:Show()
     
@@ -472,7 +495,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
 
     -- Configure POI Button Appearance
     local isQuest = (item.type == "quest" or item.type == "campaign" or item.isWorldQuest or item.type == "supertrack")
-    local superTrackedQuestID = C_SuperTrack.GetSuperTrackedQuestID()
+    local superTrackedQuestID = self._cachedSuperTrackedQuestID or 0
     
     if isQuest and POIButtonUtil then
         button.poiButton:Show()
@@ -593,7 +616,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
 
     local titleText = item.title
     if db.showQuestLevel and item.level and item.level > 0 then
-        titleText = string.format("[%d] %s", item.level, titleText)
+        titleText = format("[%d] %s", item.level, titleText)
     end
 
     local function NormalizeHeaderText(value)
@@ -656,7 +679,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     
     local textHeight = button.text:GetStringHeight()
     button.text:SetWidth(0) -- Release fixed width to allow anchors to work on resize
-    local height = math.max(db.fontSize + 4, textHeight + 4)
+    local height = max(db.fontSize + 4, textHeight + 4)
     
     -- Objectives
     if not item.collapsed and item.objectives and #item.objectives > 0 then
@@ -736,7 +759,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             objLine:Show()
             
             local lineH = objLine:GetStringHeight()
-            local minLineH = math.max(1, db.fontSize - 1)
+            local minLineH = max(1, db.fontSize - 1)
             if lineH < minLineH then
                 lineH = minLineH
             end
@@ -792,7 +815,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                           barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
                      end
                      local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                     local styleSig = string.format("%s|%d|%.3f|%.3f|%.3f|%.3f",
+                     local styleSig = format("%s|%d|%.3f|%.3f|%.3f|%.3f",
                          tostring(barTex),
                          db.barBorderSize or 0,
                          bgC.r or 0, bgC.g or 0, bgC.b or 0, bgC.a or 0
@@ -814,7 +837,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 local barLeft = leftPadding + db.spacingObjectiveIndent
                 local barTop = currentY - padding
                 local barRightInset = db.spacingProgressBarInset
-                local anchorKey = string.format("%d|%d|%d", barLeft, barTop, barRightInset)
+                local anchorKey = format("%d|%d|%d", barLeft, barTop, barRightInset)
                 if bar._anchorKey ~= anchorKey then
                     bar:ClearAllPoints()
                     bar:SetPoint("TOPLEFT", button, "TOPLEFT", barLeft, barTop)
@@ -824,11 +847,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 
                 local percent = 0
                 if progressMax > 0 then
-                    percent = math.floor((progressValue / progressMax) * 100)
+                    percent = floor((progressValue / progressMax) * 100)
                 end
                 local dispText = percent .. "%"
                 if progressMax > 0 and progressMax ~= 100 then
-                    dispText = string.format("%d/%d (%d%%)", math.floor(progressValue), math.floor(progressMax), percent)
+                    dispText = format("%d/%d (%d%%)", floor(progressValue), floor(progressMax), percent)
                 end
 
                 if bar.isTemplate and bar.Bar then
@@ -949,26 +972,27 @@ function addon:UpdateTrackerDisplay(trackables)
     ClearArray(remainingTrackables)
     
     local superTrackedQuestID = (C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()) or 0
+    self._cachedSuperTrackedQuestID = superTrackedQuestID
 
     for _, item in ipairs(trackables) do
         if item.type == "scenario" then
-            table.insert(scenarios, item)
+            scenarios[#scenarios + 1] = item
         elseif item.type == "autoquest" then
-            table.insert(autoQuests, item)
+            autoQuests[#autoQuests + 1] = item
         elseif item.type == "supertrack" then
             if superTrackedQuestID > 0
                 and item.id
                 and item.id == superTrackedQuestID
                 and item.title
                 and item.title ~= "" then
-                table.insert(superTrackedItems, item)
+                superTrackedItems[#superTrackedItems + 1] = item
             end
         elseif item.type == "bonus" then
-            table.insert(bonusObjectives, item)
+            bonusObjectives[#bonusObjectives + 1] = item
         elseif item.type == "worldquest" then
-            table.insert(worldQuestItems, item)
+            worldQuestItems[#worldQuestItems + 1] = item
         else
-            table.insert(remainingTrackables, item)
+            remainingTrackables[#remainingTrackables + 1] = item
         end
     end
     
@@ -994,7 +1018,7 @@ function addon:UpdateTrackerDisplay(trackables)
 
     -- Legacy support (BfA/Shadowlands) for AutoQuestPopUpTracker
     if autoQuestTracker and autoQuestTracker.ContentsFrame and #autoQuests > 0 then
-        table.insert(stolenPopups, autoQuestTracker.ContentsFrame)
+        stolenPopups[#stolenPopups + 1] = autoQuestTracker.ContentsFrame
     end
 
     -- Modern support (Dragonflight / The War Within) for popups inside QuestObjectiveTracker
@@ -1002,7 +1026,7 @@ function addon:UpdateTrackerDisplay(trackables)
         for _, child in ipairs({QuestObjectiveTracker.ContentsFrame:GetChildren()}) do
             if child and child.Contents and (child.Contents.QuestIconBg or child.Contents.QuestionMark or child.Contents.Exclamation) then
                 if child:IsShown() and (child:GetHeight() or 0) > 1 then
-                    table.insert(stolenPopups, child.Contents)
+                    stolenPopups[#stolenPopups + 1] = child.Contents
                 end
             end
         end
@@ -1065,79 +1089,53 @@ function addon:UpdateTrackerDisplay(trackables)
                     popup._tplusClicker:SetAllPoints(popup)
                     popup._tplusClicker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     popup._tplusClicker:SetScript("OnClick", function(self, btn)
-                        print("|cff00ccff[TrackerPlus]|r Clicked popup!")
                         local orig = popup._trackerPlusOriginalParent
-                        
-                        if not orig then
-                            print("|cffff0000[TrackerPlus]|r ERROR: original parent missing!")
-                            return
-                        end
-                        
-                        print("|cff00ccff[TrackerPlus]|r Found orig: " .. tostring(orig:GetName() or "Anonymous"))
+                        if not orig then return end
 
-                        -- The hidden container logic usually attaches scripts specifically to `orig` or `orig:GetParent()`
-                        -- Let's trace it and dump exactly what it contains
+                        -- The hidden container logic usually attaches scripts to `orig` or `orig:GetParent()`
                         local target = orig
                         if orig.Contents == popup then
-                            print("|cff00ccff[TrackerPlus]|r Debug: Orig is direct parent.")
                             target = orig
                         elseif orig:GetParent() and orig:GetParent().Contents == popup then
-                            print("|cff00ccff[TrackerPlus]|r Debug: Orig is grandparent.")
                             target = orig:GetParent()
-                        else
-                             print("|cff00ccff[TrackerPlus]|r Debug: Structure unknown, using Orig directly.")
                         end
 
-                        -- Attempt manual data pull first to guarantee a result instead of hoping a script works through a mask
+                        -- Attempt direct API call using quest data from the frame hierarchy
                         local questID = target.questID or target.id
                         if not questID and target:GetParent() then
                             questID = target:GetParent().questID or target:GetParent().id
                         end
                         
-                        -- If we found an ID, directly trigger the blizzard API methods
                         if questID then
-                            print("|cff00ccff[TrackerPlus]|r Found QuestID via data: " .. tostring(questID))
                             if ShowQuestComplete and ShowQuestOffer then
                                 local isComplete = target.popUpType == "COMPLETE" or (target:GetParent() and target:GetParent().popUpType == "COMPLETE") or C_QuestLog.IsComplete(questID)
-                                print("|cff00ccff[TrackerPlus]|r Quest is complete state: " .. tostring(isComplete))
-                                
                                 if isComplete then
                                     ShowQuestComplete(questID)
                                 else
                                     ShowQuestOffer(questID)
                                 end
-                            else
-                                print("|cffff0000[TrackerPlus]|r Blizzard global functions ShowQuestComplete/ShowQuestOffer missing!")
                             end
                             return
                         end
 
-                        print("|cff00ccff[TrackerPlus]|r No QuestID found, attempting script execution fallback.")
-
+                        -- Script execution fallback
                         if target.Click then
-                            print("|cff00ccff[TrackerPlus]|r Firing native target:Click()")
                             target:Click(btn)
                         elseif target:HasScript("OnClick") and target:GetScript("OnClick") then
-                            print("|cff00ccff[TrackerPlus]|r Firing native target:GetScript(OnClick)")
                             target:GetScript("OnClick")(target, btn)
                         elseif target:HasScript("OnMouseUp") and target:GetScript("OnMouseUp") then
-                            print("|cff00ccff[TrackerPlus]|r Firing native target:GetScript(OnMouseUp)")
                             target:GetScript("OnMouseUp")(target, btn)
                         else
-                            print("|cffff0000[TrackerPlus]|r Target has NO interactive scripts!")
-                            
-                            -- Explore children just in case Blizzard buried a button one level lower inside `child` rather than on `child`
+                            -- Explore children for buried interactive buttons
                             if target.GetNumChildren then
                                 for i, c in ipairs({target:GetChildren()}) do
                                     if c.GetScript and (c:GetScript("OnClick") or c:GetScript("OnMouseUp")) then
-                                        print("|cff00ccff[TrackerPlus]|r Found a child button: " .. tostring(c:GetName() or i) .. " | Attempting invoke!")
                                         if c:GetScript("OnClick") then c:GetScript("OnClick")(c, btn)
                                         elseif c:GetScript("OnMouseUp") then c:GetScript("OnMouseUp")(c, btn) end
                                         return
                                     end
                                 end
                             end
-                            print("|cffff0000[TrackerPlus]|r Completely failed to invoke popup click. No valid data or script found.")
                         end
                     end)
                     -- Optional: Provide hover highlighting to make it clear it's clickable
@@ -1237,49 +1235,54 @@ function addon:UpdateTrackerDisplay(trackables)
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
             local scenarioWidth = self.db.frameWidth - 10
-            if not self._scenarioContentsAnchored or self._scenarioContentsWidth ~= scenarioWidth then
-                hostFrame:ClearAllPoints()
-                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, -scenarioTopInset)
-                hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
 
-                -- Stop breaking Blizzard's internal relative anchors.
-                -- We only restrict width here so progress bars/text warp correctly, 
-                -- but let Blizzard maintain vertical headers vs body stacking.
-                if contents and contents:GetParent() == hostFrame then
-                    contents:SetWidth(scenarioWidth - scenarioLeftInset)
+            -- Constantly enforce top-left anchors to prevent scenario-specific shifts 
+            -- (e.g. Abundance widget shifting right)
+            hostFrame:ClearAllPoints()
+            hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, -scenarioTopInset)
+            hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
+
+            if contents and contents:GetParent() == hostFrame then
+                local _, _, _, _, yOfs = contents:GetPoint(1)
+                contents:ClearAllPoints()
+                contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, yOfs or -30)
+                contents:SetWidth(scenarioWidth - scenarioLeftInset)
+
+                if contents.WidgetContainer then
+                    local _, _, _, _, wyOfs = contents.WidgetContainer:GetPoint(1)
+                    contents.WidgetContainer:ClearAllPoints()
+                    contents.WidgetContainer:SetPoint("TOPLEFT", contents, "TOPLEFT", 0, wyOfs or 0)
+                    contents.WidgetContainer:SetWidth(scenarioWidth - scenarioLeftInset)
                 end
+            end
 
-                if hostFrame.Header then
-                    hostFrame.Header:SetWidth(scenarioWidth - scenarioLeftInset)
+            if hostFrame.Header then
+                hostFrame.Header:SetWidth(scenarioWidth - scenarioLeftInset)
 
-                    if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
-                        local function TrackerPlus_UpdateScenarioHeader(textStr)
-                            if textStr._tpUpdating then return end
-                            textStr._tpUpdating = true
-                            
-                            local inInstance, instanceType = IsInInstance()
-                            if inInstance then
-                                if instanceType == "party" then
-                                    textStr:SetText(TRACKER_HEADER_DUNGEON or "Dungeon")
-                                elseif instanceType == "scenario" then
-                                    local name = GetInstanceInfo()
-                                    if name and name ~= "" then
-                                        textStr:SetText(name)
-                                    else
-                                        textStr:SetText("Delve / Scenario")
-                                    end
+                if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
+                    local function TrackerPlus_UpdateScenarioHeader(textStr)
+                        if textStr._tpUpdating then return end
+                        textStr._tpUpdating = true
+
+                        local inInstance, instanceType = IsInInstance()
+                        if inInstance then
+                            if instanceType == "party" then
+                                textStr:SetText(TRACKER_HEADER_DUNGEON or "Dungeon")
+                            elseif instanceType == "scenario" then
+                                local name = GetInstanceInfo()
+                                if name and name ~= "" then
+                                    textStr:SetText(name)
+                                else
+                                    textStr:SetText("Delve / Scenario")
                                 end
                             end
-                            textStr._tpUpdating = false
                         end
-                        hooksecurefunc(hostFrame.Header.Text, "SetText", TrackerPlus_UpdateScenarioHeader)
-                        TrackerPlus_UpdateScenarioHeader(hostFrame.Header.Text)
-                        hostFrame._trackerPlusHeaderHooked = true
+                        textStr._tpUpdating = false
                     end
+                    hooksecurefunc(hostFrame.Header.Text, "SetText", TrackerPlus_UpdateScenarioHeader)
+                    TrackerPlus_UpdateScenarioHeader(hostFrame.Header.Text)
+                    hostFrame._trackerPlusHeaderHooked = true
                 end
-
-                self._scenarioContentsAnchored = true
-                self._scenarioContentsWidth = scenarioWidth
             end
          
          EnsureFrameVisible(hostFrame)
@@ -1302,7 +1305,7 @@ function addon:UpdateTrackerDisplay(trackables)
          
          -- Capture raw heights but do not trust them first: collapsed scenario modules can
          -- keep stale expanded values for several frames.
-         rawHeight = math.max(contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
+         rawHeight = max(contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
 
          -- Method 2: Check WidgetContainer
          if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
@@ -1351,7 +1354,7 @@ function addon:UpdateTrackerDisplay(trackables)
          local hostTop = hostFrame:GetTop()
          local contentsTop = contents:GetTop()
          if hostTop and contentsTop then
-             maxTop = math.max(hostTop, contentsTop)
+             maxTop = max(hostTop, contentsTop)
          else
              maxTop = hostTop or contentsTop
          end
@@ -1383,13 +1386,13 @@ function addon:UpdateTrackerDisplay(trackables)
          -- If we are in a scenario and have a hijacked host frame, keep the section alive.
          if not hasScenarioContent and isScenarioActive and (hostFrame:IsShown() or contents:IsShown()) then
              hasScenarioContent = true
-             blizzardHeight = math.max(blizzardHeight, self._lastScenarioBlizzardHeight or 90)
+             blizzardHeight = max(blizzardHeight, self._lastScenarioBlizzardHeight or 90)
          end
          
          if hasScenarioContent then
              -- If height is suspiciously small while content exists, enforce a modest floor.
              if blizzardHeight < 30 then
-                 blizzardHeight = math.max(self._lastScenarioBlizzardHeight or 60, 60)
+                 blizzardHeight = max(self._lastScenarioBlizzardHeight or 60, 60)
              end
 
              self._lastScenarioBlizzardHeight = blizzardHeight
@@ -1601,7 +1604,7 @@ function addon:UpdateTrackerDisplay(trackables)
                              
                              progressValue = percent
                              progressMax = 100
-                             progressText = string.format("%d%%", math.floor(percent))
+                             progressText = format("%d%%", floor(percent))
                             
                              objText = "  - " .. obj.text
                         elseif obj.numRequired and obj.numRequired > 0 then
@@ -1624,12 +1627,12 @@ function addon:UpdateTrackerDisplay(trackables)
                              
                              progressValue = percent
                              progressMax = 100
-                             progressText = string.format("%d%%", math.floor(percent))
+                             progressText = format("%d%%", floor(percent))
                             
                              objText = "  - " .. obj.text
                         elseif obj.quantityString and obj.quantityString ~= "" then
                              -- Fallback if numRequired is 0 but we have a quantity string (common in some scenarios)
-                             objText = string.format("  - %s: %s", obj.text, obj.quantityString)
+                             objText = format("  - %s: %s", obj.text, obj.quantityString)
                         end
                         
                         if not button.objectives then button.objectives = {} end
@@ -1694,7 +1697,7 @@ function addon:UpdateTrackerDisplay(trackables)
                                       barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
                                  end
                                  local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                                 local styleSig = string.format("%s|%d|%.3f|%.3f|%.3f|%.3f",
+                                 local styleSig = format("%s|%d|%.3f|%.3f|%.3f|%.3f",
                                      tostring(barTex),
                                      db.barBorderSize or 0,
                                      bgC.r or 0, bgC.g or 0, bgC.b or 0, bgC.a or 0
@@ -1713,7 +1716,7 @@ function addon:UpdateTrackerDisplay(trackables)
                                  end
                             end
 
-                            local anchorKey = string.format("%d|%d|%d", 20, -height, 20)
+                            local anchorKey = format("%d|%d|%d", 20, -height, 20)
                             if bar._anchorKey ~= anchorKey then
                                 bar:ClearAllPoints()
                                 bar:SetPoint("TOPLEFT", 20, -height)
@@ -1872,7 +1875,7 @@ function addon:UpdateTrackerDisplay(trackables)
                  -- Check IsShown because IsVisible fails if we hid the main tracker
                  if child:IsShown() and child:GetHeight() > 1 then
                      hasContent = true
-                     blizzardBonusHeight = math.max(blizzardBonusHeight, 10) -- Will recalculate below
+                     blizzardBonusHeight = max(blizzardBonusHeight, 10) -- Will recalculate below
                      break
                  end
              end
@@ -2040,7 +2043,7 @@ function addon:UpdateTrackerDisplay(trackables)
          for _, child in pairs({contents:GetChildren()}) do
              if child:IsShown() and child:GetHeight() > 8 then
                  hasContent = true
-                 blizzardWQHeight = math.max(blizzardWQHeight, child:GetHeight() or 10)
+                 blizzardWQHeight = max(blizzardWQHeight, child:GetHeight() or 10)
              end
          end
 
@@ -2048,7 +2051,7 @@ function addon:UpdateTrackerDisplay(trackables)
              local widgetHeight = contents.WidgetContainer:GetHeight() or 0
              if widgetHeight > 8 then
                  hasContent = true
-                 blizzardWQHeight = math.max(blizzardWQHeight, widgetHeight)
+                 blizzardWQHeight = max(blizzardWQHeight, widgetHeight)
              end
          end
          
@@ -2560,7 +2563,7 @@ function addon:UpdateTrackerDisplay(trackables)
     end
     
     -- Update content frame height
-    contentFrame:SetHeight(math.max(yOffset, self.db.frameHeight))
+    contentFrame:SetHeight(max(yOffset, self.db.frameHeight))
 
     -- Hide only unused pooled buttons after this frame has been fully rendered.
     self:FinalizeButtonPool()
@@ -2586,7 +2589,7 @@ function addon:ShowTrackableTooltip(button, trackable)
             GameTooltip:AddLine(trackable.description, 1, 1, 1, true)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format("%d points", trackable.points or 0), 1, 0.82, 0)
+        GameTooltip:AddLine(format("%d points", trackable.points or 0), 1, 0.82, 0)
     end
     
     GameTooltip:Show()

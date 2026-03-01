@@ -1,6 +1,20 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
 
+-- Localize hot-path globals to avoid repeated global lookups
+local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
+local tinsert, wipe = table.insert, wipe
+local format, match, gsub = string.format, string.match, string.gsub
+local max, min, floor, band = math.max, math.min, math.floor, bit.band
+local GetTime = GetTime
+local InCombatLockdown = InCombatLockdown
+local IsInInstance = IsInInstance
+local GetRealZoneText = GetRealZoneText
+local C_QuestLog = C_QuestLog
+local C_SuperTrack = C_SuperTrack
+local C_Scenario = C_Scenario
+local C_Timer = C_Timer
+
 -- Core addon initialization and event handling
 local frame = CreateFrame("Frame")
 
@@ -86,16 +100,15 @@ function addon:IsAnyScenarioTrackerActive()
         local t = _G[name]
         -- If it exists, is shown, and has an active UI inside it
         if t and t:IsShown() and t.ContentsFrame then
-            local hasContent = t.ContentsFrame:GetNumChildren() > 0
-            if not hasContent then
-                for _, child in pairs({t.ContentsFrame:GetChildren()}) do
-                    if child:IsShown() and child:GetHeight() > 5 then
-                        hasContent = true
-                        break
-                    end
+            local hasContent = false
+            -- Check if any children are actually visible (GetNumChildren > 0 alone is unreliable)
+            for _, child in pairs({t.ContentsFrame:GetChildren()}) do
+                if child:IsShown() and child:GetHeight() > 5 then
+                    hasContent = true
+                    break
                 end
             end
-            local hasHeight = math.max(t:GetHeight() or 0, t.ContentsFrame:GetHeight() or 0) > 10
+            local hasHeight = max(t:GetHeight() or 0, t.ContentsFrame:GetHeight() or 0) > 10
             if hasContent or hasHeight then
                 return true
             end
@@ -134,7 +147,7 @@ function addon:Initialize()
         -- Hook Show to control visibility based on our enabled state
         if not addon.hookedTracker then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
-                if addon:GetSetting("enabled") then
+                if addon.db.enabled then
                     -- Instead of Hide(), move it offscreen so we can still hijack its children (Bonus Frames)
                     -- If we Hide() it, its children (BonusObjectiveTracker) are also hidden and inactive.
                     MoveObjectiveTrackerOffscreen(addon)
@@ -143,7 +156,7 @@ function addon:Initialize()
             
             -- Prevent internal layout resets from moving it back
             hooksecurefunc(ObjectiveTrackerFrame, "SetPoint", function(self)
-                 if addon:GetSetting("enabled") and not InCombatLockdown() then
+                 if addon.db.enabled and not InCombatLockdown() then
                       -- If it tries to move back, force it away
                       local point, _, _, x, _ = self:GetPoint()
                       if x < 5000 then -- If it's on screen
@@ -166,9 +179,9 @@ end
 function addon:UpdateDefaultTrackerVisibility()
     if not ObjectiveTrackerFrame then return end
     
-    if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self:GetSetting("enabled"))) end
+    if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
     
-    if self:GetSetting("enabled") then
+    if self.db.enabled then
         -- Offscreen Mode
         MoveObjectiveTrackerOffscreen(self)
         if ObjectiveTrackerFrame.Show then ObjectiveTrackerFrame:Show() end
@@ -280,12 +293,12 @@ function addon:OnEvent(event, ...)
         self:RequestUpdate("full")
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat
-        if self:GetSetting("hideInCombat") then
+        if self.db.hideInCombat then
             self:SetTrackerVisible(false)
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Leaving combat
-        if self:GetSetting("hideInCombat") then
+        if self.db.hideInCombat then
             self:SetTrackerVisible(true)
         end
         
@@ -358,20 +371,21 @@ function addon:OnUpdate(elapsed)
     end
     
     updateTimer = updateTimer + elapsed
-    local updateInterval = self:GetSetting("updateInterval") or 0.1
-    local now = GetTime and GetTime() or 0
+    local db = self.db
+    local updateInterval = db.updateInterval or 0.1
+    local now = GetTime()
 
     -- Adaptive cadence: fast during active objective churn, slower when idle/minimized/hidden
-    if self.db and self.db.minimized then
-        updateInterval = math.max(updateInterval, 0.25)
+    if db.minimized then
+        updateInterval = max(updateInterval, 0.25)
     elseif self._updateBurstUntil and now < self._updateBurstUntil then
-        updateInterval = math.min(updateInterval, 0.05)
+        updateInterval = min(updateInterval, 0.05)
     else
-        updateInterval = math.max(updateInterval, 0.15)
+        updateInterval = max(updateInterval, 0.15)
     end
 
     if self.trackerFrame and not self.trackerFrame:IsShown() then
-        updateInterval = math.max(updateInterval, 0.25)
+        updateInterval = max(updateInterval, 0.25)
     end
     
     if updateTimer >= updateInterval then
@@ -395,8 +409,7 @@ function addon:RequestUpdate(section)
         or section == "superTracked"
         or section == "scenarios"
         or section == "achievements" then
-        local now = GetTime and GetTime() or 0
-        self._updateBurstUntil = now + 1.0
+        self._updateBurstUntil = GetTime() + 1.0
     end
 end
 
@@ -412,20 +425,22 @@ function addon:UpdateTracker()
         return
     end
 
+    local db = self.db
+
     -- Check if we should hide
     local inInstance = IsInInstance()
-    if self:GetSetting("hideInInstance") and inInstance then
+    if db.hideInInstance and inInstance then
         self:SetTrackerVisible(false)
         return
     end
     
     -- Track layout changes independently from data changes
-    local layoutSignature = string.format("%d|%d|%s|%s|%s", 
-        self.db.frameWidth or 0,
-        self.db.frameHeight or 0,
-        tostring(self.db.groupByZone),
-        tostring(self.db.groupByCategory),
-        tostring(self.db.frameScale or 1)
+    local layoutSignature = format("%d|%d|%s|%s|%s", 
+        db.frameWidth or 0,
+        db.frameHeight or 0,
+        tostring(db.groupByZone),
+        tostring(db.groupByCategory),
+        tostring(db.frameScale or 1)
     )
     if layoutSignature ~= lastLayoutSignature then
         lastLayoutSignature = layoutSignature
@@ -440,11 +455,10 @@ function addon:UpdateTracker()
     -- mutating our collected dataVersion, so skipping paint can leave stale/empty UI.
     local forceDisplayRefresh = false
     if addon:IsAnyScenarioTrackerActive() then
-        local now = GetTime and GetTime() or 0
-        local interval = 2.0
+        local now = GetTime()
         if self._nextScenarioRefreshAt == nil or now >= self._nextScenarioRefreshAt then
             forceDisplayRefresh = true
-            self._nextScenarioRefreshAt = now + interval
+            self._nextScenarioRefreshAt = now + 2.0
         end
     else
         self._nextScenarioRefreshAt = nil
@@ -472,7 +486,7 @@ function addon:UpdateTracker()
                 self:Log("Render error: %s", tostring(err))
             end
 
-            local now = GetTime and GetTime() or 0
+            local now = GetTime()
             if not self._lastRenderErrorPrintAt or (now - self._lastRenderErrorPrintAt) > 5 then
                 self._lastRenderErrorPrintAt = now
                 Print("Render error captured. Use /tpdebug to inspect details.")
@@ -482,19 +496,19 @@ function addon:UpdateTracker()
     
     -- Handle fade when empty
     -- If unlocked, always show so user can move it
-    if not self.db.locked then
+    if not db.locked then
         self:SetTrackerVisible(true)
         -- Add a visual indicator that it's empty but unlocked
         if #trackables == 0 and self.trackerFrame and self.trackerFrame.title then
              self.trackerFrame.title:SetText("Tracker Plus (Empty - Drag to Move)")
         end
-    elseif self:GetSetting("fadeWhenEmpty") and #trackables == 0 then
+    elseif db.fadeWhenEmpty and #trackables == 0 then
         self:SetTrackerVisible(false)
     else
         if self.trackerFrame and self.trackerFrame.title then
              self.trackerFrame.title:SetText("Tracker Plus")
         end
-        self:SetTrackerVisible(self:GetSetting("enabled"))
+        self:SetTrackerVisible(db.enabled)
     end
 end
 
@@ -600,27 +614,28 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     
     local isWorldQuest = C_QuestLog.IsWorldQuest(questID)
     local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not isWorldQuest
-    local type = typeOverride
-    if not type then
+    local isComplete = C_QuestLog.IsComplete(questID)
+    local itemType = typeOverride
+    if not itemType then
          if isBonusObjective then
-             type = "bonus"
+             itemType = "bonus"
          elseif isWorldQuest then
-             type = "worldquest"
+             itemType = "worldquest"
          else
-             type = "quest"
+             itemType = "quest"
          end
     end
 
     local questInfo = {
-        type = type,
+        type = itemType,
         id = questID,
         logIndex = logIndex,
         title = info.title,
         level = info.level,
         questType = self:GetQuestTypeName(questID),
-        isComplete = C_QuestLog.IsComplete(questID),
+        isComplete = isComplete,
         isFailed = info.isFailed,
-        isWorldQuest = C_QuestLog.IsWorldQuest(questID),
+        isWorldQuest = isWorldQuest,
         zone = zoneOverride or GetRealZoneText() or "Unknown Zone",
         objectives = {},
         color = self:GetQuestColor(info),
@@ -638,10 +653,6 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     -- Get objectives
     local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
-
--- Get objectives
-    local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
-    local hasObjectives = false
     local hasProgressBarObj = false
 
     if objectives then
@@ -652,19 +663,19 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
             hasObjectives = true
             
             local flags = obj.flags or 0
-            local isFlagged = bit.band(flags, 1) == 1
+            local isFlagged = band(flags, 1) == 1
             if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
                 hasProgressBarObj = true
             end
             
-            table.insert(questInfo.objectives, {
+            questInfo.objectives[#questInfo.objectives + 1] = {
                 text = obj.text,
                 type = obj.type,
                 finished = obj.finished,
                 numFulfilled = obj.numFulfilled,
                 numRequired = obj.numRequired,
                 flags = obj.flags,
-            })
+            }
         end
     end
 
@@ -675,13 +686,13 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
 
         if progress then
              hasObjectives = true
-             table.insert(questInfo.objectives, {
+             questInfo.objectives[#questInfo.objectives + 1] = {
                  text = "Progress",
                  type = "progressbar",
                  finished = (progress >= 100),
                  numFulfilled = progress,
                  numRequired = 100,
-             })
+             }
         end
     end
     
@@ -690,13 +701,13 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         for j=1, numLeaderBoards do
              local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
              if text then
-                 table.insert(questInfo.objectives, {
+                 questInfo.objectives[#questInfo.objectives + 1] = {
                      text = text,
                      type = type,
                      finished = finished,
                      numFulfilled = 0,
                      numRequired = 0,
-                 })
+                 }
              end
         end
     end
@@ -746,7 +757,7 @@ function addon:CollectQuests(trackables)
                     end
                     local questInfo = self:GetQuestData(i, questType, currentZone)
                     if questInfo then
-                        table.insert(trackables, questInfo)
+                        trackables[#trackables + 1] = questInfo
                     end
                 end
             end
@@ -840,16 +851,16 @@ function addon:CollectAchievements(trackables)
                 end
                 
                 if criteriaString then
-                    table.insert(achievementInfo.objectives, {
+                    achievementInfo.objectives[#achievementInfo.objectives + 1] = {
                         text = criteriaString,
                         finished = criteriaCompleted,
                         numFulfilled = quantity,
                         numRequired = reqQuantity,
-                    })
+                    }
                 end
             end
-            
-            table.insert(trackables, achievementInfo)
+
+            trackables[#trackables + 1] = achievementInfo
         end
     end
 end
@@ -864,7 +875,7 @@ function addon:CollectAutoQuests(trackables)
              -- Only check if we have a title
              local title = C_QuestLog.GetTitleForQuestID(questID)
              if title then
-                 table.insert(trackables, {
+                 trackables[#trackables + 1] = {
                      type = "autoquest",
                      questID = questID, -- Needed for interactions
                      title = title,
@@ -876,7 +887,7 @@ function addon:CollectAutoQuests(trackables)
                          text = (popUpType == "COMPLETE" and "Click to Complete" or "New Quest Available"), 
                          finished = false
                      }}
-                 })
+                 }
              end
         end
     end
@@ -903,13 +914,14 @@ function addon:CollectScenarioObjectives(trackables)
             color = self.db.scenarioColor,
             isDummy = true
     }
-    table.insert(trackables, scenarioInfo)
+    trackables[#trackables + 1] = scenarioInfo
 end
 
 -- Collect profession tracking
 function addon:CollectProfessionTracking(trackables)
     self._professionReagentNameCache = self._professionReagentNameCache or {}
     local reagentNameCache = self._professionReagentNameCache
+    local db = self.db
 
     local function GetReagentName(reagent)
         if not reagent then return nil end
@@ -1051,22 +1063,22 @@ function addon:CollectProfessionTracking(trackables)
             elseif isRequired and reagentSlotSchematic.slotInfo and reagentSlotSchematic.slotInfo.slotText then
                 local slotText = reagentSlotSchematic.slotInfo.slotText
                 local quantityRequired = reagentSlotSchematic.quantityRequired or 1
-                table.insert(objectives, {
+                objectives[#objectives + 1] = {
                     text = slotText,
                     finished = false,
                     numFulfilled = 0,
                     numRequired = quantityRequired,
-                })
+                }
             end
         end
 
         for _, data in pairs(reagentTotals) do
-            table.insert(objectives, {
+            objectives[#objectives + 1] = {
                 text = data.name,
                 finished = data.owned >= data.required,
                 numFulfilled = data.owned,
                 numRequired = data.required,
-            })
+            }
         end
 
         table.sort(objectives, function(a, b)
@@ -1087,7 +1099,7 @@ function addon:CollectProfessionTracking(trackables)
                 local professionName = professionInfo and professionInfo.professionName or "Professions"
                 local objectives = BuildRecipeObjectives(schematic)
                 
-                table.insert(trackables, {
+                trackables[#trackables + 1] = {
                     type = "profession",
                     id = recipeID,
                     title = schematic.name,
@@ -1095,8 +1107,8 @@ function addon:CollectProfessionTracking(trackables)
                     zone = professionName,
                     isRecraft = isRecraft,
                     objectives = objectives,
-                    color = self.db.professionColor
-                })
+                    color = db.professionColor
+                }
             end
         end
     end
@@ -1129,16 +1141,16 @@ function addon:CollectMonthlyActivities(trackables)
                 local progress = info.progress or 0
                 local required = info.threshold or 1
                 
-                table.insert(objectives, {
+                objectives[#objectives + 1] = {
                     text = info.activityName,
                     finished = isComplete,
                     numFulfilled = progress,
                     numRequired = required,
                     flags = 0 -- Default
-                })
+                }
             end
             
-            table.insert(trackables, {
+            trackables[#trackables + 1] = {
                 type = "monthly",
                 id = activityID,
                 title = info.activityName,
@@ -1147,7 +1159,7 @@ function addon:CollectMonthlyActivities(trackables)
                 isComplete = isComplete,
                 objectives = objectives,
                 color = self.db.monthlyColor -- Cyan-ish
-            })
+            }
         end
     end
 end
@@ -1186,7 +1198,7 @@ function addon:CollectEndeavors(trackables)
                useCache = true
                if self.db.endeavorCache then
                    for id, _ in pairs(self.db.endeavorCache) do
-                       table.insert(trackedIDs, id)
+                       trackedIDs[#trackedIDs + 1] = id
                    end
                end
           end
@@ -1199,25 +1211,25 @@ function addon:CollectEndeavors(trackables)
                   
                   if info.requirementsList then
                       for _, req in ipairs(info.requirementsList) do
-                          local text = req.requirementText
-                          if text then
+                          local reqText = req.requirementText
+                          if reqText then
                               -- Clean up text formatting
                               -- Remove leading dashes to prevent double dashes in tracker
-                              text = text:gsub("^%s*-%s*", "")
-                              text = string.gsub(text, " / ", "/") 
+                              reqText = reqText:gsub("^%s*-%s*", "")
+                              reqText = gsub(reqText, " / ", "/") 
                               
                               local isFinished = req.completed
                               if not isFinished then
-                                  table.insert(objectives, {
-                                      text = text,
+                                  objectives[#objectives + 1] = {
+                                      text = reqText,
                                       finished = isFinished
-                                  })
+                                  }
                               end
                           end
                       end
                   end
                   
-                  table.insert(trackables, {
+                  trackables[#trackables + 1] = {
                        type = "endeavor",
                        id = info.ID or id,
                        title = info.taskName or ("Endeavor " .. id),
@@ -1225,7 +1237,7 @@ function addon:CollectEndeavors(trackables)
                        zone = "Housing",
                        objectives = objectives,
                        color = self.db.endeavorColor -- Warm Pink
-                  })
+                  }
               end
           end
      end
@@ -1233,22 +1245,24 @@ end
 
 -- Get quest color based on type/status
 function addon:GetQuestColor(info)
+    local db = self.db
+    local questID = info.questID
     if info.isFailed then
-        return self.db.failedColor
-    elseif C_QuestLog.IsComplete(info.questID) then
-        return self.db.completeColor
-    elseif C_QuestLog.IsWorldQuest(info.questID) then
-        return self.db.questTypeColors.worldQuest
-    elseif C_QuestLog.IsQuestTask(info.questID) then
-        return self.db.bonusColor
+        return db.failedColor
+    elseif C_QuestLog.IsComplete(questID) then
+        return db.completeColor
+    elseif C_QuestLog.IsWorldQuest(questID) then
+        return db.questTypeColors.worldQuest
+    elseif C_QuestLog.IsQuestTask(questID) then
+        return db.bonusColor
     else
-        return self.db.questColor
+        return db.questColor
     end
 end
 
 -- Sort trackables
 function addon:SortTrackables(trackables)
-    local sortMethod = self:GetSetting("sortMethod")
+    local sortMethod = self.db.sortMethod
     
     local function GetPriority(trackable)
         -- Priority 1: Scenarios/Dungeons (always on top)
@@ -1295,7 +1309,7 @@ function addon:CollectSuperTrackedQuest(trackables)
 
     local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
     if questInfo then
-         table.insert(trackables, questInfo)
+         trackables[#trackables + 1] = questInfo
     end
 end
 
@@ -1326,7 +1340,7 @@ function addon:RegisterSlashCommands()
                 Print("Settings panel not loaded yet.")
             end
         elseif msg == "toggle" then
-            local enabled = not addon:GetSetting("enabled")
+            local enabled = not addon.db.enabled
             addon:SetSetting("enabled", enabled)
             addon:SetTrackerVisible(enabled)
             addon:UpdateDefaultTrackerVisibility()
