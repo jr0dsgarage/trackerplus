@@ -138,7 +138,7 @@ function addon:UpdateSectionDebugBoxes()
         { key = "tracker", frame = self.trackerFrame, label = "trackerFrame", color = {1.0, 0.35, 0.35}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "autoquest", frame = self.autoQuestFrame, label = "autoQuestFrame", color = {1.0, 0.65, 0.25}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
         { key = "completedquest", frame = self.completedQuestFrame, label = "completedQuestFrame", color = {0.8, 0.8, 0.2}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
-        { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -20 } },
+        { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "scroll", frame = self.scrollFrame, label = "scrollFrame", color = {0.4, 1.0, 0.45}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "content", frame = self.contentFrame, label = "contentFrame", color = {0.3, 0.7, 1.0}, anchor = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -3, y = 3 } },
         { key = "bonus", frame = self.bonusFrame, label = "bonusFrame", color = {0.85, 0.45, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
@@ -1220,7 +1220,7 @@ function addon:UpdateTrackerDisplay(trackables)
     
         if useBlizzardScenario then
             local scenarioTopInset = -10 -- Native blizzard headers have a ~10-15px top blank gap; pull it UP
-            local scenarioLeftInset = 15 -- Indent to the right so it aligns better with TrackerPlus style
+            local scenarioLeftInset = 5 -- Standard left inset for TrackerPlus layout
             local scenarioBottomPadding = 24
          -- We are using Blizzard's frame, so we hijack it.
          local hostFrame = scenarioTracker
