@@ -1217,7 +1217,7 @@ function addon:UpdateTrackerDisplay(trackables)
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
         if useBlizzardScenario then
-            local scenarioTopInset = -10 -- Native blizzard headers have a ~10-15px top blank gap; pull it UP
+            local scenarioTopInset = -25 -- Native blizzard headers have ~25px blank gap above Header; pull it UP
             local scenarioLeftInset = 5 -- Standard left inset for TrackerPlus layout
             local scenarioBottomPadding = 24
          -- We are using Blizzard's frame, so we hijack it.
@@ -1236,22 +1236,24 @@ function addon:UpdateTrackerDisplay(trackables)
 
             local scenarioWidth = self.db.frameWidth - 10
 
-            -- Constantly enforce top-left anchors to prevent scenario-specific shifts 
-            -- (e.g. Abundance widget shifting right)
+            -- Anchor hostFrame so its Header sits flush with the top of scenarioFrame.
+            -- The native Blizzard tracker frame has ~25px of blank padding above the Header
+            -- widget; pull hostFrame UP by that amount to eliminate the visible blank gap.
+            -- We only set TOPLEFT (no BOTTOMRIGHT) — hostFrame uses its natural height so
+            -- Blizzard's internal layout of Header / ContentsFrame / WidgetContainer is
+            -- preserved intact.  DO NOT call ClearAllPoints on ContentsFrame or WidgetContainer:
+            -- doing so destroys their BOTTOMRIGHT/height anchors and collapses them to zero.
+            local headerPullUp = 25  -- matches native Blizzard tracker top blank padding
             hostFrame:ClearAllPoints()
-            hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, -scenarioTopInset)
+            hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, headerPullUp)
             hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
 
+            -- Enforce widths without touching anchors so Blizzard's internal layout is intact.
             if contents and contents:GetParent() == hostFrame then
-                local _, _, _, _, yOfs = contents:GetPoint(1)
-                contents:ClearAllPoints()
-                contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, yOfs or -30)
                 contents:SetWidth(scenarioWidth - scenarioLeftInset)
-
-                -- NOTE: Do NOT manipulate WidgetContainer anchors here.
-                -- Calling ClearAllPoints() removes its BOTTOMRIGHT/height anchor (e.g. from
-                -- SetAllPoints), collapsing it to zero height and hiding scenario widgets.
-                -- Width is already inherited from contents; visibility is handled below.
+                if contents.WidgetContainer then
+                    contents.WidgetContainer:SetWidth(scenarioWidth - scenarioLeftInset)
+                end
             end
 
             if hostFrame.Header then
