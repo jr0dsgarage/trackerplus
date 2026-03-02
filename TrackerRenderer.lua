@@ -1238,8 +1238,7 @@ function addon:UpdateTrackerDisplay(trackables)
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
             local scenarioWidth = self.db.frameWidth - 10
-
-            -- Only touch anchors/widths when the values actually change.
+            local headerPullUp = -scenarioTopInset  -- pull hostFrame UP by exactly the blank gap amount
             -- Calling ClearAllPoints() + SetPoint() every render pass leaves the frame
             -- momentarily unanchored between the two calls, which the GPU renders as a
             -- one-frame jump (flicker).  Cache a signature and skip if unchanged.
