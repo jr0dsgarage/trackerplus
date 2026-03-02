@@ -1218,7 +1218,6 @@ function addon:UpdateTrackerDisplay(trackables)
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
     
         if useBlizzardScenario then
-            local scenarioTopInset = -25 -- Native blizzard headers have ~25px blank gap above Header; pull it UP
             local scenarioLeftInset = 5 -- Standard left inset for TrackerPlus layout
             local scenarioBottomPadding = 24
          -- We are using Blizzard's frame, so we hijack it.
@@ -1232,13 +1231,65 @@ function addon:UpdateTrackerDisplay(trackables)
          
             -- Parent the full tracker frame so Delve/Scenario visuals outside ContentsFrame also render.
                 local wasHijacked = (hostFrame:GetParent() ~= self.scenarioFrame)
+                DebugLayout(self, "[SCN] BEGIN render — wasHijacked=%s cachedGap=%s cachedSig=%s",
+                    tostring(wasHijacked),
+                    tostring(hostFrame._tpMeasuredHeaderGap),
+                    tostring(hostFrame._tpAnchorSig))
                 EnsureHijackedParent(self, hostFrame, self.scenarioFrame, "_scenarioOriginalParent", "HIGH", 100)
-                -- Clear anchor cache so we unconditionally re-set TOPLEFT after a fresh reparent.
-                if wasHijacked then hostFrame._tpAnchorSig = nil end
+                -- Clear all caches so we unconditionally re-measure and re-anchor after a fresh reparent.
+                if wasHijacked then
+                    hostFrame._tpAnchorSig = nil
+                    hostFrame._tpMeasuredHeaderGap = nil
+                    -- SetParent() causes WoW to clear all anchors on hostFrame, so GetTop()
+                    -- returns nil immediately after – the measurement below would fall back to
+                    -- the hardcoded 25px constant and the corrective re-anchor on the very next
+                    -- render (triggered by OnSizeChanged) would cause the visible "jump then drop"
+                    -- the user sees.  Setting a temporary y=0 anchor here gives the frame a valid
+                    -- screen position so GetTop() works when we measure the header gap below.
+                    -- The sig-check block further down will overwrite this with the correct offset.
+                    hostFrame:ClearAllPoints()
+                    hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, 0)
+                    DebugLayout(self, "[SCN] wasHijacked=true — cleared caches, set temp y=0 anchor. hostFrame:GetTop()=%s",
+                        tostring(hostFrame:GetTop()))
+                end
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
             local scenarioWidth = self.db.frameWidth - 10
-            local headerPullUp = -scenarioTopInset  -- pull hostFrame UP by exactly the blank gap amount
+
+            -- Measure the actual blank gap above the Header widget from live frame geometry.
+            -- This replaces every hardcoded constant.  The gap is the distance between the
+            -- top of hostFrame and the top of its Header child — exactly what Blizzard has
+            -- drawn as blank padding.  We measure once after reparenting (when GetTop() is
+            -- valid) and cache the result so we never guess or hardcode again.
+            local headerGap = hostFrame._tpMeasuredHeaderGap
+            if not headerGap and hostFrame.Header then
+                local fTop = hostFrame:GetTop()
+                local hTop = hostFrame.Header:GetTop()
+                DebugLayout(self, "[SCN] GAP measure attempt — fTop=%s hTop=%s",
+                    tostring(fTop), tostring(hTop))
+                if fTop and hTop then
+                    local measured = fTop - hTop
+                    -- Sanity-clamp: reject values outside a plausible range (0..60px)
+                    if measured >= 0 and measured <= 60 then
+                        headerGap = measured
+                        hostFrame._tpMeasuredHeaderGap = headerGap
+                        DebugLayout(self, "[SCN] GAP measured=%.2f — cached", measured)
+                    else
+                        DebugLayout(self, "[SCN] GAP measured=%.2f — OUT OF RANGE, discarded", measured)
+                    end
+                else
+                    DebugLayout(self, "[SCN] GAP measure failed (nil coords) — will use fallback")
+                end
+            else
+                DebugLayout(self, "[SCN] GAP using existing cache=%s", tostring(headerGap))
+            end
+            -- Fall back to 25px if measurement hasn't succeeded yet (first frame, off-screen, etc.)
+            local headerPullUp  =  headerGap or 25
+            local scenarioTopInset = -headerPullUp  -- used in height reservation below
+            DebugLayout(self, "[SCN] headerPullUp=%.2f (fallback=%s) scenarioTopInset=%.2f",
+                headerPullUp, tostring(headerGap == nil), scenarioTopInset)
+
+            -- Only touch anchors/widths when the values actually change.
             -- Calling ClearAllPoints() + SetPoint() every render pass leaves the frame
             -- momentarily unanchored between the two calls, which the GPU renders as a
             -- one-frame jump (flicker).  Cache a signature and skip if unchanged.
@@ -1249,10 +1300,14 @@ function addon:UpdateTrackerDisplay(trackables)
                 scenarioWidth)
 
             if hostFrame._tpAnchorSig ~= anchorSig then
+                DebugLayout(self, "[SCN] ANCHOR changed — old=%s new=%s — re-anchoring y=%.2f",
+                    tostring(hostFrame._tpAnchorSig), anchorSig, headerPullUp)
                 hostFrame:ClearAllPoints()
                 hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, headerPullUp)
                 hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
                 hostFrame._tpAnchorSig = anchorSig
+            else
+                DebugLayout(self, "[SCN] ANCHOR unchanged — sig=%s skipping SetPoint", anchorSig)
             end
 
             -- Enforce widths without touching anchors so Blizzard's internal layout is intact.
@@ -1338,6 +1393,8 @@ function addon:UpdateTrackerDisplay(trackables)
          -- Capture raw heights but do not trust them first: collapsed scenario modules can
          -- keep stale expanded values for several frames.
          rawHeight = max(contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
+         DebugLayout(self, "[SCN] HEIGHT rawHeight=%.2f (contents=%.2f hostFrame=%.2f)",
+             rawHeight, contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
 
          -- Method 2: Check WidgetContainer
          if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
@@ -1405,6 +1462,8 @@ function addon:UpdateTrackerDisplay(trackables)
          -- reported heights).  Sub-component scans (WidgetContainer, individual children)
          -- can return a value smaller than the full visual widget, which would make the
          -- scenarioFrame too short and let Blizzard's content overlap the quest area below.
+         DebugLayout(self, "[SCN] HEIGHT pre-floor — blizzardHeight=%.2f rawHeight=%.2f widgetHeight=%.2f maxVisChild=%.2f visChildren=%d",
+             blizzardHeight, rawHeight, widgetHeight, maxVisibleChildHeight, visibleChildren)
          if rawHeight > blizzardHeight then
              blizzardHeight = rawHeight
          end
@@ -1439,6 +1498,8 @@ function addon:UpdateTrackerDisplay(trackables)
 
              scenarioHeight = blizzardHeight + scenarioTopInset + effectiveBottomPadding + 10 -- Extra padding for safety
              scenarioYOffset = scenarioHeight
+             DebugLayout(self, "[SCN] FINAL scenarioHeight=%.2f (blizzH=%.2f topInset=%.2f botPad=%.2f)",
+                 scenarioHeight, blizzardHeight, scenarioTopInset, effectiveBottomPadding)
          else
              RestoreHijackedParent(self, hostFrame, self.scenarioFrame, ObjectiveTrackerFrame or UIParent, "_scenarioOriginalParent")
              if hasManualScenarioData then
