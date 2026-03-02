@@ -1233,32 +1233,48 @@ function addon:UpdateTrackerDisplay(trackables)
             -- Parent the full tracker frame so Delve/Scenario visuals outside ContentsFrame also render.
                 local wasHijacked = (hostFrame:GetParent() ~= self.scenarioFrame)
                 EnsureHijackedParent(self, hostFrame, self.scenarioFrame, "_scenarioOriginalParent", "HIGH", 100)
+                -- Clear anchor cache so we unconditionally re-set TOPLEFT after a fresh reparent.
+                if wasHijacked then hostFrame._tpAnchorSig = nil end
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
             local scenarioWidth = self.db.frameWidth - 10
 
-            -- Anchor hostFrame so its Header sits flush with the top of scenarioFrame.
-            -- The native Blizzard tracker frame has ~25px of blank padding above the Header
-            -- widget; pull hostFrame UP by that amount to eliminate the visible blank gap.
-            -- We only set TOPLEFT (no BOTTOMRIGHT) — hostFrame uses its natural height so
-            -- Blizzard's internal layout of Header / ContentsFrame / WidgetContainer is
-            -- preserved intact.  DO NOT call ClearAllPoints on ContentsFrame or WidgetContainer:
-            -- doing so destroys their BOTTOMRIGHT/height anchors and collapses them to zero.
-            local headerPullUp = 25  -- matches native Blizzard tracker top blank padding
-            hostFrame:ClearAllPoints()
-            hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, headerPullUp)
-            hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
+            -- Only touch anchors/widths when the values actually change.
+            -- Calling ClearAllPoints() + SetPoint() every render pass leaves the frame
+            -- momentarily unanchored between the two calls, which the GPU renders as a
+            -- one-frame jump (flicker).  Cache a signature and skip if unchanged.
+            local anchorSig = format("%s|%d|%d|%d",
+                tostring(self.scenarioFrame),
+                scenarioLeftInset,
+                headerPullUp,
+                scenarioWidth)
+
+            if hostFrame._tpAnchorSig ~= anchorSig then
+                hostFrame:ClearAllPoints()
+                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", scenarioLeftInset, headerPullUp)
+                hostFrame:SetWidth(scenarioWidth - scenarioLeftInset)
+                hostFrame._tpAnchorSig = anchorSig
+            end
 
             -- Enforce widths without touching anchors so Blizzard's internal layout is intact.
+            -- Only update when the width changes to avoid spurious layout recalculations.
+            local contentWidth = scenarioWidth - scenarioLeftInset
             if contents and contents:GetParent() == hostFrame then
-                contents:SetWidth(scenarioWidth - scenarioLeftInset)
-                if contents.WidgetContainer then
-                    contents.WidgetContainer:SetWidth(scenarioWidth - scenarioLeftInset)
+                if contents._tpWidth ~= contentWidth then
+                    contents:SetWidth(contentWidth)
+                    contents._tpWidth = contentWidth
+                end
+                if contents.WidgetContainer and contents.WidgetContainer._tpWidth ~= contentWidth then
+                    contents.WidgetContainer:SetWidth(contentWidth)
+                    contents.WidgetContainer._tpWidth = contentWidth
                 end
             end
 
             if hostFrame.Header then
-                hostFrame.Header:SetWidth(scenarioWidth - scenarioLeftInset)
+                if hostFrame.Header._tpWidth ~= contentWidth then
+                    hostFrame.Header:SetWidth(contentWidth)
+                    hostFrame.Header._tpWidth = contentWidth
+                end
 
                 if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
                     local function TrackerPlus_UpdateScenarioHeader(textStr)
