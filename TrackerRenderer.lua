@@ -150,6 +150,7 @@ function addon:UpdateSectionDebugBoxes()
         { key = "autoquest", frame = self.autoQuestFrame, label = "autoQuestFrame", color = {1.0, 0.65, 0.25}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
         { key = "completedquest", frame = self.completedQuestFrame, label = "completedQuestFrame", color = {0.8, 0.8, 0.2}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
         { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "activequest", frame = self.activeQuestFrame, label = "activeQuestFrame", color = {1.0, 0.85, 0.2}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "scroll", frame = self.scrollFrame, label = "scrollFrame", color = {0.4, 1.0, 0.45}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "content", frame = self.contentFrame, label = "contentFrame", color = {0.3, 0.7, 1.0}, anchor = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -3, y = 3 } },
         { key = "bonus", frame = self.bonusFrame, label = "bonusFrame", color = {0.85, 0.45, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
@@ -1777,95 +1778,90 @@ function addon:UpdateTrackerDisplay(trackables)
     end
     
     
-    -- Render Super Tracked Items (Pinned)
+    --------------------------------------------------------------------------
+    -- 1.1 Render Active Quest (Super-tracked) — dedicated activeQuestFrame
+    --------------------------------------------------------------------------
+    local aqYOffset = 0
+
+    if self.activeQuestFrame then
         if superTrackedQuestID > 0 and #superTrackedItems > 0 then
-         -- Add Header if scenarios exist or just to separate
-         if scenarioYOffset > 0 then
-              scenarioYOffset = scenarioYOffset + 10
-         end
+            local aqFrame = self.activeQuestFrame
 
-         local header = self:GetOrCreateButton(self.scenarioFrame)
-         header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
-         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
-         
-         header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
-         header.text:SetTextColor(1, 0.82, 0, 1) -- Gold
-         header.text:SetText("Active Quest")
-         header.text:SetJustifyH("LEFT")
-         
-         if header.expandBtn then header.expandBtn:Hide() end
-         header.text:ClearAllPoints()
-         header.text:SetPoint("LEFT", 5, 0)
-         header.text:SetPoint("RIGHT", -5, 0)
-         
-         -- Create or show styled backdrop (Scenario Stage Box style)
-         if not header.styledBackdrop then
-             header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
-             -- Note: Anchors are set below to accommodate dynamic content height
-             
-             -- Ensure backdrop is behind the text (which is a region of header)
-             -- We need header to be at least level 2 to safely put this at level - 1 relative to it?
-             -- Actually, simple SetFrameStrata("BACKGROUND") might be safer if header is LOW/MEDIUM
-             if header:GetFrameLevel() > 1 then
-                 header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
-             else
-                 header.styledBackdrop:SetFrameLevel(1)
-                 header:SetFrameLevel(2)
-             end
-             
-             header.styledBackdrop:SetBackdrop({
-                bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                tile = true, tileSize = 16, edgeSize = 16,
-                insets = { left = 4, right = 4, top = 4, bottom = 4 }
-             })
-             header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
-             header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-         end
-         
-         -- Configure Backdrop Anchors (covering Header + Items)
-         header.styledBackdrop:ClearAllPoints()
-         header.styledBackdrop:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
-         header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
-         -- Bottom/Height will be set after item loop
-         
-         header.styledBackdrop:Show()
-         header.bg:SetColorTexture(0, 0, 0, 0) -- Hide default flat bg
-         
-         header:SetHeight(30)
-         header:Show()
-         
-         -- Flag this button usage so subsequent reuses invalidate cached properties
-         header._scriptMode = "activeQuestHeader"
-         
-         -- Cleanup header parts
-         if header.poiButton then header.poiButton:Hide() end
-         if header.itemButton then header.itemButton:Hide() end
-         if header.icon then header.icon:Hide() end
-         if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
-         if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+            local header = self:GetOrCreateButton(aqFrame)
+            header:SetPoint("TOPLEFT",  aqFrame, "TOPLEFT",  0, -aqYOffset)
+            header:SetPoint("TOPRIGHT", aqFrame, "TOPRIGHT", 0, -aqYOffset)
 
-         -- Capture start Y for backdrop calculation (This is the top of the header)
-         local activeQuestStartY = scenarioYOffset
-         scenarioYOffset = scenarioYOffset + 30 -- Advance past header height
+            header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
+            header.text:SetTextColor(1, 0.82, 0, 1) -- Gold
+            header.text:SetText("Active Quest")
+            header.text:SetJustifyH("LEFT")
 
-         for _, item in ipairs(superTrackedItems) do
-            local height = self:RenderTrackableItem(self.scenarioFrame, item, scenarioYOffset, db.spacingMinorHeaderIndent + 10)
-            scenarioYOffset = scenarioYOffset + height + db.spacingItemVertical
-         end
+            if header.expandBtn then header.expandBtn:Hide() end
+            header.text:ClearAllPoints()
+            header.text:SetPoint("LEFT", 5, 0)
+            header.text:SetPoint("RIGHT", -5, 0)
 
-         -- Update backdrop height to cover items
-         -- Total height is current cursor - startY
-         local totalHeight = scenarioYOffset - activeQuestStartY
-         -- Add a bit of padding at the bottom for aesthetics
-         if totalHeight < 30 then totalHeight = 30 end -- Minimum height
-         
-         -- User requested "a few pixels bigger"
-         local backdropPadding = 10
-         header.styledBackdrop:SetHeight(totalHeight + backdropPadding)
-         
-         -- Increase frame offset so the scroll frame below doesn't overlap the backdrop
-         scenarioYOffset = scenarioYOffset + backdropPadding
+            -- Styled backdrop (covers header + items below)
+            if not header.styledBackdrop then
+                header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
+                if header:GetFrameLevel() > 1 then
+                    header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
+                else
+                    header.styledBackdrop:SetFrameLevel(1)
+                    header:SetFrameLevel(2)
+                end
+                header.styledBackdrop:SetBackdrop({
+                    bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                    tile = true, tileSize = 16, edgeSize = 16,
+                    insets = { left = 4, right = 4, top = 4, bottom = 4 }
+                })
+                header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
+                header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+            end
+
+            header.styledBackdrop:ClearAllPoints()
+            header.styledBackdrop:SetPoint("TOPLEFT",  header, "TOPLEFT",  0, 0)
+            header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
+            header.styledBackdrop:Show()
+            header.bg:SetColorTexture(0, 0, 0, 0)
+
+            header:SetHeight(30)
+            header:Show()
+            header._scriptMode = "activeQuestHeader"
+
+            if header.poiButton  then header.poiButton:Hide()  end
+            if header.itemButton then header.itemButton:Hide() end
+            if header.icon       then header.icon:Hide()       end
+            if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+            if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
+
+            local startY = aqYOffset
+            aqYOffset = aqYOffset + 30
+
+            for _, item in ipairs(superTrackedItems) do
+                local h = self:RenderTrackableItem(aqFrame, item, aqYOffset, db.spacingMinorHeaderIndent + 10)
+                aqYOffset = aqYOffset + h + db.spacingItemVertical
+            end
+
+            local totalHeight = aqYOffset - startY
+            if totalHeight < 30 then totalHeight = 30 end
+            local backdropPadding = 10
+            header.styledBackdrop:SetHeight(totalHeight + backdropPadding)
+            aqYOffset = aqYOffset + backdropPadding
+        end
+
+        -- Show/hide and size activeQuestFrame based on content
+        if aqYOffset > 0 then
+            self.activeQuestFrame:SetHeight(aqYOffset)
+            if addon.db.minimized then
+                self.activeQuestFrame:Hide()
+            else
+                self.activeQuestFrame:Show()
+            end
+        else
+            self.activeQuestFrame:Hide()
+        end
     end
     
     --------------------------------------------------------------------------
@@ -2236,8 +2232,9 @@ function addon:UpdateTrackerDisplay(trackables)
     self:UpdateLayoutAnchors()
 
     DebugLayout(self,
-        "anchors scenY=%d bonusY=%d wqY=%d autoQH=%.1f",
+        "anchors scenY=%d aqY=%d bonusY=%d wqY=%d autoQH=%.1f",
         tonumber(scenarioYOffset or 0),
+        tonumber(aqYOffset or 0),
         tonumber(bonusYOffset or 0),
         tonumber(wqYOffset or 0),
         tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0)
