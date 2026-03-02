@@ -460,9 +460,19 @@ function addon:UpdateLayoutAnchors()
     local xL, xR     = SIDE, -SIDE
 
     for _, section in ipairs(topSections) do
-        section:ClearAllPoints()
-        section:SetPoint("TOPLEFT",  prevFrame, prevPoint,  xL, yOff)
-        section:SetPoint("TOPRIGHT", prevFrame, prevPointR, xR, yOff)
+        -- Only call ClearAllPoints+SetPoint on this particular section when its
+        -- own anchor parameters changed.  The outer sig catches any downstream
+        -- change (e.g. activeQuestFrame height changing), which previously caused
+        -- ClearAllPoints to be called on *every* section including scenarioFrame —
+        -- momentarily detaching it and producing the visible flash/drop.
+        local sectionSig = format("%s|%s|%s|%d|%d",
+            tostring(prevFrame), prevPoint, prevPointR, xL, yOff)
+        if section._tpLayoutAnchorSig ~= sectionSig then
+            section:ClearAllPoints()
+            section:SetPoint("TOPLEFT",  prevFrame, prevPoint,  xL, yOff)
+            section:SetPoint("TOPRIGHT", prevFrame, prevPointR, xR, yOff)
+            section._tpLayoutAnchorSig = sectionSig
+        end
         prevFrame  = section
         prevPoint  = "BOTTOMLEFT"
         prevPointR = "BOTTOMRIGHT"
