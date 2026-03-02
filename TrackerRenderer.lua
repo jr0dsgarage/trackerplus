@@ -1248,12 +1248,10 @@ function addon:UpdateTrackerDisplay(trackables)
                 contents:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, yOfs or -30)
                 contents:SetWidth(scenarioWidth - scenarioLeftInset)
 
-                if contents.WidgetContainer then
-                    local _, _, _, _, wyOfs = contents.WidgetContainer:GetPoint(1)
-                    contents.WidgetContainer:ClearAllPoints()
-                    contents.WidgetContainer:SetPoint("TOPLEFT", contents, "TOPLEFT", 0, wyOfs or 0)
-                    contents.WidgetContainer:SetWidth(scenarioWidth - scenarioLeftInset)
-                end
+                -- NOTE: Do NOT manipulate WidgetContainer anchors here.
+                -- Calling ClearAllPoints() removes its BOTTOMRIGHT/height anchor (e.g. from
+                -- SetAllPoints), collapsing it to zero height and hiding scenario widgets.
+                -- Width is already inherited from contents; visibility is handled below.
             end
 
             if hostFrame.Header then
