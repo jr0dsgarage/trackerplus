@@ -1298,6 +1298,22 @@ function addon:UpdateTrackerDisplay(trackables)
              pcall(function() scenarioTracker:Update() end)
          end
 
+         -- Hook OnSizeChanged so that Blizzard's roll-up/down animations (which resize
+         -- hostFrame and ContentsFrame every frame) trigger a layout refresh.  The
+         -- RequestUpdate("scenarios") call feeds into the existing 50ms burst throttle so
+         -- we don't re-render on every animation frame.
+         if not hostFrame._trackerPlusSizeHooked then
+             hostFrame:HookScript("OnSizeChanged", function()
+                 addon:RequestUpdate("scenarios")
+             end)
+             if contents then
+                 contents:HookScript("OnSizeChanged", function()
+                     addon:RequestUpdate("scenarios")
+                 end)
+             end
+             hostFrame._trackerPlusSizeHooked = true
+         end
+
          -- The height of the blizzard frame varies. We need to update our container to match it.
          -- Use robust child-scanning to determine true content height, as GetHeight() on the container 
          -- is often unreliable during objective updates or animations.
@@ -1369,17 +1385,18 @@ function addon:UpdateTrackerDisplay(trackables)
              end
          end
 
-         -- When extent scanning worked we already have a good value.
-         -- Otherwise prefer rawHeight (container's own reported size) over
-         -- maxVisibleChildHeight (single tallest child) which under-counts
-         -- stacked rows.
-         if blizzardHeight < 1 then
-             if rawHeight > 1 and (contents:IsShown() or hostFrame:IsShown()) then
-                 blizzardHeight = rawHeight
-                 hasScenarioContent = true
-             elseif maxVisibleChildHeight > 0 then
-                 blizzardHeight = maxVisibleChildHeight
-             end
+         -- Always floor blizzardHeight at rawHeight (= max of hostFrame and ContentsFrame
+         -- reported heights).  Sub-component scans (WidgetContainer, individual children)
+         -- can return a value smaller than the full visual widget, which would make the
+         -- scenarioFrame too short and let Blizzard's content overlap the quest area below.
+         if rawHeight > blizzardHeight then
+             blizzardHeight = rawHeight
+         end
+         if blizzardHeight < 1 and maxVisibleChildHeight > 0 then
+             blizzardHeight = maxVisibleChildHeight
+         end
+         if blizzardHeight > 8 and (contents:IsShown() or hostFrame:IsShown()) then
+             hasScenarioContent = true
          end
 
          -- Fail-safe: Blizzard can report transient zero sizes during scenario transitions.
