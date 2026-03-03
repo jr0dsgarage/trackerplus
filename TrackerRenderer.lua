@@ -1240,14 +1240,6 @@ function addon:UpdateTrackerDisplay(trackables)
             local contentWidth = scenarioWidth
 
             if wasHijacked then
-                -- Anchor hostFrame's TOPRIGHT to scenarioFrame's TOPRIGHT.
-                -- Using only a top anchor (no bottom constraint) means hostFrame's height
-                -- is entirely driven by Blizzard's internal layout — not by scenarioFrame —
-                -- which breaks the feedback loop that SetAllPoints caused.
-                hostFrame:ClearAllPoints()
-                hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-                hostFrame:SetWidth(contentWidth)
-
                 -- Swallow any SetPoint calls Blizzard makes on this frame (e.g. from
                 -- DelvesObjectiveTracker:Update / ScenarioObjectiveTracker:Update).
                 -- The hook re-applies our TOPRIGHT anchor whenever _tpLockAnchors is true.
@@ -1266,9 +1258,19 @@ function addon:UpdateTrackerDisplay(trackables)
                     hostFrame._tpSetPointHooked = true
                 end
                 hostFrame._tpLockAnchors = true
-
-                DebugLayout(self, "[SCN] wasHijacked — reparented TOPRIGHT anchor, width=%d", contentWidth)
             end
+
+            -- Always re-enforce TOPRIGHT anchor every render pass so the widget's right
+            -- edge stays pinned to the scenarioFrame's right edge (grows leftward).
+            -- Set _tpReanchorring while we do this so our own SetPoint hook (installed
+            -- in the wasHijacked block above) does not fire and create a feedback loop.
+            hostFrame._tpReanchorring = true
+            hostFrame:ClearAllPoints()
+            hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
+            hostFrame:SetWidth(contentWidth)
+            hostFrame._tpReanchorring = false
+
+            DebugLayout(self, "[SCN] TOPRIGHT anchor enforced, width=%d", contentWidth)
 
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
@@ -1479,8 +1481,9 @@ function addon:UpdateTrackerDisplay(trackables)
     if ((not useBlizzardScenario) or forceManualScenario) and hasManualScenarioData then
         -- Manual rendering fallback
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
-        header:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 0, -scenarioYOffset)
+        header:ClearAllPoints()
         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
+        header:SetWidth(self.db.frameWidth - 10)
         
         header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
         header.text:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
@@ -1515,8 +1518,9 @@ function addon:UpdateTrackerDisplay(trackables)
         -- Render Scenario Content
         for _, item in ipairs(self.currentScenarios) do
               local button = self:GetOrCreateButton(self.scenarioFrame)
-              button:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", 5, -scenarioYOffset)
+              button:ClearAllPoints()
               button:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -5, -scenarioYOffset)
+              button:SetWidth(self.db.frameWidth - 20)
               
               -- Setup Button Appearance (Copied from below logic)
               button.text:SetFont(db.fontFace, db.fontSize + 2, db.fontOutline) -- Slightly larger for Scenario Title
@@ -2063,9 +2067,30 @@ function addon:UpdateTrackerDisplay(trackables)
     
     -- Hijacking Strategy for World Quests
     local wqTracker = WorldQuestObjectiveTracker
-    local useBlizzardWQ = (wqTracker and wqTracker.ContentsFrame)
+
+    -- Ground-truth check: only show WQ section when quests are actively tracked
+    local hasAnyTrackedWQ = (#worldQuestItems > 0)
+    if not hasAnyTrackedWQ and C_TaskQuest and C_TaskQuest.GetTrackedQuestIDs then
+        local ids = C_TaskQuest.GetTrackedQuestIDs()
+        if ids and #ids > 0 then
+            hasAnyTrackedWQ = true
+        end
+    end
+
+    local useBlizzardWQ = hasAnyTrackedWQ and (wqTracker and wqTracker.ContentsFrame) and (#worldQuestItems == 0)
     local preferManualWQ = (#worldQuestItems > 0)
     if preferManualWQ then
+        useBlizzardWQ = false
+    end
+
+    -- If nothing to track, restore any previously hijacked frame and bail out early
+    if not hasAnyTrackedWQ then
+        if wqTracker and wqTracker.ContentsFrame then
+            local contents = wqTracker.ContentsFrame
+            RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
+        end
+        ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
+        hasBlizzardWQContent = false
         useBlizzardWQ = false
     end
     
@@ -2150,44 +2175,48 @@ function addon:UpdateTrackerDisplay(trackables)
 
     -- Render the Header container for World Quests (Either used by Hijacked frame or manual items)
     if wqFrame and (hasBlizzardWQContent or #worldQuestItems > 0) then
-        if not db.collapsedSections then db.collapsedSections = {} end
-        local collapsed = db.collapsedSections["World Quests"]
-        
         -- Header
         local header = self:GetOrCreateButton(wqFrame)
         header:SetPoint("TOPLEFT", wqFrame, "TOPLEFT", 0, 0)
         header:SetPoint("TOPRIGHT", wqFrame, "TOPRIGHT", 0, 0)
         
         header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
-        header.text:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
+        header.text:SetTextColor(0.204, 0.478, 0.678, 1)  -- #347AAD
         header.text:SetText("World Quests")
         header.text:SetJustifyH("LEFT")
         header.text:ClearAllPoints()
         header.text:SetPoint("LEFT", 5, 0)
-        header.text:SetPoint("RIGHT", -25, 0)
+        header.text:SetPoint("RIGHT", -5, 0)
         
-        -- Expand Button
-        if not header.expandBtn then
-             header.expandBtn = CreateFrame("Button", nil, header)
-             header.expandBtn:SetSize(16, 16)
+        -- No expand/collapse button (matching Bonus Objective style)
+        if header.expandBtn then header.expandBtn:Hide() end
+        
+        -- Styled Backdrop (matching Bonus Objective style)
+        if not header.styledBackdrop then
+            header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
+            if header:GetFrameLevel() > 1 then
+                header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
+            else
+                header.styledBackdrop:SetFrameLevel(1)
+                header:SetFrameLevel(2)
+            end
+            header.styledBackdrop:SetBackdrop({
+                bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 }
+            })
+            header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
+            header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
         end
-        header.expandBtn:SetPoint("RIGHT", -8, 0)
-        header.expandBtn:Show()
         
-        -- Expand/Collapse Logic
-        local function UpdateWQCollapseIcon()
-            local atlas = collapsed and "UI-QuestTrackerButton-Secondary-Expand" or "UI-QuestTrackerButton-Secondary-Collapse"
-            header.expandBtn:SetNormalAtlas(atlas)
-            header.expandBtn:SetPushedAtlas(atlas)
+        header.styledBackdrop:ClearAllPoints()
+        header.styledBackdrop:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
+        header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
+        
+        if header.bg then
+            header.bg:SetColorTexture(0, 0, 0, 0)
         end
-        UpdateWQCollapseIcon()
-        
-        header.expandBtn:SetScript("OnClick", function()
-            db.collapsedSections["World Quests"] = not db.collapsedSections["World Quests"]
-            addon:RequestUpdate()
-        end)
-        
-        ApplyConfiguredHeaderBackground(header)
         
         -- Cleanup header recycling
         if header.poiButton then header.poiButton:Hide() end
@@ -2197,35 +2226,30 @@ function addon:UpdateTrackerDisplay(trackables)
         if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
         if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
         if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
-        if header.styledBackdrop then header.styledBackdrop:Hide() end
 
-        -- If Hijacked frame was found, we don't need to manually render items, 
-        -- BUT if hijacked frame was found and YOffset > 0, we just set the header. 
-        -- If we are collapsed, we need to hide the hijacked frame!
-        
+        header:SetHeight(30)
+        header:Show()
+
+        -- If Hijacked frame was found, we don't need to manually render items.
            if useBlizzardWQ and hasBlizzardWQContent and wqYOffset > 0 then
              local contents = wqTracker.ContentsFrame
-             if collapsed then
-                  contents:Hide()
-                  wqYOffset = 24
-             else
-               EnsureFrameVisible(contents)
-                  
-                  if contents.WidgetContainer then
-                   EnsureFrameVisible(contents.WidgetContainer)
-                  end
+             EnsureFrameVisible(contents)
+             if contents.WidgetContainer then
+                 EnsureFrameVisible(contents.WidgetContainer)
              end
            elseif #worldQuestItems > 0 and (wqYOffset == 0 or not hasBlizzardWQContent) then
                -- Fallback: manual render when Blizzard WQ container is missing/empty.
              wqYOffset = 24 + 5
-             
-             if not collapsed then
-                for _, item in ipairs(worldQuestItems) do
-                    local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
-                    wqYOffset = wqYOffset + height + db.spacingItemVertical
-                end
-            end
+             for _, item in ipairs(worldQuestItems) do
+                 local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
+                 wqYOffset = wqYOffset + height + db.spacingItemVertical
+             end
         end
+
+        -- Set styledBackdrop height to cover the full section (matching Bonus Objective style)
+        local backdropPadding = 10
+        header.styledBackdrop:SetHeight(wqYOffset + backdropPadding)
+        header.styledBackdrop:Show()
 
     end
     

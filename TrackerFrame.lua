@@ -33,11 +33,12 @@ function addon:CreateTrackerFrame()
     -- Set position
     -- Function to restore position
     addon.RestorePosition = function()
-        if trackerFrame and addon.db.framePosition then
+        local pos = addon.db.framePosition
+        if trackerFrame and pos and pos.point and pos.x and pos.y then
              trackerFrame:ClearAllPoints()
              -- Use saved relativePoint if available, otherwise fallback to point (legacy support)
-             local relativePoint = addon.db.framePosition.relativePoint or addon.db.framePosition.point
-             trackerFrame:SetPoint(addon.db.framePosition.point, UIParent, relativePoint, addon.db.framePosition.x, addon.db.framePosition.y)
+             local relativePoint = pos.relativePoint or pos.point
+             trackerFrame:SetPoint(pos.point, UIParent, relativePoint, pos.x, pos.y)
         elseif trackerFrame then
              trackerFrame:ClearAllPoints()
              trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)
