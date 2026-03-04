@@ -10,6 +10,15 @@ Database.lua
 DebugFrame.lua
 Core.lua
 TrackerUtils.lua
+RendererUtils.lua
+ObjectiveParser.lua
+RenderItem.lua
+RenderAutoQuests.lua
+RenderScenario.lua
+RenderActiveQuest.lua
+RenderBonusObjectives.lua
+RenderWorldQuests.lua
+RenderHeaders.lua
 TrackerRenderer.lua
 TrackerFrame.lua
 Settings.lua

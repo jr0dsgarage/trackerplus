@@ -720,6 +720,13 @@ function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
     local currentZone = GetRealZoneText() or "Unknown Zone"
     local currentHeaderIsCampaign = false
+    local worldQuestsHeader = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
+
+    local function IsWorldQuestsHeaderTitle(title)
+        if not title then return false end
+        if title == worldQuestsHeader then return true end
+        return tostring(title):lower() == tostring(worldQuestsHeader):lower()
+    end
 
     for i = 1, numQuests do
         local info = C_QuestLog.GetInfo(i)
@@ -732,15 +739,19 @@ function addon:CollectQuests(trackables)
                 local isWorldQuest = C_QuestLog.IsWorldQuest(info.questID)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
+                local isComplete = C_QuestLog.IsComplete(info.questID)
+                local isUnderWorldQuestHeader = IsWorldQuestsHeaderTitle(currentZone)
+                local treatAsWorldQuest = isWorldQuest or isUnderWorldQuestHeader
 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
 
                 local shouldInclude = false
-                if isWorldQuest then
+                if treatAsWorldQuest then
                     -- World quests are rendered in their own pinned section.
                     -- Do not require the watch flag; quest-log tracking can be transient.
-                    shouldInclude = self.db.showWorldQuests
+                    -- Hide completed/ended world quests immediately so stale headers disappear.
+                    shouldInclude = self.db.showWorldQuests and not isComplete
                 elseif isTask then
                     -- Bonus objectives are rendered in their own pinned section.
                     -- Do not require watch state; these are often hidden/unwatched in the quest log.
@@ -752,7 +763,9 @@ function addon:CollectQuests(trackables)
                 if (not info.isHidden or allowHidden) and shouldInclude then
                     local isCamp = currentHeaderIsCampaign or (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory
                     local questType = nil
-                    if isCamp and not isWorldQuest and not isTask then
+                    if treatAsWorldQuest then
+                        questType = "worldquest"
+                    elseif isCamp and not isWorldQuest and not isTask then
                         questType = "campaign"
                     end
                     local questInfo = self:GetQuestData(i, questType, currentZone)

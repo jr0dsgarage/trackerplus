@@ -70,3 +70,19 @@ local addonName, addon = ...
 - [TrackerPlus.toc](TrackerPlus.toc): Manifest.
 - [Core.lua](Core.lua): Logic heart.
 - [TrackerFrame.lua](TrackerFrame.lua): UI implementation.
+
+## Regression Guardrails (Do Not Reintroduce)
+
+### Active Quest item icon parity
+- Active Quest rows (`type == "supertrack"`) must resolve quest-item icons using the same data path as normal quest rows.
+- In `TrackerRenderer.lua`, keep/maintain fallback propagation from matching quest ID item data when `supertrack` lacks `item.link` or `item.texture`.
+- `RenderTrackableItem` must always attempt icon resolution in this order when needed: cached texture -> `GetItemIcon(link)` -> `GetItemInfoInstant(link)` iconID -> fallback question-mark icon.
+
+### World Quests header lifecycle
+- The floating/dangling `World Quests` text must never remain after a world quest ends.
+- In `Core.lua` `CollectQuests`, treat quests under the quest-log `WORLD_QUESTS` header as world-quest entries even if `C_QuestLog.IsWorldQuest` is transiently false.
+- Completed/ended world quests should be excluded from collection immediately so the grouped header cannot linger.
+
+### Rendering ownership notes
+- Pinned section rendering (Active Quest / Bonus / World Quests) is in `TrackerRenderer.lua`; do not assume `TrackerFrame.lua` owns section content lifecycle.
+- Any header-style or pooled-button changes must preserve hide/cleanup behavior for recycled buttons across section show/hide transitions.
