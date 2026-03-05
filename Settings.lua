@@ -77,12 +77,12 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
     
     if tooltip then
         cb:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(text, 1, 1, 1)
-            GameTooltip:AddLine(tooltip, nil, nil, nil, true)
-            GameTooltip:Show()
+            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            tooltipFrame:SetText(text)
+            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
+            tooltipFrame:Show()
         end)
-        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        cb:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
     end
     
     return yOffset - 30
@@ -132,12 +132,12 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
     
     if tooltip then
         slider:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(text, 1, 1, 1)
-            GameTooltip:AddLine(tooltip, nil, nil, nil, true)
-            GameTooltip:Show()
+            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            tooltipFrame:SetText(text)
+            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
+            tooltipFrame:Show()
         end)
-        slider:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        slider:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
     end
     
     return yOffset - 50 -- Sliders need more vertical space
@@ -189,12 +189,12 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
     
     if tooltip then
         dropdown:SetScript("OnEnter", function(self)
-             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-             GameTooltip:SetText(text, 1, 1, 1)
-             GameTooltip:AddLine(tooltip, nil, nil, nil, true)
-             GameTooltip:Show()
+               local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+               tooltipFrame:SetText(text)
+               tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
+               tooltipFrame:Show()
         end)
-        dropdown:SetScript("OnLeave", function() GameTooltip:Hide() end)
+           dropdown:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
     end
     
     return yOffset - 35
@@ -533,11 +533,11 @@ local function InitUI()
         local hitRect = CreateFrame("Frame", nil, frame)
         hitRect:SetAllPoints(text)
         hitRect:SetScript("OnEnter", function()
-            GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
-            GameTooltip:SetText(description, 1, 1, 1, 1, true)
-            GameTooltip:Show()
+            local tooltipFrame = addon:AcquireTooltip(frame, "ANCHOR_RIGHT")
+            tooltipFrame:SetText(description)
+            tooltipFrame:Show()
         end)
-        hitRect:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        hitRect:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
         
         UIDropDownMenu_SetWidth(frame, 150)
         

@@ -204,18 +204,43 @@ end
 function addon:ShowTrackableTooltip(button, trackable)
     if not trackable then return end
 
-    GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+    local tooltip = addon:AcquireTooltip(button, "ANCHOR_RIGHT")
 
-    if trackable.type == "quest" or trackable.type == "campaign" then
-        GameTooltip:SetQuestLogItem("quest", trackable.id)
-    elseif trackable.type == "achievement" then
-        GameTooltip:SetText(trackable.title)
-        if trackable.description then
-            GameTooltip:AddLine(trackable.description, 1, 1, 1, true)
+    if trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" or trackable.type == "worldquest" then
+        tooltip:SetText(trackable.title or "Quest")
+
+        if trackable.level then
+            tooltip:AddLine(format("Level %d", trackable.level), 0.82, 0.82, 0.82)
         end
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(format("%d points", trackable.points or 0), 1, 0.82, 0)
+
+        if trackable.zone and trackable.zone ~= "" then
+            tooltip:AddLine(trackable.zone, 0.5, 0.8, 1)
+        end
+
+        if trackable.objectives and #trackable.objectives > 0 then
+            tooltip:AddLine(" ")
+            for i, objective in ipairs(trackable.objectives) do
+                if i > 8 then
+                    break
+                end
+                local text = objective and objective.text
+                if text and text ~= "" then
+                    if objective.finished then
+                        tooltip:AddLine("• " .. text, 0.5, 1, 0.5, true)
+                    else
+                        tooltip:AddLine("• " .. text, 1, 1, 1, true)
+                    end
+                end
+            end
+        end
+    elseif trackable.type == "achievement" then
+        tooltip:SetText(trackable.title)
+        if trackable.description then
+            tooltip:AddLine(trackable.description, 1, 1, 1, true)
+        end
+        tooltip:AddLine(" ")
+        tooltip:AddLine(format("%d points", trackable.points or 0), 1, 0.82, 0)
     end
 
-    GameTooltip:Show()
+    tooltip:Show()
 end

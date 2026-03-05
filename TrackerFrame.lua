@@ -239,12 +239,12 @@ function addon:CreateTrackerFrame()
         end
     end)
     trackerFrame.settingsParam:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Open Settings")
-        GameTooltip:Show()
+        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+        tooltip:SetText("Open Settings")
+        tooltip:Show()
     end)
     trackerFrame.settingsParam:SetScript("OnLeave", function()
-        GameTooltip:Hide()
+        addon:HideSharedTooltip()
     end)
 
     -- Minimize/Maximize Button

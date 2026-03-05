@@ -164,24 +164,24 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 end)
                 
                 header.expandBtn:SetScript("OnEnter", function(self)
-                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                     local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
                      local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
                      if isMainHeader then
                          if self._headerCollapsed then
-                             GameTooltip:SetText("Hold SHIFT to Expand All", 1, 1, 1)
+                             tooltip:SetText("Hold SHIFT to Expand All")
                          else
-                             GameTooltip:SetText("Hold SHIFT to Minimize All", 1, 1, 1)
+                             tooltip:SetText("Hold SHIFT to Minimize All")
                          end
                      else
                          if self._headerCollapsed then
-                             GameTooltip:SetText("Click to Expand", 1, 1, 1)
+                             tooltip:SetText("Click to Expand")
                          else
-                             GameTooltip:SetText("Click to Collapse", 1, 1, 1)
+                             tooltip:SetText("Click to Collapse")
                          end
                      end
-                     GameTooltip:Show()
+                     tooltip:Show()
                 end)
-                header.expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                header.expandBtn:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
                 header.expandBtn._handlersBound = true
             end
 

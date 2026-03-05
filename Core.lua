@@ -124,6 +124,27 @@ end
 
 addon.Print = Print
 
+function addon:GetSharedTooltip()
+    if not self._sharedTooltip then
+        self._sharedTooltip = CreateFrame("GameTooltip", "TrackerPlusTooltip", UIParent, "GameTooltipTemplate")
+        self._sharedTooltip:SetFrameStrata("TOOLTIP")
+        self._sharedTooltip:SetClampedToScreen(true)
+    end
+    return self._sharedTooltip
+end
+
+function addon:AcquireTooltip(owner, anchor)
+    local tooltip = self:GetSharedTooltip()
+    tooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
+    return tooltip
+end
+
+function addon:HideSharedTooltip()
+    if self._sharedTooltip then
+        self._sharedTooltip:Hide()
+    end
+end
+
 -- Initialize addon
 function addon:Initialize()
     -- Initialize database

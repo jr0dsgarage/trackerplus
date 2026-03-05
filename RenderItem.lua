@@ -96,12 +96,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
 
         secureBtn:SetScript("OnEnter", function(self)
             if not self.itemLink then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(self.itemLink)
-            GameTooltip:Show()
+            local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            local itemName = GetItemInfo(self.itemLink)
+            tooltip:SetText(itemName or self.itemLink)
+            tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
+            tooltip:Show()
         end)
         secureBtn:SetScript("OnLeave", function()
-            GameTooltip:Hide()
+            addon:HideSharedTooltip()
         end)
         
         -- Robust Icon handling
@@ -228,11 +230,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end)
             
             button.groupButton:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(OBJECTIVES_FIND_GROUP, 1, 1, 1)
-                GameTooltip:Show()
+                local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+                tooltip:SetText(OBJECTIVES_FIND_GROUP)
+                tooltip:Show()
             end)
-            button.groupButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            button.groupButton:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
         end
         
         button.groupButton.questID = item.id
@@ -561,7 +563,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 addon:ShowTrackableTooltip(self, self.trackableData)
             end
         end)
-        button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        button:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
         button._scriptMode = "trackable"
     end
     
