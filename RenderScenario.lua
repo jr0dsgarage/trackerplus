@@ -60,22 +60,24 @@ function addon:RenderScenarioSection()
             local wasHijacked = (hostFrame:GetParent() ~= self.scenarioFrame)
             EnsureHijackedParent(self, hostFrame, self.scenarioFrame, "_scenarioOriginalParent", "HIGH", 100)
 
-            local scenarioWidth = self.db.frameWidth - 10
-            local contentWidth = scenarioWidth
+            local RIGHT_INSET = 0  -- scenarioFrame's own 5px inset is sufficient
 
             if wasHijacked then
                 -- Swallow any SetPoint calls Blizzard makes on this frame (e.g. from
                 -- DelvesObjectiveTracker:Update / ScenarioObjectiveTracker:Update).
-                -- The hook re-applies our TOPRIGHT anchor whenever _tpLockAnchors is true.
+                -- The hook re-applies our TOPLEFT anchor, computed so the widget's
+                -- right edge sits RIGHT_INSET pixels inside scenarioFrame.
                 if not hostFrame._tpSetPointHooked then
                     hooksecurefunc(hostFrame, "SetPoint", function(f)
-                        -- Guard against re-entrancy: our own SetPoint call below would
-                        -- re-trigger this hook infinitely without this check.
                         if f._tpLockAnchors and not f._tpReanchorring then
                             f._tpReanchorring = true
-                            f:ClearAllPoints()
-                            f:SetPoint("TOPRIGHT", addon.scenarioFrame, "TOPRIGHT", 0, 0)
-                            f:SetWidth(addon.db.frameWidth - 10)
+                            local sw = addon.scenarioFrame and addon.scenarioFrame:GetWidth() or 0
+                            local hw = f:GetWidth() or 0
+                            if sw > 10 and hw > 10 then
+                                local xOff = sw - hw - RIGHT_INSET
+                                f:ClearAllPoints()
+                                f:SetPoint("TOPLEFT", addon.scenarioFrame, "TOPLEFT", xOff, 0)
+                            end
                             f._tpReanchorring = false
                         end
                     end)
@@ -84,38 +86,31 @@ function addon:RenderScenarioSection()
                 hostFrame._tpLockAnchors = true
             end
 
-            -- Always re-enforce TOPRIGHT anchor every render pass so the widget's right
-            -- edge stays pinned to the scenarioFrame's right edge (grows leftward).
-            -- Set _tpReanchorring while we do this so our own SetPoint hook (installed
-            -- in the wasHijacked block above) does not fire and create a feedback loop.
+            -- Always re-enforce TOPLEFT anchor every render pass. We position the
+            -- widget so its right edge lands RIGHT_INSET px inside scenarioFrame.
+            -- We do NOT call SetWidth — Blizzard keeps its natural widget size.
             hostFrame._tpReanchorring = true
-            hostFrame:ClearAllPoints()
-            hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-            hostFrame:SetWidth(contentWidth)
+            local sw = self.scenarioFrame:GetWidth() or 0
+            local hw = hostFrame:GetWidth() or 0
+            if sw > 10 and hw > 10 then
+                local xOff = sw - hw - RIGHT_INSET
+                hostFrame:ClearAllPoints()
+                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", xOff, 0)
+                DebugLayout(self, "[SCN] TOPLEFT anchor enforced, xOff=%d (sw=%d hw=%d)", xOff, sw, hw)
+            else
+                -- Fallback: frame sizes not resolved yet, pin to right edge temporarily
+                hostFrame:ClearAllPoints()
+                hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -RIGHT_INSET, 0)
+                DebugLayout(self, "[SCN] TOPRIGHT fallback (sw=%d hw=%d)", sw, hw)
+            end
             hostFrame._tpReanchorring = false
-
-            DebugLayout(self, "[SCN] TOPRIGHT anchor enforced, width=%d", contentWidth)
 
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
-            -- Enforce widths so content renders at the right size inside our frame.
-            -- Only update when the value changes to avoid spurious Blizzard layout passes.
-            if contents and contents:GetParent() == hostFrame then
-                if contents._tpWidth ~= contentWidth then
-                    contents:SetWidth(contentWidth)
-                    contents._tpWidth = contentWidth
-                end
-                if contents.WidgetContainer and contents.WidgetContainer._tpWidth ~= contentWidth then
-                    contents.WidgetContainer:SetWidth(contentWidth)
-                    contents.WidgetContainer._tpWidth = contentWidth
-                end
-            end
+            -- Let Blizzard keep its natural widths for ContentsFrame,
+            -- WidgetContainer, and Header — we only control position, not size.
 
             if hostFrame.Header then
-                if hostFrame.Header._tpWidth ~= contentWidth then
-                    hostFrame.Header:SetWidth(contentWidth)
-                    hostFrame.Header._tpWidth = contentWidth
-                end
 
                 if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
                     local function TrackerPlus_UpdateScenarioHeader(textStr)
