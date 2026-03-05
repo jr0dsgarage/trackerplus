@@ -123,6 +123,8 @@ local function Print(...)
 end
 
 addon.Print = Print
+addon.disableBlizzardTrackerHijack = true
+addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()
     if not self._sharedTooltip then
@@ -166,24 +168,13 @@ function addon:Initialize()
     -- Manage default Blizzard tracker
     if ObjectiveTrackerFrame then
         -- Hook Show to control visibility based on our enabled state
-        if not addon.hookedTracker then
+        if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
                 if addon.db.enabled then
-                    -- Instead of Hide(), move it offscreen so we can still hijack its children (Bonus Frames)
-                    -- If we Hide() it, its children (BonusObjectiveTracker) are also hidden and inactive.
-                    MoveObjectiveTrackerOffscreen(addon)
+                    if self.Hide then
+                        self:Hide()
+                    end
                 end
-            end)
-            
-            -- Prevent internal layout resets from moving it back
-            hooksecurefunc(ObjectiveTrackerFrame, "SetPoint", function(self)
-                 if addon.db.enabled and not InCombatLockdown() then
-                      -- If it tries to move back, force it away
-                      local point, _, _, x, _ = self:GetPoint()
-                      if x < 5000 then -- If it's on screen
-                          MoveObjectiveTrackerOffscreen(addon)
-                      end
-                 end
             end)
             
             addon.hookedTracker = true
@@ -203,21 +194,15 @@ function addon:UpdateDefaultTrackerVisibility()
     if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
     
     if self.db.enabled then
-        -- Offscreen Mode
-        MoveObjectiveTrackerOffscreen(self)
-        if ObjectiveTrackerFrame.Show then ObjectiveTrackerFrame:Show() end
-        if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame moved offscreen") end
+        if ObjectiveTrackerFrame.Hide then
+            ObjectiveTrackerFrame:Hide()
+        end
+        if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame hidden") end
     else
-        -- Restore (This might need a ReloadUI to perfect, but we try)
+        -- Restore default Blizzard tracker visibility
         if ObjectiveTrackerFrame.Show then
             ObjectiveTrackerFrame:SetAlpha(1)
             ObjectiveTrackerFrame:EnableMouse(true)
-            local restore = self._objectiveTrackerRestorePoint
-            if restore and restore.point and restore.relativePoint then
-                ObjectiveTrackerFrame:ClearAllPoints()
-                local relativeTo = restore.relativeTo or UIParent
-                ObjectiveTrackerFrame:SetPoint(restore.point, relativeTo, restore.relativePoint, restore.x or 0, restore.y or 0)
-            end
             ObjectiveTrackerFrame:Show()
             if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame restored") end
         end

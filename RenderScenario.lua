@@ -36,7 +36,7 @@ function addon:RenderScenarioSection()
     end
 
     local isScenarioActive = isInScenario or hasManualScenarioData
-    local useBlizzardScenario = not not (isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame)
+    local useBlizzardScenario = not addon.disableBlizzardTrackerHijack and not not (isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame)
 
     local scenarioHeight = 0
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
