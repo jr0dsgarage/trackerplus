@@ -19,11 +19,18 @@ function addon.GetScenarioTrackerSource()
     for _, name in ipairs(candidates) do
         local tracker = _G and _G[name]
         if tracker and tracker.ContentsFrame then
+            local isShown = tracker:IsShown()
+            local contentShown = tracker.ContentsFrame:IsShown()
+            local cHeight = tracker.ContentsFrame:GetHeight() or 0
+            local numC = tracker.ContentsFrame:GetNumChildren() or 0
+            addon:LogAt("trace", "[TRACKER] %s shown=%s cShown=%s cH=%s numC=%s", name, tostring(isShown), tostring(contentShown), tostring(cHeight), tostring(numC))
+            
             -- Prefer a tracker that is currently visible/active AND has actual content
-            if (tracker:IsShown() or tracker.ContentsFrame:IsShown()) and (max(tracker.ContentsFrame:GetHeight() or 0, tracker:GetHeight() or 0) > 10 or tracker.ContentsFrame:GetNumChildren() > 0) then
+            if (isShown or contentShown) and (max(cHeight, tracker:GetHeight() or 0) > 10 or numC > 0) then
+                addon:LogAt("trace", "[TRACKER] selected %s", name)
                 return tracker
             end
-            
+
             if not fallback then
                 fallback = tracker
             elseif (tracker:IsShown() or tracker.ContentsFrame:IsShown()) then
@@ -33,12 +40,9 @@ function addon.GetScenarioTrackerSource()
         end
     end
 
-    -- If none are actively shown, return the first one found so we have something to hook
+    addon:LogAt("trace", "[TRACKER] fallback selected %s", tostring(fallback and fallback:GetName()))
     return fallback
 end
-
--------------------------------------------------------------------------------
--- Frame visibility / hijack helpers
 -------------------------------------------------------------------------------
 function addon.EnsureFrameVisible(frame)
     if not frame then return end

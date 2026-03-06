@@ -123,7 +123,7 @@ local function Print(...)
 end
 
 addon.Print = Print
-addon.disableBlizzardTrackerHijack = true
+addon.disableBlizzardTrackerHijack = false
 addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()

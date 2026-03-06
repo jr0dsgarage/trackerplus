@@ -140,8 +140,9 @@ function addon:RenderBonusSection(bonusObjectives)
          end
          header:SetHeight(30)
          header:Show()
-         
-         -- Cleanup 
+         header._scriptMode = "bonusObjectiveHeader"
+
+         -- Cleanup
          if header.poiButton then header.poiButton:Hide() end
          if header.itemButton then header.itemButton:Hide() end
          if header.icon then header.icon:Hide() end

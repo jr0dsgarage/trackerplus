@@ -36,7 +36,9 @@ function addon:RenderScenarioSection()
     end
 
     local isScenarioActive = isInScenario or hasManualScenarioData
-    local useBlizzardScenario = not addon.disableBlizzardTrackerHijack and not not (isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame)
+    local useBlizzardScenario = not addon.disableBlizzardTrackerHijack and scenarioTracker and scenarioTracker.ContentsFrame
+    
+    addon:LogAt("trace", "[SCENARIO] isScenarioActive=%s, disableHijack=%s, tracker=%s, useBlizzardScenario=%s", tostring(isScenarioActive), tostring(addon.disableBlizzardTrackerHijack), tostring(scenarioTracker and scenarioTracker:GetName()), tostring(useBlizzardScenario))
 
     local scenarioHeight = 0
     local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
@@ -250,13 +252,16 @@ function addon:RenderScenarioSection()
              hasScenarioContent = true
          end
 
+         addon:LogAt("trace", "[SCENARIO] hasContent=%s, hTop=%s, cTop=%s, minB=%s, childH=%s, m3WH=%s", tostring(hasScenarioContent), tostring(hostTop), tostring(contentsTop), tostring(minBottom), tostring(maxChildTop), tostring(blizzardHeight))
+
          -- Fail-safe: Blizzard can report transient zero sizes during scenario transitions.
          -- If we are in a scenario and have a hijacked host frame, keep the section alive.
          if not hasScenarioContent and isScenarioActive and (hostFrame:IsShown() or contents:IsShown()) then
+             addon:LogAt("trace", "[SCENARIO] FAIL-SAFE ACTIVATED")
              hasScenarioContent = true
              blizzardHeight = max(blizzardHeight, self._lastScenarioBlizzardHeight or 90)
          end
-         
+
          if hasScenarioContent then
              -- If height is suspiciously small while content exists, enforce a modest floor.
              if blizzardHeight < 30 then
@@ -324,7 +329,8 @@ function addon:RenderScenarioSection()
         header.bg:SetColorTexture(0, 0, 0, 0.4)
         header:SetHeight(24)
         header:Show()
-        
+        header._scriptMode = "scenarioHeader"
+
         -- Cleanup header parts
         if header.poiButton then header.poiButton:Hide() end
         if header.itemButton then header.itemButton:Hide() end
@@ -621,6 +627,7 @@ function addon:RenderScenarioSection()
                
                button:SetHeight(height + 4)
                button:Show()
+               button._scriptMode = "scenarioRow"
                scenarioYOffset = scenarioYOffset + height + 8
         end
     end

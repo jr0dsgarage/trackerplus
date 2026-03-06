@@ -185,6 +185,7 @@ function addon:RenderWorldQuestSection(worldQuestItems)
 
         header:SetHeight(30)
         header:Show()
+        header._scriptMode = "worldQuestHeader"
 
         -- If Hijacked frame was found, we don't need to manually render items.
            if useBlizzardWQ and hasBlizzardWQContent and wqYOffset > 0 then
