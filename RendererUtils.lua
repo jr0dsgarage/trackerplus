@@ -55,6 +55,7 @@ end
 
 function addon.EnsureHijackedParent(owner, frame, targetParent, originalParentKey, strata, frameLevel)
     if not frame or not targetParent then return end
+    if InCombatLockdown() then return end
     if frame:GetParent() ~= targetParent then
         owner[originalParentKey] = frame:GetParent() or owner[originalParentKey]
         frame:SetParent(targetParent)
@@ -65,6 +66,7 @@ end
 
 function addon.RestoreHijackedParent(owner, frame, hijackParent, fallbackParent, originalParentKey)
     if not frame then return end
+    if InCombatLockdown() then return end
     if frame:GetParent() == hijackParent then
         frame:SetParent(owner[originalParentKey] or fallbackParent)
     end

@@ -72,6 +72,7 @@ function addon:RenderScenarioSection()
                 if not hostFrame._tpSetPointHooked then
                     hooksecurefunc(hostFrame, "SetPoint", function(f)
                         if f._tpLockAnchors and not f._tpReanchorring then
+                            if InCombatLockdown() then return end
                             f._tpReanchorring = true
                             local sw = addon.scenarioFrame and addon.scenarioFrame:GetWidth() or 0
                             local hw = f:GetWidth() or 0
@@ -91,21 +92,23 @@ function addon:RenderScenarioSection()
             -- Always re-enforce TOPLEFT anchor every render pass. We position the
             -- widget so its right edge lands RIGHT_INSET px inside scenarioFrame.
             -- We do NOT call SetWidth — Blizzard keeps its natural widget size.
-            hostFrame._tpReanchorring = true
-            local sw = self.scenarioFrame:GetWidth() or 0
-            local hw = hostFrame:GetWidth() or 0
-            if sw > 10 and hw > 10 then
-                local xOff = sw - hw - RIGHT_INSET
-                hostFrame:ClearAllPoints()
-                hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", xOff, 0)
-                DebugLayout(self, "[SCN] TOPLEFT anchor enforced, xOff=%d (sw=%d hw=%d)", xOff, sw, hw)
-            else
-                -- Fallback: frame sizes not resolved yet, pin to right edge temporarily
-                hostFrame:ClearAllPoints()
-                hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -RIGHT_INSET, 0)
-                DebugLayout(self, "[SCN] TOPRIGHT fallback (sw=%d hw=%d)", sw, hw)
+            if not InCombatLockdown() then
+                hostFrame._tpReanchorring = true
+                local sw = self.scenarioFrame:GetWidth() or 0
+                local hw = hostFrame:GetWidth() or 0
+                if sw > 10 and hw > 10 then
+                    local xOff = sw - hw - RIGHT_INSET
+                    hostFrame:ClearAllPoints()
+                    hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", xOff, 0)
+                    DebugLayout(self, "[SCN] TOPLEFT anchor enforced, xOff=%d (sw=%d hw=%d)", xOff, sw, hw)
+                else
+                    -- Fallback: frame sizes not resolved yet, pin to right edge temporarily
+                    hostFrame:ClearAllPoints()
+                    hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -RIGHT_INSET, 0)
+                    DebugLayout(self, "[SCN] TOPRIGHT fallback (sw=%d hw=%d)", sw, hw)
+                end
+                hostFrame._tpReanchorring = false
             end
-            hostFrame._tpReanchorring = false
 
             if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
 
