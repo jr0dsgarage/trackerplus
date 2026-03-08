@@ -170,8 +170,6 @@ function addon:Initialize()
         -- Hook Show to control visibility based on our enabled state
         if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
-                local inInstance, instanceType = IsInInstance()
-                if inInstance and (instanceType == "pvp" or instanceType == "arena") then return end
                 if addon.db.enabled and not InCombatLockdown() then
                     self:SetAlpha(0)
                 end
@@ -197,20 +195,8 @@ end
 -- Update default tracker visibility based on enabled state
 function addon:UpdateDefaultTrackerVisibility()
     if not ObjectiveTrackerFrame then return end
-    
+
     if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
-    
-    local inInstance, instanceType = IsInInstance()
-    if inInstance and (instanceType == "pvp" or instanceType == "arena") then
-        if addon.LogAt then addon:LogAt("trace", "In PvP instance, restoring ObjectiveTrackerFrame") end
-        if ObjectiveTrackerFrame.Show and not InCombatLockdown() then
-            ObjectiveTrackerFrame:SetAlpha(1)
-            ObjectiveTrackerFrame:EnableMouse(true)
-            ObjectiveTrackerFrame:Show()
-            addon:RestoreAllHijackedFrames()
-        end
-        return
-    end
 
     if self.db.enabled then
         if not InCombatLockdown() then
@@ -220,6 +206,11 @@ function addon:UpdateDefaultTrackerVisibility()
     else
         -- Restore default Blizzard tracker visibility
         if ObjectiveTrackerFrame.Show and not InCombatLockdown() then
+            ObjectiveTrackerFrame:SetAlpha(1)
+            ObjectiveTrackerFrame:EnableMouse(true)
+            ObjectiveTrackerFrame:Show()
+            if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame restored") end
+        end
     end
 end
 
