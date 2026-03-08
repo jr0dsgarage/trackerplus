@@ -171,12 +171,9 @@ function addon:Initialize()
         if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
                 if addon.db.enabled then
-                    if self.Hide then
-                        self:Hide()
-                    end
+                    self:SetAlpha(0)
                 end
             end)
-            
             addon.hookedTracker = true
         end
 
@@ -194,9 +191,7 @@ function addon:UpdateDefaultTrackerVisibility()
     if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
     
     if self.db.enabled then
-        if ObjectiveTrackerFrame.Hide then
-            ObjectiveTrackerFrame:Hide()
-        end
+        ObjectiveTrackerFrame:SetAlpha(0)
         if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame hidden") end
     else
         -- Restore default Blizzard tracker visibility
