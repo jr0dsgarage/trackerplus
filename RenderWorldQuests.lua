@@ -203,8 +203,8 @@ function addon:RenderWorldQuestSection(worldQuestItems)
              end
         end
 
-        -- Set styledBackdrop height to cover the full section (matching Bonus Objective style)
-        local backdropPadding = 10
+          -- Set styledBackdrop height to cover the full section
+          local backdropPadding = 5
         header.styledBackdrop:SetHeight(wqYOffset + backdropPadding)
         header.styledBackdrop:Show()
     end
