@@ -190,6 +190,9 @@ function addon:UpdateTrackerDisplay(trackables)
     --------------------------------------------------------------------------
     contentFrame:SetHeight(max(yOffset, self.db.frameHeight))
 
+    -- Update scroll shadow gradients based on new content size
+    self:UpdateScrollShadows()
+
     -- Hide only unused pooled buttons after this frame has been fully rendered.
     self:FinalizeButtonPool()
 

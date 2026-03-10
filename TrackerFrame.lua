@@ -9,6 +9,24 @@ local scrollFrame = nil
 local contentFrame = nil
 local completedQuestFrame = nil
 
+local SHADOW_FADE_DISTANCE = 100
+
+
+-- Update scroll shadow opacity based on scroll position.
+-- Uses SetAlpha instead of SetHeight so no tainted geometry values enter
+-- Blizzard's LayoutFrame comparisons (which would cause taint errors).
+function addon:UpdateScrollShadows()
+    if not scrollFrame or not self.scrollShadowTop or not self.scrollShadowBottom then return end
+    local current = scrollFrame:GetVerticalScroll()
+    local maxScroll = scrollFrame:GetVerticalScrollRange()
+    if maxScroll <= 0 then
+        self.scrollShadowTop:SetAlpha(0)
+        self.scrollShadowBottom:SetAlpha(0)
+        return
+    end
+    self.scrollShadowTop:SetAlpha(min(1, current / SHADOW_FADE_DISTANCE))
+    self.scrollShadowBottom:SetAlpha(min(1, (maxScroll - current) / SHADOW_FADE_DISTANCE))
+end
 
 -- Create the main tracker frame
 function addon:CreateTrackerFrame()
@@ -144,6 +162,7 @@ function addon:CreateTrackerFrame()
             local maxScroll = scrollFrame:GetVerticalScrollRange()
             local newScroll = max(0, min(maxScroll, current - (delta * 20)))
             scrollFrame:SetVerticalScroll(newScroll)
+            addon:UpdateScrollShadows()
         end
     end)
     
@@ -203,7 +222,36 @@ function addon:CreateTrackerFrame()
     contentFrame = CreateFrame("Frame", nil, scrollFrame)
     contentFrame:SetSize(self.db.frameWidth - 2, 100) -- Reduce width for scrollbar/padding logic
     scrollFrame:SetScrollChild(contentFrame)
-    
+
+    -- Scroll frame shadow gradients (depth effect: content appears "behind" pinned sections)
+    local shadowLevel = 100
+
+    local scrollShadowTop = CreateFrame("Frame", nil, trackerFrame)
+    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, 0)
+    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, 0)
+    scrollShadowTop:SetHeight(100)
+    scrollShadowTop:SetFrameLevel(shadowLevel)
+    scrollShadowTop:EnableMouse(false)
+    scrollShadowTop:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity
+    local topGradient = scrollShadowTop:CreateTexture(nil, "OVERLAY")
+    topGradient:SetAllPoints()
+    topGradient:SetColorTexture(0, 0, 0, 1)
+    topGradient:SetGradient("VERTICAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, 1))
+    self.scrollShadowTop = scrollShadowTop
+
+    local scrollShadowBottom = CreateFrame("Frame", nil, trackerFrame)
+    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, 0)
+    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, 0)
+    scrollShadowBottom:SetHeight(100)
+    scrollShadowBottom:SetFrameLevel(shadowLevel)
+    scrollShadowBottom:EnableMouse(false)
+    scrollShadowBottom:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity
+    local bottomGradient = scrollShadowBottom:CreateTexture(nil, "OVERLAY")
+    bottomGradient:SetAllPoints()
+    bottomGradient:SetColorTexture(0, 0, 0, 1)
+    bottomGradient:SetGradient("VERTICAL", CreateColor(1, 1, 1, 1), CreateColor(1, 1, 1, 0))
+    self.scrollShadowBottom = scrollShadowBottom
+
     -- Main Header Background (Behind Title/Settings)
     trackerFrame.headerBg = trackerFrame:CreateTexture(nil, "BACKGROUND")
     trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
