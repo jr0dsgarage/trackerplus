@@ -36,6 +36,7 @@ function addon:UpdateTrackerDisplay(trackables)
     self._tmpScenarios            = self._tmpScenarios            or {}
     self._tmpAutoQuests           = self._tmpAutoQuests           or {}
     self._tmpSuperTrackedItems    = self._tmpSuperTrackedItems    or {}
+    self._tmpCampaignItems        = self._tmpCampaignItems        or {}
     self._tmpBonusObjectives      = self._tmpBonusObjectives      or {}
     self._tmpWorldQuestItems      = self._tmpWorldQuestItems      or {}
     self._tmpRemainingTrackables  = self._tmpRemainingTrackables  or {}
@@ -44,6 +45,7 @@ function addon:UpdateTrackerDisplay(trackables)
     local scenarios          = self._tmpScenarios
     local autoQuests         = self._tmpAutoQuests
     local superTrackedItems  = self._tmpSuperTrackedItems
+    local campaignItems      = self._tmpCampaignItems
     local bonusObjectives    = self._tmpBonusObjectives
     local worldQuestItems    = self._tmpWorldQuestItems
     local remainingTrackables = self._tmpRemainingTrackables
@@ -52,6 +54,7 @@ function addon:UpdateTrackerDisplay(trackables)
     ClearArray(scenarios)
     ClearArray(autoQuests)
     ClearArray(superTrackedItems)
+    ClearArray(campaignItems)
     ClearArray(bonusObjectives)
     ClearArray(worldQuestItems)
     ClearArray(remainingTrackables)
@@ -77,6 +80,8 @@ function addon:UpdateTrackerDisplay(trackables)
                 and item.title ~= "" then
                 superTrackedItems[#superTrackedItems + 1] = item
             end
+        elseif item.type == "campaign" then
+            campaignItems[#campaignItems + 1] = item
         elseif item.type == "bonus" then
             bonusObjectives[#bonusObjectives + 1] = item
         elseif item.type == "worldquest" then
@@ -120,6 +125,9 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Active (super-tracked) quest
     local aqYOffset = self:RenderActiveQuestSection(superTrackedItems)
 
+    -- Campaign quests (dedicated pinned section below Active Quest)
+    local campaignYOffset = self:RenderCampaignSection(campaignItems)
+
     -- Bonus objectives
     local bonusYOffset = self:RenderBonusSection(bonusObjectives)
 
@@ -146,9 +154,10 @@ function addon:UpdateTrackerDisplay(trackables)
     self:UpdateLayoutAnchors()
 
     DebugLayout(self,
-        "anchors scenY=%d aqY=%d bonusY=%d wqY=%d autoQH=%.1f",
+        "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f",
         tonumber(scenarioYOffset or 0),
         tonumber(aqYOffset or 0),
+        tonumber(campaignYOffset or 0),
         tonumber(bonusYOffset or 0),
         tonumber(wqYOffset or 0),
         tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0)

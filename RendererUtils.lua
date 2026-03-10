@@ -160,6 +160,7 @@ function addon:UpdateSectionDebugBoxes()
         { key = "completedquest", frame = self.completedQuestFrame, label = "completedQuestFrame", color = {0.8, 0.8, 0.2}, anchor = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y = -3 } },
         { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "activequest", frame = self.activeQuestFrame, label = "activeQuestFrame", color = {1.0, 0.85, 0.2}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "campaign", frame = self.campaignFrame, label = "campaignFrame", color = {1.0, 0.65, 0.2}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "scroll", frame = self.scrollFrame, label = "scrollFrame", color = {0.4, 1.0, 0.45}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "content", frame = self.contentFrame, label = "contentFrame", color = {0.3, 0.7, 1.0}, anchor = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -3, y = 3 } },
         { key = "bonus", frame = self.bonusFrame, label = "bonusFrame", color = {0.85, 0.45, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
