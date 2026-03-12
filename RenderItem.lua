@@ -10,6 +10,35 @@ local max, floor = math.max, math.floor
 local ParseObjectiveDisplay = function(...) return addon.ParseObjectiveDisplay(...) end
 local ResolveTrackableItemData = function(...) return addon.ResolveTrackableItemData(...) end
 
+local function NormalizeHeaderText(value)
+    if not value or value == "" then return "" end
+    local normalized = tostring(value):lower()
+    normalized = normalized:gsub("^%s+", ""):gsub("%s+$", "")
+    normalized = normalized:gsub("[^%w%s]", "")
+    normalized = normalized:gsub("%s+", " ")
+    return normalized
+end
+
+local function IsQuestTypeRedundant(item, typeText)
+    local qType = NormalizeHeaderText(typeText)
+    if qType == "" then return true end
+
+    local minorHeader = NormalizeHeaderText(item._minorHeaderTitle)
+    local majorHeader = NormalizeHeaderText(item._majorHeaderTitle)
+    local zoneHeader = NormalizeHeaderText(item.zone)
+
+    if qType == minorHeader or qType == majorHeader or qType == zoneHeader then
+        return true
+    end
+    if minorHeader ~= "" and (minorHeader:find(qType, 1, true) or qType:find(minorHeader, 1, true)) then
+        return true
+    end
+    if zoneHeader ~= "" and (zoneHeader:find(qType, 1, true) or qType:find(zoneHeader, 1, true)) then
+        return true
+    end
+    return false
+end
+
 -------------------------------------------------------------------------------
 -- RenderTrackableItem — renders a single quest/achievement row
 -------------------------------------------------------------------------------
@@ -214,7 +243,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     -- Group Finder Button
-    local showGroupButton = (item.isWorldQuest or item.type == "bonus") and C_LFGList.CanCreateQuestGroup(item.id)
+    local showGroupButton = (item.isWorldQuest or item.type == "bonus") and item.canCreateGroup == true
     
     if showGroupButton then
         if not button.groupButton then
@@ -288,39 +317,10 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         titleText = format("[%d] %s", item.level, titleText)
     end
 
-    local function NormalizeHeaderText(value)
-        if not value or value == "" then return "" end
-        local normalized = tostring(value):lower()
-        normalized = normalized:gsub("^%s+", ""):gsub("%s+$", "")
-        normalized = normalized:gsub("[^%w%s]", "")
-        normalized = normalized:gsub("%s+", " ")
-        return normalized
-    end
-
-    local function IsQuestTypeRedundant(typeText)
-        local qType = NormalizeHeaderText(typeText)
-        if qType == "" then return true end
-
-        local minorHeader = NormalizeHeaderText(item._minorHeaderTitle)
-        local majorHeader = NormalizeHeaderText(item._majorHeaderTitle)
-        local zoneHeader = NormalizeHeaderText(item.zone)
-
-        if qType == minorHeader or qType == majorHeader or qType == zoneHeader then
-            return true
-        end
-        if minorHeader ~= "" and (minorHeader:find(qType, 1, true) or qType:find(minorHeader, 1, true)) then
-            return true
-        end
-        if zoneHeader ~= "" and (zoneHeader:find(qType, 1, true) or qType:find(zoneHeader, 1, true)) then
-            return true
-        end
-        return false
-    end
-
     if item.questType
         and not item.isWorldQuest
         and item.type ~= "worldquest"
-        and not IsQuestTypeRedundant(item.questType) then
+        and not IsQuestTypeRedundant(item, item.questType) then
         titleText = titleText .. " (" .. item.questType .. ")"
     end
     
@@ -464,8 +464,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                          
                          bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                          bar.bg:SetAllPoints()
-                         local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                         bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
+                        local bgC = db.barBackgroundColor
+                        local bgR = bgC and bgC.r or 0
+                        local bgG = bgC and bgC.g or 0
+                        local bgB = bgC and bgC.b or 0
+                        local bgA = bgC and bgC.a or 0.5
+                        bar.bg:SetColorTexture(bgR, bgG, bgB, bgA)
                          
                          addon:CreateBorderLines(bar, db.barBorderSize)
      
@@ -479,21 +483,33 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 
                 -- Update bar style only when settings changed
                 if not bar.isTemplate then
-                     local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
-                     if LSM and db.barTexture then
-                          barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
-                     end
-                     local bgC = db.barBackgroundColor or {r=0,g=0,b=0,a=0.5}
-                     local styleSig = format("%s|%d|%.3f|%.3f|%.3f|%.3f",
-                         tostring(barTex),
-                         db.barBorderSize or 0,
-                         bgC.r or 0, bgC.g or 0, bgC.b or 0, bgC.a or 0
-                     )
-                     if bar._styleSig ~= styleSig then
+                     local bgC = db.barBackgroundColor
+                     local bgR = bgC and bgC.r or 0
+                     local bgG = bgC and bgC.g or 0
+                     local bgB = bgC and bgC.b or 0
+                     local bgA = bgC and bgC.a or 0.5
+                     local barTextureKey = db.barTexture or ""
+                     local borderSize = db.barBorderSize or 0
+
+                     if bar._barTextureKey ~= barTextureKey
+                        or bar._barBorderSize ~= borderSize
+                        or bar._barBgR ~= bgR
+                        or bar._barBgG ~= bgG
+                        or bar._barBgB ~= bgB
+                        or bar._barBgA ~= bgA then
+                        local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                        if LSM and db.barTexture then
+                            barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
+                        end
                          bar:SetStatusBarTexture(barTex)
-                         if bar.bg then bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a) end
-                         addon:CreateBorderLines(bar, db.barBorderSize)
-                         bar._styleSig = styleSig
+                        if bar.bg then bar.bg:SetColorTexture(bgR, bgG, bgB, bgA) end
+                        addon:CreateBorderLines(bar, borderSize)
+                        bar._barTextureKey = barTextureKey
+                        bar._barBorderSize = borderSize
+                        bar._barBgR = bgR
+                        bar._barBgG = bgG
+                        bar._barBgB = bgB
+                        bar._barBgA = bgA
                      end
                 elseif bar.Bar then
                      local borderSize = db.barBorderSize or 0

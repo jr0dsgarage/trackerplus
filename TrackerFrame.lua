@@ -577,6 +577,64 @@ function addon:UpdateTrackerAppearance()
     
     local db = self.db
 
+    self._appearanceState = self._appearanceState or {}
+    local s = self._appearanceState
+
+    local minimized = db.minimized == true
+    local borderEnabled = db.borderEnabled == true
+    local bgStyle = db.headerBackgroundStyle or "tracker"
+
+    local unchanged =
+        s.minimized == minimized
+        and s.frameScale == (db.frameScale or 1)
+        and s.frameWidth == (db.frameWidth or 0)
+        and s.frameHeight == (db.frameHeight or 0)
+        and s.bgR == (db.backgroundColor and db.backgroundColor.r or 0)
+        and s.bgG == (db.backgroundColor and db.backgroundColor.g or 0)
+        and s.bgB == (db.backgroundColor and db.backgroundColor.b or 0)
+        and s.bgA == (db.backgroundColor and db.backgroundColor.a or 0)
+        and s.borderEnabled == borderEnabled
+        and s.borderSize == (db.borderSize or 0)
+        and s.borderR == (db.borderColor and db.borderColor.r or 0)
+        and s.borderG == (db.borderColor and db.borderColor.g or 0)
+        and s.borderB == (db.borderColor and db.borderColor.b or 0)
+        and s.borderA == (db.borderColor and db.borderColor.a or 0)
+        and s.headerFontFace == db.headerFontFace
+        and s.headerFontSize == (db.headerFontSize or 0)
+        and s.headerFontOutline == db.headerFontOutline
+        and s.headerR == (db.headerColor and db.headerColor.r or 0)
+        and s.headerG == (db.headerColor and db.headerColor.g or 0)
+        and s.headerB == (db.headerColor and db.headerColor.b or 0)
+        and s.headerA == (db.headerColor and db.headerColor.a or 0)
+        and s.headerBackgroundStyle == bgStyle
+
+    if unchanged then
+        return
+    end
+
+    s.minimized = minimized
+    s.frameScale = db.frameScale or 1
+    s.frameWidth = db.frameWidth or 0
+    s.frameHeight = db.frameHeight or 0
+    s.bgR = db.backgroundColor and db.backgroundColor.r or 0
+    s.bgG = db.backgroundColor and db.backgroundColor.g or 0
+    s.bgB = db.backgroundColor and db.backgroundColor.b or 0
+    s.bgA = db.backgroundColor and db.backgroundColor.a or 0
+    s.borderEnabled = borderEnabled
+    s.borderSize = db.borderSize or 0
+    s.borderR = db.borderColor and db.borderColor.r or 0
+    s.borderG = db.borderColor and db.borderColor.g or 0
+    s.borderB = db.borderColor and db.borderColor.b or 0
+    s.borderA = db.borderColor and db.borderColor.a or 0
+    s.headerFontFace = db.headerFontFace
+    s.headerFontSize = db.headerFontSize or 0
+    s.headerFontOutline = db.headerFontOutline
+    s.headerR = db.headerColor and db.headerColor.r or 0
+    s.headerG = db.headerColor and db.headerColor.g or 0
+    s.headerB = db.headerColor and db.headerColor.b or 0
+    s.headerA = db.headerColor and db.headerColor.a or 0
+    s.headerBackgroundStyle = bgStyle
+
     if db.minimized then
         trackerFrame:SetSize(34, 34)
         trackerFrame:SetScale(db.frameScale)
@@ -599,10 +657,12 @@ function addon:UpdateTrackerAppearance()
             trackerFrame.border = CreateFrame("Frame", nil, trackerFrame, "BackdropTemplate")
             trackerFrame.border:SetAllPoints()
         end
-        trackerFrame.border:SetBackdrop({
+        self._trackerBorderBackdrop = self._trackerBorderBackdrop or {
             edgeFile = "Interface\\Buttons\\WHITE8X8",
             edgeSize = db.borderSize,
-        })
+        }
+        self._trackerBorderBackdrop.edgeSize = db.borderSize
+        trackerFrame.border:SetBackdrop(self._trackerBorderBackdrop)
         trackerFrame.border:SetBackdropBorderColor(
             db.borderColor.r,
             db.borderColor.g,
@@ -635,7 +695,6 @@ function addon:UpdateTrackerAppearance()
     
     -- Update Main Header Background
     if trackerFrame.headerBg then
-        local bgStyle = db.headerBackgroundStyle or "tracker"
         
         trackerFrame.headerBg:ClearAllPoints()
         
