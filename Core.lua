@@ -108,6 +108,15 @@ local function GetCanCreateQuestGroupCached(owner, questID)
     return canCreate
 end
 
+local WORLD_QUESTS_HEADER_TITLE = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
+local WORLD_QUESTS_HEADER_TITLE_LOWER = tostring(WORLD_QUESTS_HEADER_TITLE):lower()
+
+local function IsWorldQuestsHeaderTitle(title)
+    if not title then return false end
+    if title == WORLD_QUESTS_HEADER_TITLE then return true end
+    return tostring(title):lower() == WORLD_QUESTS_HEADER_TITLE_LOWER
+end
+
 -- Print helper
 local function Print(...)
     print("|cff00ff00TrackerPlus:|r", ...)
@@ -728,13 +737,6 @@ function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
     local currentZone = GetRealZoneText() or "Unknown Zone"
     local currentHeaderIsCampaign = false
-    local worldQuestsHeader = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
-
-    local function IsWorldQuestsHeaderTitle(title)
-        if not title then return false end
-        if title == worldQuestsHeader then return true end
-        return tostring(title):lower() == tostring(worldQuestsHeader):lower()
-    end
 
     for i = 1, numQuests do
         local info = C_QuestLog.GetInfo(i)
@@ -748,7 +750,7 @@ function addon:CollectQuests(trackables)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
                 local isComplete = C_QuestLog.IsComplete(info.questID)
-                    local treatAsWorldQuest = isWorldQuest or IsWorldQuestsHeaderTitle(currentZone)
+                local treatAsWorldQuest = isWorldQuest or IsWorldQuestsHeaderTitle(currentZone)
 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask

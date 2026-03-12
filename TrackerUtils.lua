@@ -4,6 +4,7 @@ local addonName, addon = ...
 local pairs, ipairs, next = pairs, ipairs, next
 local floor, max = math.floor, math.max
 local InCombatLockdown = InCombatLockdown
+local wipe = wipe
 
 -- Pools
 local trackableButtons = {}
@@ -64,17 +65,33 @@ end
 
 -- Organize trackables into Major/Minor hierarchy
 function addon:OrganizeTrackables(trackables)
-    self.knownMinorKeys = {} -- Reset cache
-    local organized = {}
+    self.knownMinorKeys = self.knownMinorKeys or {}
+    wipe(self.knownMinorKeys)
+
+    self._organizedTrackables = self._organizedTrackables or {}
+    local organized = self._organizedTrackables
+    wipe(organized)
+
     -- Scenarios should already be extracted by ExtractScenarios, but just in case
-    
-    local buckets = {
+
+    self._organizeBuckets = self._organizeBuckets or {
         quest = {},
         achievement = {},
         profession = {},
         monthly = {},
         endeavor = {},
     }
+    local buckets = self._organizeBuckets
+    for _, bucket in pairs(buckets) do
+        wipe(bucket)
+    end
+
+    self._organizeZones = self._organizeZones or {}
+    self._organizeSortedZones = self._organizeSortedZones or {}
+    self._organizeZoneTables = self._organizeZoneTables or {}
+    local zones = self._organizeZones
+    local sortedZones = self._organizeSortedZones
+    local zoneTables = self._organizeZoneTables
     
     -- Bucketing
     for _, item in ipairs(trackables) do
@@ -104,18 +121,27 @@ function addon:OrganizeTrackables(trackables)
             
             if not majorCollapsed then
                 -- Group by Minor (Zone or Category)
-                local zones = {}
+                wipe(zones)
                 for _, item in ipairs(items) do
                     local zone = item.zone or "General"
                     -- Simplify "World Quest" zones
                     if item.isWorldQuest then zone = "World Quests - " .. zone end
-                    
-                    if not zones[zone] then zones[zone] = {} end
-                    zones[zone][#zones[zone] + 1] = item
+
+                    local zoneItems = zones[zone]
+                    if not zoneItems then
+                        zoneItems = zoneTables[zone]
+                        if not zoneItems then
+                            zoneItems = {}
+                            zoneTables[zone] = zoneItems
+                        end
+                        wipe(zoneItems)
+                        zones[zone] = zoneItems
+                    end
+                    zoneItems[#zoneItems + 1] = item
                 end
                 
                 -- Sort Zones
-                local sortedZones = {}
+                wipe(sortedZones)
                 for zoneName, _ in pairs(zones) do sortedZones[#sortedZones + 1] = zoneName end
                 table.sort(sortedZones)
                 
@@ -224,14 +250,12 @@ function addon:GetOrCreateButton(parent)
     
     -- Nuclear option: Ensure any lingering children like ProgressBars are hidden
     if btn.progressBars then
-        for _, bar in pairs(btn.progressBars) do
-            bar:Hide()
-        end
+        local arr = btn.progressBars
+        for i = 1, #arr do arr[i]:Hide() end
     end
     if btn.objectives then
-        for _, obj in pairs(btn.objectives) do
-            obj:Hide()
-        end
+        local arr = btn.objectives
+        for i = 1, #arr do arr[i]:Hide() end
     end
     if btn.distance then btn.distance:Hide() end
     if btn.styledBackdrop then btn.styledBackdrop:Hide() end
