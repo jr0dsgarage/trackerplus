@@ -3,7 +3,7 @@ local addonName, addon = ...
 
 -- Localize hot-path globals to avoid repeated global lookups
 local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
-local tinsert, wipe = table.insert, wipe
+local wipe = wipe
 local format, match, gsub = string.format, string.match, string.gsub
 local max, min, floor, band = math.max, math.min, math.floor, bit.band
 local GetTime = GetTime
@@ -61,15 +61,6 @@ local function AppendBucket(dest, source)
     for i = 1, #source do
         dest[#dest + 1] = source[i]
     end
-end
-
-local function MoveObjectiveTrackerOffscreen(owner)
-    if not ObjectiveTrackerFrame then return end
-    
-    -- Hide without moving to avoid tainting geometry in the widget system.
-    -- SetAlpha(0) hides the frame without causing secure frame taint.
-    ObjectiveTrackerFrame:SetAlpha(0)
-    ObjectiveTrackerFrame:EnableMouse(false)
 end
 
 function addon:IsAnyScenarioTrackerActive()
@@ -165,14 +156,6 @@ function addon:Initialize()
     end
     
     Print("Loaded! Type /trackerplus or /tp for options.")
-end
-
-function addon:RestoreAllHijackedFrames()
-    if InCombatLockdown() then return end
-    if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.hostFrame then
-        addon.scenarioFrame.hostFrame:SetParent(addon.scenarioHostOriginalParent)
-        addon.scenarioFrame.hostFrame:ClearAllPoints()
-    end
 end
 
 -- Update default tracker visibility based on enabled state
@@ -485,8 +468,6 @@ function addon:UpdateTracker()
         else
             if self.LogAt then
                 self:LogAt("error", "Render error: %s", tostring(err))
-            elseif self.Log then
-                self:Log("Render error: %s", tostring(err))
             end
 
             local now = GetTime()
@@ -667,7 +648,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
             
             local flags = obj.flags or 0
             local isFlagged = band(flags, 1) == 1
-            if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
+            if obj.type == "progressbar" or isFlagged or (obj.text and match(obj.text, "%%")) then
                 hasProgressBarObj = true
             end
             
@@ -743,8 +724,7 @@ function addon:CollectQuests(trackables)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
                 local isComplete = C_QuestLog.IsComplete(info.questID)
-                local isUnderWorldQuestHeader = IsWorldQuestsHeaderTitle(currentZone)
-                local treatAsWorldQuest = isWorldQuest or isUnderWorldQuestHeader
+                    local treatAsWorldQuest = isWorldQuest or IsWorldQuestsHeaderTitle(currentZone)
 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
@@ -793,7 +773,7 @@ function addon:CollectAchievements(trackables)
     end
     
     for _, achievementID in ipairs(trackedAchievements) do
-        local id, name, points, completed, icon, isGuild
+        local id, name, points, completed, icon
         
         -- Try C_AchievementInfo (Modern API)
         if C_AchievementInfo and C_AchievementInfo.GetInfo then
@@ -804,11 +784,10 @@ function addon:CollectAchievements(trackables)
                 points = info.points
                 completed = info.completed
                 icon = info.icon
-                isGuild = info.isGuild
             end
         elseif GetAchievementInfo then
             local _
-            id, name, points, completed, _, _, _, _, _, icon, _, isGuild = GetAchievementInfo(achievementID)
+            id, name, points, completed, _, _, _, _, _, icon = GetAchievementInfo(achievementID)
         end
         
         if id then

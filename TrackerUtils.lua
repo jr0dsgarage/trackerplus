@@ -234,7 +234,6 @@ function addon:GetOrCreateButton(parent)
         end
     end
     if btn.distance then btn.distance:Hide() end
-    if btn.stageBox then btn.stageBox:Hide() end
     if btn.styledBackdrop then btn.styledBackdrop:Hide() end
     if btn.SetBackdrop then btn:SetBackdrop(nil) end
 
