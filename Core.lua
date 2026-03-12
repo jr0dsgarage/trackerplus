@@ -63,28 +63,11 @@ local function AppendBucket(dest, source)
     end
 end
 
-local function SaveObjectiveTrackerPoint(owner)
-    if not ObjectiveTrackerFrame then return end
-    local point, relativeTo, relativePoint, x, y = ObjectiveTrackerFrame:GetPoint(1)
-    owner._objectiveTrackerRestorePoint = {
-        point = point,
-        relativeTo = relativeTo,
-        relativePoint = relativePoint,
-        x = x,
-        y = y,
-    }
-end
-
 local function MoveObjectiveTrackerOffscreen(owner)
     if not ObjectiveTrackerFrame then return end
-
-    local _, _, _, x = ObjectiveTrackerFrame:GetPoint(1)
-    if not x or x < 5000 then
-        SaveObjectiveTrackerPoint(owner)
-    end
-
-    ObjectiveTrackerFrame:ClearAllPoints()
-    ObjectiveTrackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 10000, 0)
+    
+    -- Hide without moving to avoid tainting geometry in the widget system.
+    -- SetAlpha(0) hides the frame without causing secure frame taint.
     ObjectiveTrackerFrame:SetAlpha(0)
     ObjectiveTrackerFrame:EnableMouse(false)
 end
@@ -266,6 +249,10 @@ function addon:RegisterEvents()
     pcall(function() frame:RegisterEvent("ITEM_COUNT_CHANGED") end)
     pcall(function() frame:RegisterEvent("BAG_UPDATE_DELAYED") end)
     pcall(function() frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE") end)
+    pcall(function() frame:RegisterEvent("BANKFRAME_OPENED") end)
+    pcall(function() frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED") end)
+    pcall(function() frame:RegisterEvent("BANK_TABS_CHANGED") end)
+    pcall(function() frame:RegisterEvent("BANK_TAB_SETTINGS_UPDATED") end)
 
     -- Monthly Activities (Trading Post)
     if C_PerksProgram then
@@ -357,7 +344,11 @@ function addon:OnEvent(event, ...)
             or event == "GET_ITEM_INFO_RECEIVED"
             or event == "ITEM_COUNT_CHANGED"
             or event == "BAG_UPDATE_DELAYED"
-            or event == "CURRENCY_DISPLAY_UPDATE" then
+            or event == "CURRENCY_DISPLAY_UPDATE"
+            or event == "BANKFRAME_OPENED"
+            or event == "PLAYERBANKSLOTS_CHANGED"
+            or event == "BANK_TABS_CHANGED"
+            or event == "BANK_TAB_SETTINGS_UPDATED" then
             self:RequestUpdate("professions")
         elseif event == "PERKS_PROGRAM_DATA_REFRESH" then
             self:RequestUpdate("monthly")
@@ -1025,7 +1016,41 @@ function addon:CollectProfessionTracking(trackables)
         if not reagent then return 0 end
 
         if reagent.itemID then
-            return GetItemCount(reagent.itemID) or 0
+            local itemID = reagent.itemID
+
+            -- Prefer modern API path which can include Warbank counts.
+            if C_Item and C_Item.GetItemCount then
+                -- Compute total from known-good combinations used by other addons:
+                -- bags + (bank - bags) + (warbank - bags)
+                local okBag, bagQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, false)
+                local okWarbank, bagAndWarbankQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, true)
+                local okBank, bagAndBankQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, false)
+
+                if okBag and okWarbank and okBank then
+                    bagQuantity = bagQuantity or 0
+                    bagAndWarbankQuantity = bagAndWarbankQuantity or 0
+                    bagAndBankQuantity = bagAndBankQuantity or 0
+
+                    local warbankQuantity = max(0, bagAndWarbankQuantity - bagQuantity)
+                    local bankQuantity = max(0, bagAndBankQuantity - bagQuantity)
+
+                    return bagQuantity + bankQuantity + warbankQuantity
+                end
+
+                -- Fallback: try direct full include call where supported.
+                local okTotal, totalQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, true)
+                if okTotal and totalQuantity then
+                    return totalQuantity
+                end
+            end
+
+            -- Legacy fallback.
+            local okLegacy, legacyQuantity = pcall(GetItemCount, itemID, true, false, true, true)
+            if okLegacy and legacyQuantity then
+                return legacyQuantity
+            end
+
+            return GetItemCount(itemID) or 0
         end
 
         if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
@@ -1058,7 +1083,7 @@ function addon:CollectProfessionTracking(trackables)
         end
 
         for _, reagentSlotSchematic in ipairs(schematic.reagentSlotSchematics) do
-            local isRequired = reagentSlotSchematic.required == true
+            local isRequired = reagentSlotSchematic.required and true or false
 
             if isRequired and reagentSlotSchematic.reagents and #reagentSlotSchematic.reagents > 0 then
                 local reagent = reagentSlotSchematic.reagents[1]
@@ -1115,7 +1140,7 @@ function addon:CollectProfessionTracking(trackables)
 
     -- Helper to add recipes
     local function AddRecipes(isRecraft)
-        local trackedRecipes = C_TradeSkillUI.GetRecipesTracked(isRecraft)
+        local trackedRecipes = C_TradeSkillUI.GetRecipesTracked(isRecraft) or {}
         
         for _, recipeID in ipairs(trackedRecipes) do
             local schematic = C_TradeSkillUI.GetRecipeSchematic(recipeID, isRecraft)

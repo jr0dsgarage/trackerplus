@@ -13,14 +13,14 @@ local objectiveParseCache = {}
 local objectiveParseCacheCount = 0
 
 local function GetObjectiveParseKey(item, obj, objIndex)
+    -- Use only safe, immutable values (id, objIndex, numbers) to avoid tainting.
+    -- Never include obj.text or obj.quantityString as they come from protected frames.
     return table.concat({
-        tostring(item.id or item.title or ""),
+        tostring(item.id or 0),
         tostring(objIndex),
         tostring(obj.type or ""),
-        tostring(obj.text or ""),
-        tostring(obj.quantityString or ""),
-        tostring(obj.numFulfilled or ""),
-        tostring(obj.numRequired or ""),
+        tostring(obj.numFulfilled or 0),
+        tostring(obj.numRequired or 0),
     }, "\31")
 end
 
