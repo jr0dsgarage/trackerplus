@@ -3,7 +3,7 @@ local addonName, addon = ...
 
 -- Localize hot-path globals to avoid repeated global lookups
 local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
-local wipe = wipe
+local tinsert, wipe = table.insert, wipe
 local format, match, gsub = string.format, string.match, string.gsub
 local max, min, floor, band = math.max, math.min, math.floor, bit.band
 local GetTime = GetTime
@@ -22,11 +22,7 @@ local updateTimer = 0
 local requestedUpdate = false
 local pendingUpdate = false
 local lastRenderedDataVersion = -1
-local lastLayoutFrameWidth = nil
-local lastLayoutFrameHeight = nil
-local lastLayoutGroupByZone = nil
-local lastLayoutGroupByCategory = nil
-local lastLayoutFrameScale = nil
+local lastLayoutSignature = ""
 
 -- Dirty section tracking + cached buckets (high-impact perf)
 local dirtySections = { full = true }
@@ -67,6 +63,21 @@ local function AppendBucket(dest, source)
     end
 end
 
+local function MoveObjectiveTrackerOffscreen(owner)
+    if not ObjectiveTrackerFrame then return end
+    
+    -- Hide without moving to avoid tainting geometry in the widget system.
+    -- SetAlpha(0) hides the frame without causing secure frame taint.
+    ObjectiveTrackerFrame:SetAlpha(0)
+    ObjectiveTrackerFrame:EnableMouse(false)
+end
+
+function addon:IsNoHijackContext()
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance then return false end
+    return instanceType == "pvp" or instanceType == "arena"
+end
+
 function addon:IsAnyScenarioTrackerActive()
     if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
         return true
@@ -78,8 +89,14 @@ function addon:IsAnyScenarioTrackerActive()
         local t = _G[name]
         -- If it exists, is shown, and has an active UI inside it
         if t and t:IsShown() and t.ContentsFrame then
-            local numChildren = t.ContentsFrame:GetNumChildren() or 0
-            local hasContent = numChildren > 0 and (t.ContentsFrame:GetHeight() or 0) > 5
+            local hasContent = false
+            -- Check if any children are actually visible (GetNumChildren > 0 alone is unreliable)
+            for _, child in pairs({t.ContentsFrame:GetChildren()}) do
+                if child:IsShown() and child:GetHeight() > 5 then
+                    hasContent = true
+                    break
+                end
+            end
             local hasHeight = max(t:GetHeight() or 0, t.ContentsFrame:GetHeight() or 0) > 10
             if hasContent or hasHeight then
                 return true
@@ -87,34 +104,6 @@ function addon:IsAnyScenarioTrackerActive()
         end
     end
     return false
-end
-
-local function GetCanCreateQuestGroupCached(owner, questID)
-    if not questID or not C_LFGList or not C_LFGList.CanCreateQuestGroup then
-        return false
-    end
-
-    owner._groupEligibilityCache = owner._groupEligibilityCache or {}
-    local cache = owner._groupEligibilityCache
-    local entry = cache[questID]
-    local now = GetTime()
-
-    if entry and (now - entry.t) < 5 then
-        return entry.v
-    end
-
-    local canCreate = C_LFGList.CanCreateQuestGroup(questID) == true
-    cache[questID] = { v = canCreate, t = now }
-    return canCreate
-end
-
-local WORLD_QUESTS_HEADER_TITLE = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
-local WORLD_QUESTS_HEADER_TITLE_LOWER = tostring(WORLD_QUESTS_HEADER_TITLE):lower()
-
-local function IsWorldQuestsHeaderTitle(title)
-    if not title then return false end
-    if title == WORLD_QUESTS_HEADER_TITLE then return true end
-    return tostring(title):lower() == WORLD_QUESTS_HEADER_TITLE_LOWER
 end
 
 -- Print helper
@@ -182,6 +171,14 @@ function addon:Initialize()
     end
     
     Print("Loaded! Type /trackerplus or /tp for options.")
+end
+
+function addon:RestoreAllHijackedFrames()
+    if InCombatLockdown() then return end
+    if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.hostFrame then
+        addon.scenarioFrame.hostFrame:SetParent(addon.scenarioHostOriginalParent)
+        addon.scenarioFrame.hostFrame:ClearAllPoints()
+    end
 end
 
 -- Update default tracker visibility based on enabled state
@@ -447,22 +444,15 @@ function addon:UpdateTracker()
     end
     
     -- Track layout changes independently from data changes
-    local frameWidth = db.frameWidth or 0
-    local frameHeight = db.frameHeight or 0
-    local groupByZone = db.groupByZone == true
-    local groupByCategory = db.groupByCategory == true
-    local frameScale = db.frameScale or 1
-
-    if frameWidth ~= lastLayoutFrameWidth
-        or frameHeight ~= lastLayoutFrameHeight
-        or groupByZone ~= lastLayoutGroupByZone
-        or groupByCategory ~= lastLayoutGroupByCategory
-        or frameScale ~= lastLayoutFrameScale then
-        lastLayoutFrameWidth = frameWidth
-        lastLayoutFrameHeight = frameHeight
-        lastLayoutGroupByZone = groupByZone
-        lastLayoutGroupByCategory = groupByCategory
-        lastLayoutFrameScale = frameScale
+    local layoutSignature = format("%d|%d|%s|%s|%s", 
+        db.frameWidth or 0,
+        db.frameHeight or 0,
+        tostring(db.groupByZone),
+        tostring(db.groupByCategory),
+        tostring(db.frameScale or 1)
+    )
+    if layoutSignature ~= lastLayoutSignature then
+        lastLayoutSignature = layoutSignature
         self._layoutDirty = true
     end
 
@@ -501,6 +491,8 @@ function addon:UpdateTracker()
         else
             if self.LogAt then
                 self:LogAt("error", "Render error: %s", tostring(err))
+            elseif self.Log then
+                self:Log("Render error: %s", tostring(err))
             end
 
             local now = GetTime()
@@ -681,7 +673,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
             
             local flags = obj.flags or 0
             local isFlagged = band(flags, 1) == 1
-            if obj.type == "progressbar" or isFlagged or (obj.text and match(obj.text, "%%")) then
+            if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
                 hasProgressBarObj = true
             end
             
@@ -737,6 +729,13 @@ function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
     local currentZone = GetRealZoneText() or "Unknown Zone"
     local currentHeaderIsCampaign = false
+    local worldQuestsHeader = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
+
+    local function IsWorldQuestsHeaderTitle(title)
+        if not title then return false end
+        if title == worldQuestsHeader then return true end
+        return tostring(title):lower() == tostring(worldQuestsHeader):lower()
+    end
 
     for i = 1, numQuests do
         local info = C_QuestLog.GetInfo(i)
@@ -750,7 +749,8 @@ function addon:CollectQuests(trackables)
                 local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
                 local isComplete = C_QuestLog.IsComplete(info.questID)
-                local treatAsWorldQuest = isWorldQuest or IsWorldQuestsHeaderTitle(currentZone)
+                local isUnderWorldQuestHeader = IsWorldQuestsHeaderTitle(currentZone)
+                local treatAsWorldQuest = isWorldQuest or isUnderWorldQuestHeader
 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
                 local allowHidden = info.isHidden and isTask
@@ -779,9 +779,6 @@ function addon:CollectQuests(trackables)
                     end
                     local questInfo = self:GetQuestData(i, questType, currentZone)
                     if questInfo then
-                        if questInfo.type == "worldquest" or questInfo.type == "bonus" then
-                            questInfo.canCreateGroup = GetCanCreateQuestGroupCached(self, questInfo.id)
-                        end
                         trackables[#trackables + 1] = questInfo
                     end
                 end
@@ -802,7 +799,7 @@ function addon:CollectAchievements(trackables)
     end
     
     for _, achievementID in ipairs(trackedAchievements) do
-        local id, name, points, completed, icon
+        local id, name, points, completed, icon, isGuild
         
         -- Try C_AchievementInfo (Modern API)
         if C_AchievementInfo and C_AchievementInfo.GetInfo then
@@ -813,10 +810,11 @@ function addon:CollectAchievements(trackables)
                 points = info.points
                 completed = info.completed
                 icon = info.icon
+                isGuild = info.isGuild
             end
         elseif GetAchievementInfo then
             local _
-            id, name, points, completed, _, _, _, _, _, icon = GetAchievementInfo(achievementID)
+            id, name, points, completed, _, _, _, _, _, icon, _, isGuild = GetAchievementInfo(achievementID)
         end
         
         if id then
@@ -941,232 +939,238 @@ function addon:CollectScenarioObjectives(trackables)
     trackables[#trackables + 1] = scenarioInfo
 end
 
-local function GetReagentName(owner, reagent)
-    if not reagent then return nil end
-
-    if reagent.name and reagent.name ~= "" then
-        return reagent.name
-    end
-    if reagent.itemName and reagent.itemName ~= "" then
-        return reagent.itemName
-    end
-    if reagent.slotText and reagent.slotText ~= "" then
-        return reagent.slotText
-    end
-
-    if reagent.itemID then
-        local reagentNameCache = owner._professionReagentNameCache or {}
-        owner._professionReagentNameCache = reagentNameCache
-
-        local cachedName = reagentNameCache[reagent.itemID]
-        if cachedName and cachedName ~= "" then
-            return cachedName
-        end
-
-        local itemName
-
-        local getItemNameByID = C_Item and C_Item.GetItemNameByID
-        if getItemNameByID then
-            local ok, resolvedName = pcall(getItemNameByID, reagent.itemID)
-            if ok and resolvedName and resolvedName ~= "" then
-                itemName = resolvedName
-            end
-        end
-
-        if not itemName then
-            local resolvedName = GetItemInfo(reagent.itemID)
-            if resolvedName and resolvedName ~= "" then
-                itemName = resolvedName
-            end
-        end
-
-        if not itemName then
-            local hyperlink = reagent.hyperlink or reagent.itemLink
-            if hyperlink then
-                local linkName = hyperlink:match("%[(.+)%]")
-                if linkName and linkName ~= "" then
-                    itemName = linkName
-                end
-            end
-        end
-
-        if itemName and itemName ~= "" then
-            reagentNameCache[reagent.itemID] = itemName
-            return itemName
-        end
-
-        if C_Item and C_Item.RequestLoadItemDataByID then
-            pcall(C_Item.RequestLoadItemDataByID, reagent.itemID)
-        end
-
-        return "Item " .. tostring(reagent.itemID)
-    end
-
-    if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
-        local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
-        if currencyInfo and currencyInfo.name and currencyInfo.name ~= "" then
-            return currencyInfo.name
-        end
-        return "Currency " .. tostring(reagent.currencyID)
-    end
-
-    return nil
-end
-
-local function GetReagentOwnedCount(reagent)
-    if not reagent then return 0 end
-
-    if reagent.itemID then
-        local itemID = reagent.itemID
-
-        if C_Item and C_Item.GetItemCount then
-            local okBag, bagQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, false)
-            local okWarbank, bagAndWarbankQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, true)
-            local okBank, bagAndBankQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, false)
-
-            if okBag and okWarbank and okBank then
-                bagQuantity = bagQuantity or 0
-                bagAndWarbankQuantity = bagAndWarbankQuantity or 0
-                bagAndBankQuantity = bagAndBankQuantity or 0
-
-                local warbankQuantity = max(0, bagAndWarbankQuantity - bagQuantity)
-                local bankQuantity = max(0, bagAndBankQuantity - bagQuantity)
-
-                return bagQuantity + bankQuantity + warbankQuantity
-            end
-
-            local okTotal, totalQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, true)
-            if okTotal and totalQuantity then
-                return totalQuantity
-            end
-        end
-
-        local okLegacy, legacyQuantity = pcall(GetItemCount, itemID, true, false, true, true)
-        if okLegacy and legacyQuantity then
-            return legacyQuantity
-        end
-
-        return GetItemCount(itemID) or 0
-    end
-
-    if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
-        local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
-        return (currencyInfo and currencyInfo.quantity) or 0
-    end
-
-    return 0
-end
-
-local function GetSlotQuantityRequired(reagentSlotSchematic, reagent)
-    if reagentSlotSchematic and reagentSlotSchematic.GetQuantityRequired and reagent then
-        local ok, quantity = pcall(function()
-            return reagentSlotSchematic:GetQuantityRequired(reagent)
-        end)
-        if ok and quantity then
-            return quantity
-        end
-    end
-
-    return (reagentSlotSchematic and reagentSlotSchematic.quantityRequired) or 1
-end
-
-local function SortObjectiveByText(a, b)
-    return (a.text or "") < (b.text or "")
-end
-
-local function BuildRecipeObjectives(owner, schematic)
-    local objectives = {}
-    local reagentTotals = {}
-
-    if not schematic or not schematic.reagentSlotSchematics then
-        return objectives
-    end
-
-    for _, reagentSlotSchematic in ipairs(schematic.reagentSlotSchematics) do
-        local isRequired = reagentSlotSchematic.required and true or false
-
-        if isRequired and reagentSlotSchematic.reagents and #reagentSlotSchematic.reagents > 0 then
-            local reagent = reagentSlotSchematic.reagents[1]
-            local reagentName = GetReagentName(owner, reagent)
-            local quantityRequired = GetSlotQuantityRequired(reagentSlotSchematic, reagent)
-
-            if reagentName and quantityRequired and quantityRequired > 0 then
-                local reagentKey
-                if reagent.itemID then
-                    reagentKey = "item:" .. reagent.itemID
-                elseif reagent.currencyID then
-                    reagentKey = "currency:" .. reagent.currencyID
-                else
-                    reagentKey = "name:" .. reagentName
-                end
-
-                if not reagentTotals[reagentKey] then
-                    reagentTotals[reagentKey] = {
-                        name = reagentName,
-                        required = 0,
-                        owned = GetReagentOwnedCount(reagent),
-                    }
-                end
-
-                reagentTotals[reagentKey].required = reagentTotals[reagentKey].required + quantityRequired
-            end
-        elseif isRequired and reagentSlotSchematic.slotInfo and reagentSlotSchematic.slotInfo.slotText then
-            local slotText = reagentSlotSchematic.slotInfo.slotText
-            local quantityRequired = reagentSlotSchematic.quantityRequired or 1
-            objectives[#objectives + 1] = {
-                text = slotText,
-                finished = false,
-                numFulfilled = 0,
-                numRequired = quantityRequired,
-            }
-        end
-    end
-
-    for _, data in pairs(reagentTotals) do
-        objectives[#objectives + 1] = {
-            text = data.name,
-            finished = data.owned >= data.required,
-            numFulfilled = data.owned,
-            numRequired = data.required,
-        }
-    end
-
-    table.sort(objectives, SortObjectiveByText)
-
-    return objectives
-end
-
-local function AddTrackedRecipes(owner, trackables, db, isRecraft)
-    local trackedRecipes = C_TradeSkillUI.GetRecipesTracked(isRecraft) or {}
-
-    for _, recipeID in ipairs(trackedRecipes) do
-        local schematic = C_TradeSkillUI.GetRecipeSchematic(recipeID, isRecraft)
-        if schematic then
-            local professionInfo = C_TradeSkillUI.GetProfessionInfoByRecipeID(recipeID)
-            local professionName = professionInfo and professionInfo.professionName or "Professions"
-            local objectives = BuildRecipeObjectives(owner, schematic)
-
-            trackables[#trackables + 1] = {
-                type = "profession",
-                id = recipeID,
-                title = schematic.name,
-                level = 0,
-                zone = professionName,
-                isRecraft = isRecraft,
-                objectives = objectives,
-                color = db.professionColor
-            }
-        end
-    end
-end
-
 -- Collect profession tracking
 function addon:CollectProfessionTracking(trackables)
     self._professionReagentNameCache = self._professionReagentNameCache or {}
+    local reagentNameCache = self._professionReagentNameCache
     local db = self.db
 
-    AddTrackedRecipes(self, trackables, db, false)
-    AddTrackedRecipes(self, trackables, db, true)
+    local function GetReagentName(reagent)
+        if not reagent then return nil end
+
+        if reagent.name and reagent.name ~= "" then
+            return reagent.name
+        end
+        if reagent.itemName and reagent.itemName ~= "" then
+            return reagent.itemName
+        end
+        if reagent.slotText and reagent.slotText ~= "" then
+            return reagent.slotText
+        end
+
+        if reagent.itemID then
+            local cachedName = reagentNameCache[reagent.itemID]
+            if cachedName and cachedName ~= "" then
+                return cachedName
+            end
+
+            local itemName
+
+            local getItemNameByID = C_Item and C_Item.GetItemNameByID
+            if getItemNameByID then
+                local ok, resolvedName = pcall(getItemNameByID, reagent.itemID)
+                if ok and resolvedName and resolvedName ~= "" then
+                    itemName = resolvedName
+                end
+            end
+
+            if not itemName then
+                local resolvedName = GetItemInfo(reagent.itemID)
+                if resolvedName and resolvedName ~= "" then
+                    itemName = resolvedName
+                end
+            end
+
+            if not itemName then
+                local hyperlink = reagent.hyperlink or reagent.itemLink
+                if hyperlink then
+                    local linkName = hyperlink:match("%[(.+)%]")
+                    if linkName and linkName ~= "" then
+                        itemName = linkName
+                    end
+                end
+            end
+
+            if itemName and itemName ~= "" then
+                reagentNameCache[reagent.itemID] = itemName
+                return itemName
+            end
+
+            if C_Item and C_Item.RequestLoadItemDataByID then
+                pcall(C_Item.RequestLoadItemDataByID, reagent.itemID)
+            end
+
+            return "Item " .. tostring(reagent.itemID)
+        end
+
+        if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+            local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
+            if currencyInfo and currencyInfo.name and currencyInfo.name ~= "" then
+                return currencyInfo.name
+            end
+            return "Currency " .. tostring(reagent.currencyID)
+        end
+
+        if reagent.name and reagent.name ~= "" then
+            return reagent.name
+        end
+
+        return nil
+    end
+
+    local function GetReagentOwnedCount(reagent)
+        if not reagent then return 0 end
+
+        if reagent.itemID then
+            local itemID = reagent.itemID
+
+            -- Prefer modern API path which can include Warbank counts.
+            if C_Item and C_Item.GetItemCount then
+                -- Compute total from known-good combinations used by other addons:
+                -- bags + (bank - bags) + (warbank - bags)
+                local okBag, bagQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, false)
+                local okWarbank, bagAndWarbankQuantity = pcall(C_Item.GetItemCount, itemID, false, false, false, true)
+                local okBank, bagAndBankQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, false)
+
+                if okBag and okWarbank and okBank then
+                    bagQuantity = bagQuantity or 0
+                    bagAndWarbankQuantity = bagAndWarbankQuantity or 0
+                    bagAndBankQuantity = bagAndBankQuantity or 0
+
+                    local warbankQuantity = max(0, bagAndWarbankQuantity - bagQuantity)
+                    local bankQuantity = max(0, bagAndBankQuantity - bagQuantity)
+
+                    return bagQuantity + bankQuantity + warbankQuantity
+                end
+
+                -- Fallback: try direct full include call where supported.
+                local okTotal, totalQuantity = pcall(C_Item.GetItemCount, itemID, true, false, true, true)
+                if okTotal and totalQuantity then
+                    return totalQuantity
+                end
+            end
+
+            -- Legacy fallback.
+            local okLegacy, legacyQuantity = pcall(GetItemCount, itemID, true, false, true, true)
+            if okLegacy and legacyQuantity then
+                return legacyQuantity
+            end
+
+            return GetItemCount(itemID) or 0
+        end
+
+        if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+            local currencyInfo = C_CurrencyInfo.GetCurrencyInfo(reagent.currencyID)
+            return (currencyInfo and currencyInfo.quantity) or 0
+        end
+
+        return 0
+    end
+
+    local function GetSlotQuantityRequired(reagentSlotSchematic, reagent)
+        if reagentSlotSchematic and reagentSlotSchematic.GetQuantityRequired and reagent then
+            local ok, quantity = pcall(function()
+                return reagentSlotSchematic:GetQuantityRequired(reagent)
+            end)
+            if ok and quantity then
+                return quantity
+            end
+        end
+
+        return (reagentSlotSchematic and reagentSlotSchematic.quantityRequired) or 1
+    end
+
+    local function BuildRecipeObjectives(schematic)
+        local objectives = {}
+        local reagentTotals = {}
+
+        if not schematic or not schematic.reagentSlotSchematics then
+            return objectives
+        end
+
+        for _, reagentSlotSchematic in ipairs(schematic.reagentSlotSchematics) do
+            local isRequired = reagentSlotSchematic.required and true or false
+
+            if isRequired and reagentSlotSchematic.reagents and #reagentSlotSchematic.reagents > 0 then
+                local reagent = reagentSlotSchematic.reagents[1]
+                local reagentName = GetReagentName(reagent)
+                local quantityRequired = GetSlotQuantityRequired(reagentSlotSchematic, reagent)
+
+                if reagentName and quantityRequired and quantityRequired > 0 then
+                    local reagentKey
+                    if reagent.itemID then
+                        reagentKey = "item:" .. reagent.itemID
+                    elseif reagent.currencyID then
+                        reagentKey = "currency:" .. reagent.currencyID
+                    else
+                        reagentKey = "name:" .. reagentName
+                    end
+
+                    if not reagentTotals[reagentKey] then
+                        reagentTotals[reagentKey] = {
+                            name = reagentName,
+                            required = 0,
+                            owned = GetReagentOwnedCount(reagent),
+                        }
+                    end
+
+                    reagentTotals[reagentKey].required = reagentTotals[reagentKey].required + quantityRequired
+                end
+            elseif isRequired and reagentSlotSchematic.slotInfo and reagentSlotSchematic.slotInfo.slotText then
+                local slotText = reagentSlotSchematic.slotInfo.slotText
+                local quantityRequired = reagentSlotSchematic.quantityRequired or 1
+                objectives[#objectives + 1] = {
+                    text = slotText,
+                    finished = false,
+                    numFulfilled = 0,
+                    numRequired = quantityRequired,
+                }
+            end
+        end
+
+        for _, data in pairs(reagentTotals) do
+            objectives[#objectives + 1] = {
+                text = data.name,
+                finished = data.owned >= data.required,
+                numFulfilled = data.owned,
+                numRequired = data.required,
+            }
+        end
+
+        table.sort(objectives, function(a, b)
+            return (a.text or "") < (b.text or "")
+        end)
+
+        return objectives
+    end
+
+    -- Helper to add recipes
+    local function AddRecipes(isRecraft)
+        local trackedRecipes = C_TradeSkillUI.GetRecipesTracked(isRecraft) or {}
+        
+        for _, recipeID in ipairs(trackedRecipes) do
+            local schematic = C_TradeSkillUI.GetRecipeSchematic(recipeID, isRecraft)
+            if schematic then
+                local professionInfo = C_TradeSkillUI.GetProfessionInfoByRecipeID(recipeID)
+                local professionName = professionInfo and professionInfo.professionName or "Professions"
+                local objectives = BuildRecipeObjectives(schematic)
+                
+                trackables[#trackables + 1] = {
+                    type = "profession",
+                    id = recipeID,
+                    title = schematic.name,
+                    level = 0, -- Recipes don't really have levels like quests
+                    zone = professionName,
+                    isRecraft = isRecraft,
+                    objectives = objectives,
+                    color = db.professionColor
+                }
+            end
+        end
+    end
+
+    AddRecipes(false)
+    AddRecipes(true)
 end
 
 -- Collect monthly activities (Trading Post / Perks Program)

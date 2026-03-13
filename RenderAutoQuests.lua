@@ -11,10 +11,29 @@ function addon:RenderAutoQuestSection(autoQuests)
     local completedQuestFrame = self.completedQuestFrame
     local autoQuestFrame = self.autoQuestFrame
     local autoQuestTracker = AutoQuestPopUpTracker
+    local noHijackContext = addon.IsNoHijackContext and addon:IsNoHijackContext()
 
     -- We do not use the old autoQuestFrame logic anymore, but keep it hidden
     autoQuestFrame:SetHeight(1)
     autoQuestFrame:Hide()
+
+    if noHijackContext then
+        self._stolenPopups = self._stolenPopups or {}
+        for popup, _ in pairs(self._stolenPopups) do
+            pcall(function()
+                if popup._trackerPlusOriginalParent then
+                    popup:SetParent(popup._trackerPlusOriginalParent)
+                    popup:ClearAllPoints()
+                    popup:SetPoint("TOPLEFT", popup._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
+                    popup._trackerPlusOriginalParent = nil
+                end
+            end)
+        end
+        wipe(self._stolenPopups)
+        completedQuestFrame:SetHeight(1)
+        completedQuestFrame:Hide()
+        return
+    end
 
     local stolenPopups = {}
 

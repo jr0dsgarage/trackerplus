@@ -20,6 +20,7 @@ function addon:RenderWorldQuestSection(worldQuestItems)
     local wqYOffset = 0
     local wqFrame = self.worldQuestFrame
     local hasBlizzardWQContent = false
+    local noHijackContext = addon.IsNoHijackContext and addon:IsNoHijackContext()
 
     -- Hijacking Strategy for World Quests
     local wqTracker = WorldQuestObjectiveTracker
@@ -33,7 +34,7 @@ function addon:RenderWorldQuestSection(worldQuestItems)
         end
     end
 
-    local useBlizzardWQ = (not addon.disableBlizzardTrackerHijack) and hasAnyTrackedWQ and (wqTracker and wqTracker.ContentsFrame) and (#worldQuestItems == 0)
+    local useBlizzardWQ = (not addon.disableBlizzardTrackerHijack) and (not noHijackContext) and hasAnyTrackedWQ and (wqTracker and wqTracker.ContentsFrame) and (#worldQuestItems == 0)
     local preferManualWQ = (#worldQuestItems > 0)
     if preferManualWQ then
         useBlizzardWQ = false
