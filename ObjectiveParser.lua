@@ -28,10 +28,14 @@ end
 -- ParseObjectiveDisplay  (exposed as addon.ParseObjectiveDisplay)
 -------------------------------------------------------------------------------
 function addon.ParseObjectiveDisplay(item, obj, objIndex)
-    local cacheKey = GetObjectiveParseKey(item, obj, objIndex)
-    local cached = objectiveParseCache[cacheKey]
-    if cached then
-        return cached
+    local useCache = (obj and obj.type ~= "progressbar")
+    local cacheKey
+    if useCache then
+        cacheKey = GetObjectiveParseKey(item, obj, objIndex)
+        local cached = objectiveParseCache[cacheKey]
+        if cached then
+            return cached
+        end
     end
 
     local parsed = {
@@ -150,11 +154,13 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
         parsed.bodyText = " "
     end
 
-    objectiveParseCache[cacheKey] = parsed
-    objectiveParseCacheCount = objectiveParseCacheCount + 1
-    if objectiveParseCacheCount > 2000 then
-        wipe(objectiveParseCache)
-        objectiveParseCacheCount = 0
+    if useCache then
+        objectiveParseCache[cacheKey] = parsed
+        objectiveParseCacheCount = objectiveParseCacheCount + 1
+        if objectiveParseCacheCount > 2000 then
+            wipe(objectiveParseCache)
+            objectiveParseCacheCount = 0
+        end
     end
 
     return parsed
