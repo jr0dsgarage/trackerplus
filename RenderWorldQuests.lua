@@ -35,6 +35,9 @@ function addon:RenderWorldQuestSection(worldQuestItems)
     end
 
     local useBlizzardWQ = (not addon.disableBlizzardTrackerHijack) and (not noHijackContext) and hasAnyTrackedWQ and (wqTracker and wqTracker.ContentsFrame) and (#worldQuestItems == 0)
+    if useBlizzardWQ and addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(wqTracker) then
+        useBlizzardWQ = false
+    end
     local preferManualWQ = (#worldQuestItems > 0)
     if preferManualWQ then
         useBlizzardWQ = false

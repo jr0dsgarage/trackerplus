@@ -62,7 +62,9 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     if button.progressBars then
         local arr = button.progressBars
-        for i = 1, #arr do arr[i]:Hide() end
+        for _, frame in pairs(arr) do
+            if frame then frame:Hide() end
+        end
     end
 
     button:Show()

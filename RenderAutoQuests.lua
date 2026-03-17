@@ -12,16 +12,17 @@ function addon:RenderAutoQuestSection(autoQuests)
     local autoQuestFrame = self.autoQuestFrame
     local autoQuestTracker = AutoQuestPopUpTracker
     local noHijackContext = addon.IsNoHijackContext and addon:IsNoHijackContext()
+    local disableHijack = addon.disableBlizzardTrackerHijack or noHijackContext
 
     -- We do not use the old autoQuestFrame logic anymore, but keep it hidden
     autoQuestFrame:SetHeight(1)
     autoQuestFrame:Hide()
 
-    if noHijackContext then
+    if disableHijack then
         self._stolenPopups = self._stolenPopups or {}
         for popup, _ in pairs(self._stolenPopups) do
             pcall(function()
-                if popup._trackerPlusOriginalParent then
+                if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
                     popup:SetParent(popup._trackerPlusOriginalParent)
                     popup:ClearAllPoints()
                     popup:SetPoint("TOPLEFT", popup._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
@@ -30,8 +31,28 @@ function addon:RenderAutoQuestSection(autoQuests)
             end)
         end
         wipe(self._stolenPopups)
-        completedQuestFrame:SetHeight(1)
-        completedQuestFrame:Hide()
+
+        if #autoQuests > 0 then
+            local yOff = 5
+            local indent = (self.db.spacingMinorHeaderIndent or 5) + 10
+            local itemSpacing = self.db.spacingItemVertical or 4
+
+            for _, item in ipairs(autoQuests) do
+                local h = self:RenderTrackableItem(completedQuestFrame, item, yOff, indent)
+                yOff = yOff + h + itemSpacing
+            end
+
+            completedQuestFrame:SetHeight(yOff + 5)
+            if addon.db.minimized then
+                completedQuestFrame:Hide()
+            else
+                completedQuestFrame:Show()
+            end
+        else
+            completedQuestFrame:SetHeight(1)
+            completedQuestFrame:Hide()
+        end
+
         return
     end
 
@@ -66,12 +87,12 @@ function addon:RenderAutoQuestSection(autoQuests)
         end
         if not stillActive then
             pcall(function()
-                if stolenFrame._trackerPlusOriginalParent then
+                if stolenFrame._trackerPlusOriginalParent and not (stolenFrame.IsProtected and stolenFrame:IsProtected()) then
                     stolenFrame:SetParent(stolenFrame._trackerPlusOriginalParent)
                     stolenFrame:ClearAllPoints()
                     stolenFrame:SetPoint("TOPLEFT", stolenFrame._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
                     stolenFrame._trackerPlusOriginalParent = nil
-                elseif autoQuestTracker and stolenFrame == autoQuestTracker.ContentsFrame then
+                elseif autoQuestTracker and stolenFrame == autoQuestTracker.ContentsFrame and not (stolenFrame.IsProtected and stolenFrame:IsProtected()) then
                     stolenFrame:SetParent(autoQuestTracker)
                     stolenFrame:ClearAllPoints()
                     stolenFrame:SetPoint("TOPLEFT", autoQuestTracker, "TOPLEFT", 0, 0)
@@ -88,6 +109,9 @@ function addon:RenderAutoQuestSection(autoQuests)
 
         for _, popup in ipairs(stolenPopups) do
             pcall(function()
+                if popup.IsProtected and popup:IsProtected() then
+                    return
+                end
                 if popup:GetParent() ~= completedQuestFrame then
                     -- Save original parent so we can restore it easily, handle both legacy and modern
                     popup._trackerPlusOriginalParent = popup._trackerPlusOriginalParent or popup:GetParent()
@@ -184,7 +208,7 @@ function addon:RenderAutoQuestSection(autoQuests)
         -- If no popups, ensure we restore anything we had
         for popup, _ in pairs(self._stolenPopups) do
             pcall(function()
-                if popup._trackerPlusOriginalParent then
+                if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
                     popup:SetParent(popup._trackerPlusOriginalParent)
                     popup:ClearAllPoints()
                     popup:SetPoint("TOPLEFT", popup._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
@@ -203,7 +227,7 @@ function addon:RenderAutoQuestSection(autoQuests)
     -- Legacy safety cleanup
     if QuestObjectiveTracker and QuestObjectiveTracker.ContentsFrame then
         local questContents = QuestObjectiveTracker.ContentsFrame
-        if questContents:GetParent() == autoQuestFrame then
+        if questContents:GetParent() == autoQuestFrame and not (questContents.IsProtected and questContents:IsProtected()) then
             pcall(function()
                 questContents:SetParent(QuestObjectiveTracker)
                 questContents:ClearAllPoints()

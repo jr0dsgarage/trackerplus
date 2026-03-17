@@ -24,6 +24,9 @@ function addon:RenderBonusSection(bonusObjectives)
     -- Strategy: Hijack Blizzard's BonusObjectiveTracker frame if it exists and has content
     local bonusTracker = BonusObjectiveTracker
     local useBlizzardBonus = (not addon.disableBlizzardTrackerHijack) and (not noHijackContext) and (bonusTracker and bonusTracker.ContentsFrame and not preferManualBonus)
+    if useBlizzardBonus and addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(bonusTracker) then
+        useBlizzardBonus = false
+    end
 
     if useBlizzardBonus then
          local contents = bonusTracker.ContentsFrame

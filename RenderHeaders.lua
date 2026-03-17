@@ -69,12 +69,14 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             -- Compatibility: Auctionator Crafting Search Button
             if isMajor and item.key == "MAJOR_profession" then
                 if AuctionatorCraftingInfoObjectiveTrackerFrame then
-                     AuctionatorCraftingInfoObjectiveTrackerFrame:SetParent(header)
-                     AuctionatorCraftingInfoObjectiveTrackerFrame:ClearAllPoints()
-                     AuctionatorCraftingInfoObjectiveTrackerFrame:SetPoint("TOPRIGHT", header, "TOPRIGHT", -10, 0)
-                     AuctionatorCraftingInfoObjectiveTrackerFrame:SetFrameLevel(header:GetFrameLevel() + 5)
-                     -- Force show if it was hidden by parent hiding
-                     AuctionatorCraftingInfoObjectiveTrackerFrame:Show()
+                     if not (AuctionatorCraftingInfoObjectiveTrackerFrame.IsProtected and AuctionatorCraftingInfoObjectiveTrackerFrame:IsProtected()) then
+                         AuctionatorCraftingInfoObjectiveTrackerFrame:SetParent(header)
+                         AuctionatorCraftingInfoObjectiveTrackerFrame:ClearAllPoints()
+                         AuctionatorCraftingInfoObjectiveTrackerFrame:SetPoint("TOPRIGHT", header, "TOPRIGHT", -10, 0)
+                         AuctionatorCraftingInfoObjectiveTrackerFrame:SetFrameLevel(header:GetFrameLevel() + 5)
+                         -- Force show if it was hidden by parent hiding
+                         AuctionatorCraftingInfoObjectiveTrackerFrame:Show()
+                     end
                 end
             end
             

@@ -251,7 +251,9 @@ function addon:GetOrCreateButton(parent)
     -- Nuclear option: Ensure any lingering children like ProgressBars are hidden
     if btn.progressBars then
         local arr = btn.progressBars
-        for i = 1, #arr do arr[i]:Hide() end
+        for _, frame in pairs(arr) do
+            if frame then frame:Hide() end
+        end
     end
     if btn.objectives then
         local arr = btn.objectives

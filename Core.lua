@@ -78,6 +78,25 @@ function addon:IsNoHijackContext()
     return instanceType == "pvp" or instanceType == "arena"
 end
 
+function addon:IsUnsafeHijackFrame(frame)
+    if not frame then return true end
+
+    -- Secure frames must never be reparented by addon code.
+    if frame.IsProtected and frame:IsProtected() then
+        return true
+    end
+
+    -- Only block the specific world-content trackers confirmed to cause
+    -- LayoutFrame/MoneyFrame taint via the world map and quest tooltip pipeline.
+    -- Scenario and delve trackers are instance-scoped and safe to reparent.
+    local name = frame.GetName and frame:GetName() or ""
+    if name == "WorldQuestObjectiveTracker" or name == "BonusObjectiveTracker" then
+        return true
+    end
+
+    return false
+end
+
 function addon:IsAnyScenarioTrackerActive()
     if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
         return true
@@ -117,7 +136,9 @@ addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()
     if not self._sharedTooltip then
-        self._sharedTooltip = CreateFrame("GameTooltip", "TrackerPlusTooltip", UIParent, "GameTooltipTemplate")
+        -- Keep this tooltip anonymous so we don't create global named money-frame
+        -- children that can interact with Blizzard tooltip internals.
+        self._sharedTooltip = CreateFrame("GameTooltip", nil, UIParent, "GameTooltipTemplate")
         self._sharedTooltip:SetFrameStrata("TOOLTIP")
         self._sharedTooltip:SetClampedToScreen(true)
     end
@@ -176,8 +197,10 @@ end
 function addon:RestoreAllHijackedFrames()
     if InCombatLockdown() then return end
     if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.hostFrame then
-        addon.scenarioFrame.hostFrame:SetParent(addon.scenarioHostOriginalParent)
-        addon.scenarioFrame.hostFrame:ClearAllPoints()
+        if not (addon.scenarioFrame.hostFrame.IsProtected and addon.scenarioFrame.hostFrame:IsProtected()) then
+            addon.scenarioFrame.hostFrame:SetParent(addon.scenarioHostOriginalParent)
+            addon.scenarioFrame.hostFrame:ClearAllPoints()
+        end
     end
 end
 

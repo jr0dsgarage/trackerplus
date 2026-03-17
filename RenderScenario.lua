@@ -38,6 +38,9 @@ function addon:RenderScenarioSection()
 
     local isScenarioActive = isInScenario or hasManualScenarioData
     local useBlizzardScenario = not addon.disableBlizzardTrackerHijack and (not noHijackContext) and isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame
+    if useBlizzardScenario and addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(scenarioTracker) then
+        useBlizzardScenario = false
+    end
     
     addon:LogAt("trace", "[SCENARIO] isScenarioActive=%s, disableHijack=%s, tracker=%s, useBlizzardScenario=%s", tostring(isScenarioActive), tostring(addon.disableBlizzardTrackerHijack), tostring(scenarioTracker and scenarioTracker:GetName()), tostring(useBlizzardScenario))
 

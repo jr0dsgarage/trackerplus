@@ -234,9 +234,9 @@ function addon:CreateTrackerFrame()
     local shadowLevel = 100
 
     local scrollShadowTop = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, 0)
-    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, 0)
-    scrollShadowTop:SetHeight(100)
+    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, 4)
+    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, 4)
+    scrollShadowTop:SetHeight(50)
     scrollShadowTop:SetFrameLevel(shadowLevel)
     scrollShadowTop:EnableMouse(false)
     scrollShadowTop:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity
@@ -247,9 +247,9 @@ function addon:CreateTrackerFrame()
     self.scrollShadowTop = scrollShadowTop
 
     local scrollShadowBottom = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, 0)
-    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, 0)
-    scrollShadowBottom:SetHeight(100)
+    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, 4)
+    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, 4)
+    scrollShadowBottom:SetHeight(50)
     scrollShadowBottom:SetFrameLevel(shadowLevel)
     scrollShadowBottom:EnableMouse(false)
     scrollShadowBottom:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity

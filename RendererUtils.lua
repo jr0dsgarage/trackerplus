@@ -55,6 +55,9 @@ end
 
 function addon.EnsureHijackedParent(owner, frame, targetParent, originalParentKey, strata, frameLevel)
     if not frame or not targetParent then return end
+    if addon.disableBlizzardTrackerHijack then return end
+    if frame.IsProtected and frame:IsProtected() then return end
+    if addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(frame) then return end
     if InCombatLockdown() then return end
     if frame:GetParent() ~= targetParent then
         owner[originalParentKey] = frame:GetParent() or owner[originalParentKey]
@@ -66,6 +69,7 @@ end
 
 function addon.RestoreHijackedParent(owner, frame, hijackParent, fallbackParent, originalParentKey)
     if not frame then return end
+    if frame.IsProtected and frame:IsProtected() then return end
     if InCombatLockdown() then return end
     if frame:GetParent() == hijackParent then
         frame:SetParent(owner[originalParentKey] or fallbackParent)
