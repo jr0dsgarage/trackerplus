@@ -100,6 +100,14 @@ function addon:UpdateTrackerDisplay(trackables)
                 if sharedItemData then
                     item.item = sharedItemData
                 end
+
+                -- Active Quest renders before the regular quest list, so resolve
+                -- quest-item data here rather than waiting for later row renders.
+                local resolvedItemData = addon.ResolveTrackableItemData and addon.ResolveTrackableItemData(item)
+                if resolvedItemData then
+                    item.item = resolvedItemData
+                    questItemDataByID[item.id] = resolvedItemData
+                end
             end
         end
     end
@@ -229,10 +237,17 @@ function addon:ShowTrackableTooltip(button, trackable)
             tooltip:AddLine(trackable.zone, 0.5, 0.8, 1)
         end
 
+        -- Add quest short description — fetched fresh on each hover so it never goes stale
+        local shortDesc = addon:GetQuestShortDescription(trackable.id, trackable.logIndex)
+        if shortDesc and shortDesc ~= "" then
+            tooltip:AddLine(" ")
+            tooltip:AddLine(shortDesc, 0.9, 0.9, 0.9, true)
+        end
+
         if trackable.objectives and #trackable.objectives > 0 then
             tooltip:AddLine(" ")
             for i, objective in ipairs(trackable.objectives) do
-                if i > 8 then
+                if i > 5 then
                     break
                 end
                 local text = objective and objective.text

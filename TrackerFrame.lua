@@ -10,6 +10,8 @@ local contentFrame = nil
 local completedQuestFrame = nil
 
 local SHADOW_FADE_DISTANCE = 100
+local SHADOW_SEAM_OFFSET = 1
+local SHADOW_BOTTOM_EXTRA_DROP = 3
 
 
 -- Update scroll shadow opacity based on scroll position.
@@ -234,8 +236,8 @@ function addon:CreateTrackerFrame()
     local shadowLevel = 100
 
     local scrollShadowTop = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, 4)
-    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, 4)
+    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, SHADOW_SEAM_OFFSET)
+    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, SHADOW_SEAM_OFFSET)
     scrollShadowTop:SetHeight(50)
     scrollShadowTop:SetFrameLevel(shadowLevel)
     scrollShadowTop:EnableMouse(false)
@@ -247,8 +249,8 @@ function addon:CreateTrackerFrame()
     self.scrollShadowTop = scrollShadowTop
 
     local scrollShadowBottom = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, 4)
-    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, 4)
+    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP)
+    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP)
     scrollShadowBottom:SetHeight(50)
     scrollShadowBottom:SetFrameLevel(shadowLevel)
     scrollShadowBottom:EnableMouse(false)

@@ -172,28 +172,33 @@ end
 function addon.ResolveTrackableItemData(item)
     if not item then return nil end
 
-    local itemData = item.item
-    if itemData and (itemData.link or itemData.texture) then
-        return itemData
-    end
-
+    -- Always re-resolve logIndex from questID to guard against stale indices
+    -- caused by quest log reordering (quest accept/abandon/complete since last collect).
     local logIndex = item.logIndex
-    if (not logIndex or logIndex <= 0) and item.id and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        logIndex = C_QuestLog.GetLogIndexForQuestID(item.id)
-        if logIndex and logIndex > 0 then
-            item.logIndex = logIndex
+    local questID = item.id or item.questID
+    if questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        local freshIndex = C_QuestLog.GetLogIndexForQuestID(questID)
+        if freshIndex and freshIndex > 0 then
+            logIndex = freshIndex
+            item.logIndex = freshIndex
         end
     end
 
+    -- Re-fetch from the API to catch cases where data wasn't loaded at collection time.
     if logIndex and logIndex > 0 then
         local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
         if itemLink or itemTexture then
-            itemData = itemData or {}
+            local itemData = item.item or {}
             itemData.link = itemLink or itemData.link
             itemData.texture = itemTexture or itemData.texture
             item.item = itemData
         end
     end
 
-    return item.item
+    local itemData = item.item
+    if itemData and (itemData.link or itemData.texture) then
+        return itemData
+    end
+
+    return nil
 end

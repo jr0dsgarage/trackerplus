@@ -136,11 +136,107 @@ addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()
     if not self._sharedTooltip then
-        -- Keep this tooltip anonymous so we don't create global named money-frame
-        -- children that can interact with Blizzard tooltip internals.
-        self._sharedTooltip = CreateFrame("GameTooltip", nil, UIParent, "GameTooltipTemplate")
-        self._sharedTooltip:SetFrameStrata("TOOLTIP")
-        self._sharedTooltip:SetClampedToScreen(true)
+        local tooltip = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        tooltip:SetFrameStrata("TOOLTIP")
+        tooltip:SetClampedToScreen(true)
+        tooltip:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true,
+            tileSize = 16,
+            edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        tooltip:SetBackdropColor(0.08, 0.08, 0.1, 0.96)
+        tooltip:SetBackdropBorderColor(0.7, 0.7, 0.75, 1)
+        tooltip:SetSize(260, 32)
+        tooltip:Hide()
+
+        tooltip._lines = {}
+        tooltip._lineCount = 0
+        tooltip._maxTextWidth = 200
+        tooltip._padX = 8
+        tooltip._padY = 8
+        tooltip._lineSpacing = 2
+
+        function tooltip:ClearLines()
+            for _, line in ipairs(self._lines) do
+                line:Hide()
+                line:SetText("")
+            end
+            self._lineCount = 0
+        end
+
+        function tooltip:_AcquireLine(index)
+            local line = self._lines[index]
+            if line then return line end
+
+            line = self:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            line:SetJustifyH("LEFT")
+            line:SetJustifyV("TOP")
+            line:SetWordWrap(true)
+            line:SetWidth(self._maxTextWidth)
+            self._lines[index] = line
+            return line
+        end
+
+        function tooltip:_Layout()
+            local width = self._maxTextWidth + (self._padX * 2)
+            local totalHeight = self._padY
+
+            for i = 1, self._lineCount do
+                local line = self._lines[i]
+                line:ClearAllPoints()
+                line:SetPoint("TOPLEFT", self, "TOPLEFT", self._padX, -totalHeight)
+                line:SetWidth(self._maxTextWidth)
+
+                local h = line:GetStringHeight() or 0
+                if h < 12 then h = 12 end
+                totalHeight = totalHeight + h
+                if i < self._lineCount then
+                    totalHeight = totalHeight + self._lineSpacing
+                end
+            end
+
+            totalHeight = totalHeight + self._padY
+            self:SetSize(width, totalHeight)
+        end
+
+        function tooltip:SetOwner(owner, anchor)
+            self._owner = owner
+            self._anchor = anchor or "ANCHOR_RIGHT"
+
+            self:ClearAllPoints()
+            -- Position above mouse cursor to avoid blocking text below
+            local x, y = GetCursorPosition()
+            local scale = UIParent:GetScale()
+            x = x / scale
+            y = y / scale
+            
+            self:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", x, y + 32)
+        end
+
+        function tooltip:SetText(text, r, g, b)
+            self:ClearLines()
+            self:AddLine(text, r or 1, g or 0.82, b or 0, true)
+        end
+
+        function tooltip:AddLine(text, r, g, b, wrap)
+            if text == nil then return end
+            self._lineCount = self._lineCount + 1
+            local line = self:_AcquireLine(self._lineCount)
+            line:SetText(tostring(text))
+            line:SetTextColor(r or 1, g or 1, b or 1)
+            line:SetWordWrap(wrap ~= false)
+            line:Show()
+            self:_Layout()
+        end
+
+        tooltip:HookScript("OnHide", function(self)
+            self:ClearLines()
+        end)
+
+        self._sharedTooltip = tooltip
     end
     return self._sharedTooltip
 end
@@ -341,6 +437,7 @@ function addon:OnEvent(event, ...)
             or event == "QUEST_REMOVED"
             or event == "QUEST_WATCH_LIST_CHANGED"
             or event == "QUEST_LOG_UPDATE"
+            or event == "GET_ITEM_INFO_RECEIVED"
             or event == "QUEST_TURNED_IN"
             or event == "UNIT_QUEST_LOG_CHANGED"
             or event == "SUPER_TRACKING_CHANGED"
@@ -370,7 +467,6 @@ function addon:OnEvent(event, ...)
             or event == "TRADE_SKILL_SHOW"
             or event == "TRADE_SKILL_LIST_UPDATE"
             or event == "TRACKED_RECIPE_UPDATE"
-            or event == "GET_ITEM_INFO_RECEIVED"
             or event == "ITEM_COUNT_CHANGED"
             or event == "BAG_UPDATE_DELAYED"
             or event == "CURRENCY_DISPLAY_UPDATE"
@@ -675,7 +771,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
 
     -- Get Quest Item Info
     local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
-    if itemLink then
+    if itemLink or itemTexture then
         questInfo.item = {
             link = itemLink,
             texture = itemTexture,
@@ -745,6 +841,53 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     end
     
     return questInfo
+end
+
+function addon:GetQuestShortDescription(questID, logIndex)
+    local function NormalizeDescription(desc)
+        if not desc or desc == "" then return nil end
+        if #desc > 220 then
+            desc = desc:sub(1, 220) .. "..."
+        end
+        return desc
+    end
+
+    -- Resolve the effective quest log index first.
+    local idx = logIndex
+    if (not idx or idx <= 0) and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        idx = C_QuestLog.GetLogIndexForQuestID(questID)
+    end
+    if not idx or idx <= 0 then
+        return nil
+    end
+
+    -- Prefer structured description if exposed on quest info.
+    if C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = pcall(C_QuestLog.GetInfo, idx)
+        if ok and type(info) == "table" then
+            local desc = NormalizeDescription(info.logDescription or info.questDescription or info.description)
+            if desc then return desc end
+        end
+    end
+
+    -- Prefer index-based quest text API (quest-specific, no selected-quest bleed).
+    if C_QuestLog and C_QuestLog.GetQuestLogQuestText then
+        local ok, desc = pcall(C_QuestLog.GetQuestLogQuestText, idx)
+        if ok then
+            desc = NormalizeDescription(desc)
+            if desc then return desc end
+        end
+    end
+
+    if GetQuestLogQuestText then
+        local ok, desc = pcall(GetQuestLogQuestText, idx)
+        if ok then
+            desc = NormalizeDescription(desc)
+            if desc then return desc end
+        end
+    end
+
+    return nil
 end
 
 -- Collect tracked quests
