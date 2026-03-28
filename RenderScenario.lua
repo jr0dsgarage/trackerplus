@@ -8,25 +8,77 @@ local max, floor = math.max, math.floor
 local bit_band = bit.band
 
 -- Local aliases for addon utilities
-local GetScenarioTrackerSource = function() return addon.GetScenarioTrackerSource() end
-local EnsureFrameVisible = function(...) return addon.EnsureFrameVisible(...) end
-local EnsureHijackedParent = function(...) return addon.EnsureHijackedParent(...) end
-local RestoreHijackedParent = function(...) return addon.RestoreHijackedParent(...) end
-local ResetAnchorState = function(...) return addon.ResetAnchorState(...) end
 local DebugLayout = function(...) return addon.DebugLayout(...) end
 
+local function EnsureBorrowedScenarioAnchor(owner, borrowedFrame)
+    local scenarioFrame = owner and owner.scenarioFrame
+    if not scenarioFrame or not borrowedFrame then return end
+
+    if not scenarioFrame._borrowAnchorEnforcerInstalled then
+        scenarioFrame:HookScript("OnUpdate", function(frame)
+            local borrowed = frame.borrowedFrame
+            if not borrowed or borrowed:GetParent() ~= frame then return end
+
+            local point, relativeTo, relativePoint, x, y = borrowed:GetPoint(1)
+            local needsReset = borrowed:GetNumPoints() ~= 1
+                or point ~= "TOPRIGHT"
+                or relativeTo ~= frame
+                or relativePoint ~= "TOPRIGHT"
+                or x ~= 0
+                or y ~= 0
+
+            if needsReset then
+                borrowed:ClearAllPoints()
+                borrowed:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+            end
+        end)
+        scenarioFrame._borrowAnchorEnforcerInstalled = true
+    end
+
+    borrowedFrame:ClearAllPoints()
+    borrowedFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
+end
+
 -------------------------------------------------------------------------------
--- RenderScenarioSection — Blizzard frame hijacking + manual fallback
+-- RenderScenarioSection — manual mirror rendering
 -- Returns: scenarioYOffset (total height consumed by scenario section)
 -------------------------------------------------------------------------------
 function addon:RenderScenarioSection()
     local db = self.db
-    local scenarioTracker = GetScenarioTrackerSource()
-    local isInScenario = (C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario()) or false
-    local noHijackContext = addon.IsNoHijackContext and addon:IsNoHijackContext()
-
-    local forceManualScenario = false
     local hasManualScenarioData = false
+    local scenarioTracker = nil
+    local scenarioTrackerName = nil
+    
+    -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons)
+    local candidates = {
+        "DelvesObjectiveTracker",
+        "DelveObjectiveTracker", 
+        "ScenarioObjectiveTracker",
+    }
+    for _, name in ipairs(candidates) do
+        local tracker = _G and _G[name]
+        if tracker and tracker.ContentsFrame then
+            local trackerShown = tracker:IsShown()
+            local contentsShown = tracker.ContentsFrame:IsShown()
+            local trackerAlpha = tracker.GetAlpha and tracker:GetAlpha() or -1
+            local contentsAlpha = tracker.ContentsFrame.GetAlpha and tracker.ContentsFrame:GetAlpha() or -1
+            local trackerHeight = tracker:GetHeight() or 0
+            local contentsHeight = tracker.ContentsFrame:GetHeight() or 0
+            local contentsChildren = tracker.ContentsFrame.GetNumChildren and tracker.ContentsFrame:GetNumChildren() or 0
+
+            if addon.LogAt then
+                addon:LogAt("trace", "[SCN-BORROW] candidate=%s shown=%s cShown=%s alpha=%.2f cAlpha=%.2f h=%.1f cH=%.1f cChildren=%d",
+                    tostring(name), tostring(trackerShown), tostring(contentsShown), trackerAlpha, contentsAlpha, trackerHeight, contentsHeight, contentsChildren)
+            end
+
+            if trackerShown and contentsShown then
+                scenarioTracker = tracker
+                scenarioTrackerName = name
+                break
+            end
+        end
+    end
+    
     if self.currentScenarios and #self.currentScenarios > 0 then
         for _, scenarioItem in ipairs(self.currentScenarios) do
             if not scenarioItem.isDummy then
@@ -36,284 +88,109 @@ function addon:RenderScenarioSection()
         end
     end
 
-    local isScenarioActive = isInScenario or hasManualScenarioData
-    local useBlizzardScenario = not addon.disableBlizzardTrackerHijack and (not noHijackContext) and isScenarioActive and scenarioTracker and scenarioTracker.ContentsFrame
-    if useBlizzardScenario and addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(scenarioTracker) then
-        useBlizzardScenario = false
-    end
-    
-    addon:LogAt("trace", "[SCENARIO] isScenarioActive=%s, disableHijack=%s, tracker=%s, useBlizzardScenario=%s", tostring(isScenarioActive), tostring(addon.disableBlizzardTrackerHijack), tostring(scenarioTracker and scenarioTracker:GetName()), tostring(useBlizzardScenario))
-
-    local scenarioHeight = 0
-    local scenarioYOffset = 0 -- Start at 0 relative to scenarioFrame
-
-        if useBlizzardScenario then
-            local scenarioBottomPadding = 24
-         -- We are using Blizzard's frame, so we hijack it.
-         local hostFrame = scenarioTracker
-         local contents = scenarioTracker.ContentsFrame
-         local hasScenarioContent = false
-         local rawHeight = 0
-         local widgetHeight = 0
-         local visibleChildren = 0
-         local maxVisibleChildHeight = 0
-
-            -- Reparent hostFrame into our scenarioFrame once.
-            -- After SetParent(), Blizzard's own tracker Update() loop will try to
-            -- re-anchor the frame back into ObjectiveTrackerFrame via SetPoint().
-            -- We lock the frame to fill scenarioFrame and hook SetPoint to swallow
-            -- any repositioning Blizzard attempts, so our layout is never overridden.
-            local wasHijacked = (hostFrame:GetParent() ~= self.scenarioFrame)
-            EnsureHijackedParent(self, hostFrame, self.scenarioFrame, "_scenarioOriginalParent", "HIGH", 100)
-
-            local RIGHT_INSET = 0  -- scenarioFrame's own 5px inset is sufficient
-
-            if wasHijacked then
-                -- Swallow any SetPoint calls Blizzard makes on this frame (e.g. from
-                -- DelvesObjectiveTracker:Update / ScenarioObjectiveTracker:Update).
-                -- The hook re-applies our TOPLEFT anchor, computed so the widget's
-                -- right edge sits RIGHT_INSET pixels inside scenarioFrame.
-                if not hostFrame._tpSetPointHooked then
-                    hooksecurefunc(hostFrame, "SetPoint", function(f)
-                        if f._tpLockAnchors and not f._tpReanchorring then
-                            if InCombatLockdown() then return end
-                            f._tpReanchorring = true
-                            local sw = addon.scenarioFrame and addon.scenarioFrame:GetWidth() or 0
-                            local hw = f:GetWidth() or 0
-                            if sw > 10 and hw > 10 then
-                                local xOff = sw - hw - RIGHT_INSET
-                                f:ClearAllPoints()
-                                f:SetPoint("TOPLEFT", addon.scenarioFrame, "TOPLEFT", xOff, 0)
-                            end
-                            f._tpReanchorring = false
-                        end
-                    end)
-                    hostFrame._tpSetPointHooked = true
-                end
-                hostFrame._tpLockAnchors = true
-            end
-
-            -- Always re-enforce TOPLEFT anchor every render pass. We position the
-            -- widget so its right edge lands RIGHT_INSET px inside scenarioFrame.
-            -- We do NOT call SetWidth — Blizzard keeps its natural widget size.
-            if not InCombatLockdown() then
-                hostFrame._tpReanchorring = true
-                local sw = self.scenarioFrame:GetWidth() or 0
-                local hw = hostFrame:GetWidth() or 0
-                if sw > 10 and hw > 10 then
-                    local xOff = sw - hw - RIGHT_INSET
-                    hostFrame:ClearAllPoints()
-                    hostFrame:SetPoint("TOPLEFT", self.scenarioFrame, "TOPLEFT", xOff, 0)
-                    DebugLayout(self, "[SCN] TOPLEFT anchor enforced, xOff=%d (sw=%d hw=%d)", xOff, sw, hw)
-                else
-                    -- Fallback: frame sizes not resolved yet, pin to right edge temporarily
-                    hostFrame:ClearAllPoints()
-                    hostFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", -RIGHT_INSET, 0)
-                    DebugLayout(self, "[SCN] TOPRIGHT fallback (sw=%d hw=%d)", sw, hw)
-                end
-                hostFrame._tpReanchorring = false
-            end
-
-            if self.scenarioFrame.bgMask then self.scenarioFrame.bgMask:Hide() end
-
-            -- Let Blizzard keep its natural widths for ContentsFrame,
-            -- WidgetContainer, and Header — we only control position, not size.
-
-            if hostFrame.Header then
-
-                if hostFrame.Header.Text and not hostFrame._trackerPlusHeaderHooked then
-                    local function TrackerPlus_UpdateScenarioHeader(textStr)
-                        if textStr._tpUpdating then return end
-                        textStr._tpUpdating = true
-
-                        local inInstance, instanceType = IsInInstance()
-                        if inInstance then
-                            if instanceType == "party" then
-                                textStr:SetText(TRACKER_HEADER_DUNGEON or "Dungeon")
-                            elseif instanceType == "scenario" then
-                                local name = GetInstanceInfo()
-                                if name and name ~= "" then
-                                    textStr:SetText(name)
-                                else
-                                    textStr:SetText("Delve / Scenario")
-                                end
-                            end
-                        end
-                        textStr._tpUpdating = false
-                    end
-                    hooksecurefunc(hostFrame.Header.Text, "SetText", TrackerPlus_UpdateScenarioHeader)
-                    TrackerPlus_UpdateScenarioHeader(hostFrame.Header.Text)
-                    hostFrame._trackerPlusHeaderHooked = true
-                end
-            end
-
-         EnsureFrameVisible(hostFrame)
-         EnsureFrameVisible(contents)
-
-         -- Attempt to find internal WidgetContainer and force show it
-         if contents.WidgetContainer then
-             EnsureFrameVisible(contents.WidgetContainer)
-         end
-
-         -- Hook OnSizeChanged so that Blizzard's roll-up/down animations (which resize
-         -- hostFrame and ContentsFrame every frame) trigger a layout refresh.  The
-         -- RequestUpdate("scenarios") call feeds into the existing 50ms burst throttle so
-         -- we don't re-render on every animation frame.
-         if not hostFrame._trackerPlusSizeHooked then
-             hostFrame:HookScript("OnSizeChanged", function()
-                 addon:RequestUpdate("scenarios")
-             end)
-             if contents then
-                 contents:HookScript("OnSizeChanged", function()
-                     addon:RequestUpdate("scenarios")
-                 end)
-             end
-             hostFrame._trackerPlusSizeHooked = true
-         end
-
-         -- The height of the blizzard frame varies. We need to update our container to match it.
-         -- Use robust child-scanning to determine true content height, as GetHeight() on the container 
-         -- is often unreliable during objective updates or animations.
-         local blizzardHeight = 0
-         
-         -- hostFrame has only a TOPRIGHT top-anchor; its height is driven by Blizzard's
-         -- internal layout and is independent of scenarioFrame's height, so reading
-         -- hostFrame:GetHeight() here does NOT create a feedback loop.
-         rawHeight = max(contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
-         DebugLayout(self, "[SCN] HEIGHT rawHeight=%.2f (contents=%.2f hostFrame=%.2f)",
-             rawHeight, contents:GetHeight() or 0, hostFrame:GetHeight() or 0)
-
-         -- Method 2: Check WidgetContainer
-         if contents.WidgetContainer and contents.WidgetContainer:IsShown() then
-             local wH = contents.WidgetContainer:GetHeight() or 0
-             widgetHeight = wH
-             if wH > blizzardHeight then blizzardHeight = wH end
-             if wH > 8 then hasScenarioContent = true end
-         end
-
-         -- Method 3: Scan visible children and compute vertical extent (stacked rows).
-         local minBottom = nil
-         local maxChildTop = nil
-         local scenFrameHasPosition = (self.scenarioFrame:GetTop() ~= nil)
-         local function AccumulateChildExtent(parentFrame)
-             if not parentFrame or not parentFrame.GetNumChildren then return end
-             for _, child in pairs({parentFrame:GetChildren()}) do
-                 if child:IsShown() then
-                     visibleChildren = visibleChildren + 1
-                     local childHeight = child:GetHeight() or 0
-                     if childHeight > maxVisibleChildHeight then
-                         maxVisibleChildHeight = childHeight
-                     end
-                     if childHeight > 8 then
-                         hasScenarioContent = true
-                     end
-
-                     -- Only read screen coordinates when our parent has a valid position
-                     if scenFrameHasPosition then
-                         local childTop = child:GetTop()
-                         if childTop and (not maxChildTop or childTop > maxChildTop) then
-                             maxChildTop = childTop
-                         end
-
-                         local childBottom = child:GetBottom()
-                         if childBottom then
-                             if not minBottom or childBottom < minBottom then
-                                 minBottom = childBottom
-                             end
-                         end
-                     end
-                 end
-             end
-         end
-
-         local maxTop = nil
-         local hostTop = hostFrame:GetTop()
-         local contentsTop = contents:GetTop()
-         if hostTop and contentsTop then
-             maxTop = max(hostTop, contentsTop)
-         else
-             maxTop = hostTop or contentsTop
-         end
-
-         AccumulateChildExtent(contents)
-         AccumulateChildExtent(hostFrame)
-
-         if maxChildTop and minBottom then
-             local extentHeight = maxChildTop - minBottom
-             if extentHeight > blizzardHeight then
-                 blizzardHeight = extentHeight
-             end
-         end
-
-         -- Always floor blizzardHeight at rawHeight (= max of hostFrame and ContentsFrame
-         -- reported heights).  Sub-component scans (WidgetContainer, individual children)
-         -- can return a value smaller than the full visual widget, which would make the
-         -- scenarioFrame too short and let Blizzard's content overlap the quest area below.
-         if rawHeight > blizzardHeight then
-             blizzardHeight = rawHeight
-         end
-         if blizzardHeight < 1 and maxVisibleChildHeight > 0 then
-             blizzardHeight = maxVisibleChildHeight
-         end
-         if blizzardHeight > 8 and (contents:IsShown() or hostFrame:IsShown()) then
-             hasScenarioContent = true
-         end
-
-         addon:LogAt("trace", "[SCENARIO] hasContent=%s, hTop=%s, cTop=%s, minB=%s, childH=%s, m3WH=%s", tostring(hasScenarioContent), tostring(hostTop), tostring(contentsTop), tostring(minBottom), tostring(maxChildTop), tostring(blizzardHeight))
-
-         -- Fail-safe: Blizzard can report transient zero sizes during scenario transitions.
-         -- If we are in a scenario and have a hijacked host frame, keep the section alive.
-         if not hasScenarioContent and isScenarioActive and (hostFrame:IsShown() or contents:IsShown()) then
-             addon:LogAt("trace", "[SCENARIO] FAIL-SAFE ACTIVATED")
-             hasScenarioContent = true
-             blizzardHeight = max(blizzardHeight, self._lastScenarioBlizzardHeight or 90)
-         end
-
-         if hasScenarioContent then
-             -- If height is suspiciously small while content exists, enforce a modest floor.
-             if blizzardHeight < 30 then
-                 blizzardHeight = max(self._lastScenarioBlizzardHeight or 60, 60)
-             end
-
-             self._lastScenarioBlizzardHeight = blizzardHeight
-
-             -- When Blizzard scenario is collapsed, we typically only have header-level content.
-             -- Reduce reserved bottom padding so Active Quest snaps closer to Delves header.
-             local effectiveBottomPadding = scenarioBottomPadding
-             if blizzardHeight <= 36 then
-                 effectiveBottomPadding = 8
-             end
-
-             scenarioHeight = blizzardHeight + effectiveBottomPadding + 10 -- Extra padding for safety
-             scenarioYOffset = scenarioHeight
-         else
-             hostFrame._tpLockAnchors = false
-             RestoreHijackedParent(self, hostFrame, self.scenarioFrame, ObjectiveTrackerFrame or UIParent, "_scenarioOriginalParent")
-             if hasManualScenarioData then
-                 -- Blizzard scenario frame exists but did not render visible rows; use manual fallback.
-                 forceManualScenario = true
-             end
-                ResetAnchorState(self, "_scenarioContentsAnchored", "_scenarioContentsWidth")
-             self._lastScenarioBlizzardHeight = nil
-         end
-
-    else
-        if scenarioTracker and scenarioTracker.ContentsFrame then
-            local hostFrame = scenarioTracker
-            RestoreHijackedParent(self, hostFrame, self.scenarioFrame, ObjectiveTrackerFrame or UIParent, "_scenarioOriginalParent")
-        end
-           ResetAnchorState(self, "_scenarioContentsAnchored", "_scenarioContentsWidth")
-           self._lastScenarioBlizzardHeight = nil
-        if self.scenarioFrame and self.scenarioFrame.bgMask then
-             self.scenarioFrame.bgMask:Hide()
-        end
+    if addon.LogAt then
+        addon:LogAt("trace", "[SCN-BORROW] selected=%s manualData=%s scenarioCount=%d",
+            tostring(scenarioTrackerName), tostring(hasManualScenarioData), tonumber((self.currentScenarios and #self.currentScenarios) or 0))
     end
 
+    local scenarioYOffset = 0
+
     ---------------------------------------------------------------------------
-    -- Manual scenario fallback
+    -- Show Blizzard scenario/delve frame visually
     ---------------------------------------------------------------------------
-    if ((not useBlizzardScenario) or forceManualScenario) and hasManualScenarioData then
-        -- Manual rendering fallback
+    if scenarioTracker and scenarioTracker.ContentsFrame and not hasManualScenarioData then
+        -- Borrow the scenario tracker itself into TrackerPlus so the default
+        -- ObjectiveTracker panel can remain hidden.
+        local contents = scenarioTracker.ContentsFrame
+        local hostFrame = scenarioTracker
+        local objectiveAlphaBefore = ObjectiveTrackerFrame and ObjectiveTrackerFrame.GetAlpha and ObjectiveTrackerFrame:GetAlpha() or -1
+        local objectiveShownBefore = ObjectiveTrackerFrame and ObjectiveTrackerFrame:IsShown() or false
+        local parentFrame = hostFrame:GetParent()
+        local parentName = parentFrame and parentFrame.GetName and parentFrame:GetName() or "<nil>"
+
+        local visibleChildren = 0
+        for _, child in pairs({contents:GetChildren()}) do
+            if child:IsShown() then
+                visibleChildren = visibleChildren + 1
+            end
+        end
+
+        if addon.LogAt then
+            addon:LogAt("trace", "[SCN-BORROW] pre-show tracker=%s parent=%s hostShown=%s hostAlpha=%.2f contentShown=%s contentAlpha=%.2f widget=%s visibleChildren=%d",
+                tostring(scenarioTrackerName), tostring(parentName), tostring(hostFrame:IsShown()), hostFrame:GetAlpha() or -1,
+                tostring(contents:IsShown()), contents:GetAlpha() or -1, tostring(contents.WidgetContainer ~= nil), visibleChildren)
+        end
+
+        -- Restore any previously borrowed scenario subtree if we are switching trackers.
+        if self.scenarioFrame and self.scenarioFrame.borrowedFrame and self.scenarioFrame.borrowedFrame ~= hostFrame then
+            self:RestoreAllHijackedFrames()
+        end
+
+        -- Borrow the full scenario host so the subtree keeps its natural geometry,
+        -- but enforce our pinned anchors because Blizzard's layout code may try to
+        -- move it after we attach it.
+        if not InCombatLockdown() and not (hostFrame.IsProtected and hostFrame:IsProtected()) then
+            if hostFrame:GetParent() ~= self.scenarioFrame then
+                addon.scenarioHostOriginalParent = hostFrame:GetParent()
+                hostFrame:SetParent(self.scenarioFrame)
+            end
+            self.scenarioFrame.borrowedFrame = hostFrame
+            EnsureBorrowedScenarioAnchor(self, hostFrame)
+        end
+
+        -- Keep the default ObjectiveTracker hidden while the borrowed subtree is
+        -- rendered under TrackerPlus.
+        if ObjectiveTrackerFrame and not InCombatLockdown() then
+            ObjectiveTrackerFrame:SetAlpha(0)
+        end
+
+        -- Keep the owning module alive and visible under TrackerPlus.
+        hostFrame:Show()
+        hostFrame:SetAlpha(1)
+        if hostFrame.SetIgnoreParentAlpha then
+            hostFrame:SetIgnoreParentAlpha(true)
+        end
+        contents:Show()
+        contents:SetAlpha(1)
+        if contents.SetIgnoreParentAlpha then
+            contents:SetIgnoreParentAlpha(true)
+        end
+        if contents.WidgetContainer then 
+            contents.WidgetContainer:Show()
+            contents.WidgetContainer:SetAlpha(1)
+            if contents.WidgetContainer.SetIgnoreParentAlpha then
+                contents.WidgetContainer:SetIgnoreParentAlpha(true)
+            end
+        end
+
+        local objectiveAlphaAfter = ObjectiveTrackerFrame and ObjectiveTrackerFrame.GetAlpha and ObjectiveTrackerFrame:GetAlpha() or -1
+        local objectiveShownAfter = ObjectiveTrackerFrame and ObjectiveTrackerFrame:IsShown() or false
+        local widgetShown = contents.WidgetContainer and contents.WidgetContainer:IsShown() or false
+        local widgetHeight = contents.WidgetContainer and (contents.WidgetContainer:GetHeight() or 0) or 0
+        local hostTop = hostFrame:GetTop() or -1
+        local hostBottom = hostFrame:GetBottom() or -1
+        local contentTop = contents:GetTop() or -1
+        local contentBottom = contents:GetBottom() or -1
+
+        if addon.LogAt then
+            addon:LogAt("trace", "[SCN-BORROW] post-show objShown=%s->%s objAlpha=%.2f->%.2f hostShown=%s cShown=%s widgetShown=%s widgetH=%.1f hostTop=%.1f hostBottom=%.1f cTop=%.1f cBottom=%.1f",
+                tostring(objectiveShownBefore), tostring(objectiveShownAfter), objectiveAlphaBefore, objectiveAlphaAfter,
+                tostring(hostFrame:IsShown()), tostring(contents:IsShown()), tostring(widgetShown), widgetHeight,
+                hostTop, hostBottom, contentTop, contentBottom)
+        end
+        
+        -- Calculate reserved space from the stable host frame.
+        local blizzardHeight = hostFrame:GetHeight() or contents:GetHeight() or 0
+        if blizzardHeight < 20 then blizzardHeight = 60 end
+
+        if addon.LogAt and blizzardHeight >= 20 and not widgetShown and visibleChildren == 0 then
+            addon:LogAt("warn", "[SCN-BORROW] reserved-height-without-widget tracker=%s h=%.1f cH=%.1f", tostring(scenarioTrackerName), hostFrame:GetHeight() or 0, contents:GetHeight() or 0)
+        end
+        
+        scenarioYOffset = blizzardHeight + 15
+        DebugLayout(self, "[SCN] Borrowed Blizzard scenario frame, height=%d", blizzardHeight)
+    elseif hasManualScenarioData then
+        self:RestoreAllHijackedFrames()
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:ClearAllPoints()
         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
@@ -636,6 +513,25 @@ function addon:RenderScenarioSection()
                button:Show()
                button._scriptMode = "scenarioRow"
                scenarioYOffset = scenarioYOffset + height + 8
+        end
+    end
+
+    -- Hide Blizzard frame if we rendered manual content
+    local scenarioTracker2 = _G and (_G.DelvesObjectiveTracker or _G.DelveObjectiveTracker or _G.ScenarioObjectiveTracker)
+    if scenarioTracker2 and hasManualScenarioData then
+        scenarioTracker2:Hide()
+        if addon.LogAt then
+            local n = scenarioTracker2.GetName and scenarioTracker2:GetName() or "<unknown>"
+            addon:LogAt("trace", "[SCN-BORROW] manual-data-active hiding=%s", tostring(n))
+        end
+    elseif not scenarioTracker then
+        self:RestoreAllHijackedFrames()
+        -- No scenario tracker active and no manual content — hide ObjectiveTrackerFrame
+        if ObjectiveTrackerFrame then
+            ObjectiveTrackerFrame:SetAlpha(0)
+        end
+        if addon.LogAt then
+            addon:LogAt("trace", "[SCN-BORROW] no-active-tracker objectiveTrackerAlphaSet=0")
         end
     end
 

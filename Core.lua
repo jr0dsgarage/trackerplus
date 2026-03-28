@@ -72,30 +72,6 @@ local function MoveObjectiveTrackerOffscreen(owner)
     ObjectiveTrackerFrame:EnableMouse(false)
 end
 
-function addon:IsNoHijackContext()
-    local inInstance, instanceType = IsInInstance()
-    if not inInstance then return false end
-    return instanceType == "pvp" or instanceType == "arena"
-end
-
-function addon:IsUnsafeHijackFrame(frame)
-    if not frame then return true end
-
-    -- Secure frames must never be reparented by addon code.
-    if frame.IsProtected and frame:IsProtected() then
-        return true
-    end
-
-    -- Only block the specific world-content trackers confirmed to cause
-    -- LayoutFrame/MoneyFrame taint via the world map and quest tooltip pipeline.
-    -- Scenario and delve trackers are instance-scoped and safe to reparent.
-    local name = frame.GetName and frame:GetName() or ""
-    if name == "WorldQuestObjectiveTracker" or name == "BonusObjectiveTracker" then
-        return true
-    end
-
-    return false
-end
 
 function addon:IsAnyScenarioTrackerActive()
     if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
@@ -131,7 +107,6 @@ local function Print(...)
 end
 
 addon.Print = Print
-addon.disableBlizzardTrackerHijack = false
 addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()
@@ -292,12 +267,19 @@ end
 
 function addon:RestoreAllHijackedFrames()
     if InCombatLockdown() then return end
-    if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.hostFrame then
-        if not (addon.scenarioFrame.hostFrame.IsProtected and addon.scenarioFrame.hostFrame:IsProtected()) then
-            addon.scenarioFrame.hostFrame:SetParent(addon.scenarioHostOriginalParent)
-            addon.scenarioFrame.hostFrame:ClearAllPoints()
+    if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.borrowedFrame then
+        if not (addon.scenarioFrame.borrowedFrame.IsProtected and addon.scenarioFrame.borrowedFrame:IsProtected()) then
+            addon.scenarioFrame.borrowedFrame:SetParent(addon.scenarioHostOriginalParent)
+            addon.scenarioFrame.borrowedFrame:ClearAllPoints()
+            if addon.scenarioFrame.borrowedFrame.SetIgnoreParentAlpha then
+                addon.scenarioFrame.borrowedFrame:SetIgnoreParentAlpha(false)
+            end
         end
     end
+    if addon.scenarioFrame then
+        addon.scenarioFrame.borrowedFrame = nil
+    end
+    addon.scenarioHostOriginalParent = nil
 end
 
 -- Update default tracker visibility based on enabled state
@@ -437,7 +419,6 @@ function addon:OnEvent(event, ...)
             or event == "QUEST_REMOVED"
             or event == "QUEST_WATCH_LIST_CHANGED"
             or event == "QUEST_LOG_UPDATE"
-            or event == "GET_ITEM_INFO_RECEIVED"
             or event == "QUEST_TURNED_IN"
             or event == "UNIT_QUEST_LOG_CHANGED"
             or event == "SUPER_TRACKING_CHANGED"
@@ -467,6 +448,7 @@ function addon:OnEvent(event, ...)
             or event == "TRADE_SKILL_SHOW"
             or event == "TRADE_SKILL_LIST_UPDATE"
             or event == "TRACKED_RECIPE_UPDATE"
+            or event == "GET_ITEM_INFO_RECEIVED"
             or event == "ITEM_COUNT_CHANGED"
             or event == "BAG_UPDATE_DELAYED"
             or event == "CURRENCY_DISPLAY_UPDATE"
@@ -844,49 +826,30 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
 end
 
 function addon:GetQuestShortDescription(questID, logIndex)
-    local function NormalizeDescription(desc)
-        if not desc or desc == "" then return nil end
-        if #desc > 220 then
-            desc = desc:sub(1, 220) .. "..."
-        end
-        return desc
-    end
-
-    -- Resolve the effective quest log index first.
+    -- Resolve log index if not provided
     local idx = logIndex
-    if (not idx or idx <= 0) and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+    if not idx and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
         idx = C_QuestLog.GetLogIndexForQuestID(questID)
     end
-    if not idx or idx <= 0 then
-        return nil
-    end
+    if not idx or idx <= 0 then return nil end
 
-    -- Prefer structured description if exposed on quest info.
-    if C_QuestLog and C_QuestLog.GetInfo then
-        local ok, info = pcall(C_QuestLog.GetInfo, idx)
-        if ok and type(info) == "table" then
-            local desc = NormalizeDescription(info.logDescription or info.questDescription or info.description)
-            if desc then return desc end
-        end
-    end
-
-    -- Prefer index-based quest text API (quest-specific, no selected-quest bleed).
-    if C_QuestLog and C_QuestLog.GetQuestLogQuestText then
-        local ok, desc = pcall(C_QuestLog.GetQuestLogQuestText, idx)
-        if ok then
-            desc = NormalizeDescription(desc)
-            if desc then return desc end
-        end
+    -- Select the quest log entry so GetQuestLogQuestText reads the right quest.
+    -- This is done at tooltip-show time (user interaction), not during background collection,
+    -- so the side-effect event is acceptable.
+    if SelectQuestLogEntry then
+        SelectQuestLogEntry(idx)
     end
 
     if GetQuestLogQuestText then
-        local ok, desc = pcall(GetQuestLogQuestText, idx)
-        if ok then
-            desc = NormalizeDescription(desc)
-            if desc then return desc end
+        local desc = GetQuestLogQuestText()
+        if desc and desc ~= "" then
+            -- Truncate to keep tooltip concise
+            if #desc > 220 then
+                desc = desc:sub(1, 220) .. "..."
+            end
+            return desc
         end
     end
-
     return nil
 end
 

@@ -100,14 +100,6 @@ function addon:UpdateTrackerDisplay(trackables)
                 if sharedItemData then
                     item.item = sharedItemData
                 end
-
-                -- Active Quest renders before the regular quest list, so resolve
-                -- quest-item data here rather than waiting for later row renders.
-                local resolvedItemData = addon.ResolveTrackableItemData and addon.ResolveTrackableItemData(item)
-                if resolvedItemData then
-                    item.item = resolvedItemData
-                    questItemDataByID[item.id] = resolvedItemData
-                end
             end
         end
     end

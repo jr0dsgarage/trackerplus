@@ -175,9 +175,8 @@ function addon.ResolveTrackableItemData(item)
     -- Always re-resolve logIndex from questID to guard against stale indices
     -- caused by quest log reordering (quest accept/abandon/complete since last collect).
     local logIndex = item.logIndex
-    local questID = item.id or item.questID
-    if questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        local freshIndex = C_QuestLog.GetLogIndexForQuestID(questID)
+    if item.id and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        local freshIndex = C_QuestLog.GetLogIndexForQuestID(item.id)
         if freshIndex and freshIndex > 0 then
             logIndex = freshIndex
             item.logIndex = freshIndex

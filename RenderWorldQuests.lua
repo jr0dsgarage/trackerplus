@@ -1,15 +1,11 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, pairs, pcall = ipairs, pairs, pcall
+local ipairs, pairs = ipairs, pairs
 local format = string.format
 local max = math.max
 
 -- Local aliases for addon utilities
-local EnsureFrameVisible = function(...) return addon.EnsureFrameVisible(...) end
-local EnsureHijackedParent = function(...) return addon.EnsureHijackedParent(...) end
-local RestoreHijackedParent = function(...) return addon.RestoreHijackedParent(...) end
-local ResetAnchorState = function(...) return addon.ResetAnchorState(...) end
 
 -------------------------------------------------------------------------------
 -- RenderWorldQuestSection — World quest rendering
@@ -19,11 +15,6 @@ function addon:RenderWorldQuestSection(worldQuestItems)
     local db = self.db
     local wqYOffset = 0
     local wqFrame = self.worldQuestFrame
-    local hasBlizzardWQContent = false
-    local noHijackContext = addon.IsNoHijackContext and addon:IsNoHijackContext()
-
-    -- Hijacking Strategy for World Quests
-    local wqTracker = WorldQuestObjectiveTracker
 
     -- Ground-truth check: only show WQ section when quests are actively tracked
     local hasAnyTrackedWQ = (#worldQuestItems > 0)
@@ -34,107 +25,17 @@ function addon:RenderWorldQuestSection(worldQuestItems)
         end
     end
 
-    local useBlizzardWQ = (not addon.disableBlizzardTrackerHijack) and (not noHijackContext) and hasAnyTrackedWQ and (wqTracker and wqTracker.ContentsFrame) and (#worldQuestItems == 0)
-    if useBlizzardWQ and addon.IsUnsafeHijackFrame and addon:IsUnsafeHijackFrame(wqTracker) then
-        useBlizzardWQ = false
-    end
-    local preferManualWQ = (#worldQuestItems > 0)
-    if preferManualWQ then
-        useBlizzardWQ = false
-    end
-
-    -- If nothing to track, restore any previously hijacked frame and bail out early
+    -- If nothing to track, bail out early
     if not hasAnyTrackedWQ then
-        if wqTracker and wqTracker.ContentsFrame then
-            local contents = wqTracker.ContentsFrame
-            RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
+        if wqFrame then
+            wqFrame:SetHeight(0.1)
+            wqFrame:Hide()
         end
-        ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
-        hasBlizzardWQContent = false
-        useBlizzardWQ = false
+        return 0
     end
 
-    if useBlizzardWQ then
-         local contents = wqTracker.ContentsFrame
-         local blizzardWQHeight = contents:GetHeight() or 0
-         
-         -- Use IsShown() instead of IsVisible() because parent might be hidden
-         -- If we are already hijacking (parent is wqFrame) and collapsed, we assume we still have control
-         local isHijacked = (contents:GetParent() == wqFrame)
-         local isCollapsed = db.collapsedSections and db.collapsedSections["World Quests"]
-         
-         local hasContent = false
-         if isHijacked and isCollapsed then hasContent = true end
-
-         -- Prefer concrete visible child rows over container size, since the Blizzard
-         -- frame can report non-zero height even when rows have not rendered yet.
-         for _, child in pairs({contents:GetChildren()}) do
-             if child:IsShown() and child:GetHeight() > 8 then
-                 hasContent = true
-                 blizzardWQHeight = max(blizzardWQHeight, child:GetHeight() or 10)
-             end
-         end
-
-         if not hasContent and contents.WidgetContainer and contents.WidgetContainer:IsShown() then
-             local widgetHeight = contents.WidgetContainer:GetHeight() or 0
-             if widgetHeight > 8 then
-                 hasContent = true
-                 blizzardWQHeight = max(blizzardWQHeight, widgetHeight)
-             end
-         end
-         
-         if hasContent then
-              hasBlizzardWQContent = true
-              -- Hijack it!
-                pcall(function()
-                   if contents:GetParent() ~= wqFrame then
-                       EnsureHijackedParent(self, contents, wqFrame, "_wqOriginalParent", "HIGH", 100)
-                       ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
-                   end
-
-                   local wqWidth = self.db.frameWidth - 10
-                   if not self._wqContentsAnchored or self._wqContentsWidth ~= wqWidth then
-                      contents:ClearAllPoints()
-                      -- Position it BELOW the header (which we will create manually below at y=0)
-                      contents:SetPoint("TOP", wqFrame, "TOP", 0, -28)
-                      contents:SetWidth(wqWidth)
-                      self._wqContentsAnchored = true
-                      self._wqContentsWidth = wqWidth
-                   end
-
-                   EnsureFrameVisible(contents)
-              
-                   if contents.WidgetContainer then
-                       EnsureFrameVisible(contents.WidgetContainer)
-                   end
-              
-                   -- Try to trigger internal update
-                   if wqTracker.Update then wqTracker:Update() end
-              end)
-              
-              if blizzardWQHeight < 20 then blizzardWQHeight = 40 end
-              -- Calculate offset including the header we are about to make
-              wqYOffset = blizzardWQHeight + 35 
-         else
-              -- Restore if empty
-                RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
-                ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
-                 hasBlizzardWQContent = false
-         end
-    end
-
-        if not useBlizzardWQ then
-            -- Ensure Blizzard WQ frame is restored when we switch to manual mode.
-            if wqTracker and wqTracker.ContentsFrame then
-                local contents = wqTracker.ContentsFrame
-                RestoreHijackedParent(self, contents, wqFrame, wqTracker, "_wqOriginalParent")
-            end
-            ResetAnchorState(self, "_wqContentsAnchored", "_wqContentsWidth")
-            hasBlizzardWQContent = false
-        end
-
-    -- Render the Header container for World Quests (Either used by Hijacked frame or manual items)
-    if wqFrame and (hasBlizzardWQContent or #worldQuestItems > 0) then
+    -- Render the Header container for World Quests
+    if wqFrame and #worldQuestItems > 0 then
         -- Header
         local header = self:GetOrCreateButton(wqFrame)
         header:SetPoint("TOPLEFT", wqFrame, "TOPLEFT", 0, 0)
@@ -190,21 +91,10 @@ function addon:RenderWorldQuestSection(worldQuestItems)
         header:SetHeight(30)
         header:Show()
         header._scriptMode = "worldQuestHeader"
-
-        -- If Hijacked frame was found, we don't need to manually render items.
-           if useBlizzardWQ and hasBlizzardWQContent and wqYOffset > 0 then
-             local contents = wqTracker.ContentsFrame
-             EnsureFrameVisible(contents)
-             if contents.WidgetContainer then
-                 EnsureFrameVisible(contents.WidgetContainer)
-             end
-           elseif #worldQuestItems > 0 and (wqYOffset == 0 or not hasBlizzardWQContent) then
-               -- Fallback: manual render when Blizzard WQ container is missing/empty.
-             wqYOffset = 24 + 5
-             for _, item in ipairs(worldQuestItems) do
-                 local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
-                 wqYOffset = wqYOffset + height + db.spacingItemVertical
-             end
+        wqYOffset = 24 + 5
+        for _, item in ipairs(worldQuestItems) do
+            local height = self:RenderTrackableItem(wqFrame, item, wqYOffset, db.spacingMinorHeaderIndent + 10)
+            wqYOffset = wqYOffset + height + db.spacingItemVertical
         end
 
           -- Set styledBackdrop height to cover the full section
