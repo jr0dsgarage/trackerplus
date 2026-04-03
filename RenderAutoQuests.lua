@@ -18,7 +18,7 @@ function addon:RenderAutoQuestSection(autoQuests)
     -- Restore any popup frames stolen by an old hijack session
     self._stolenPopups = self._stolenPopups or {}
     for popup, _ in pairs(self._stolenPopups) do
-        if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
+        if not InCombatLockdown() and popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
             popup:SetParent(popup._trackerPlusOriginalParent)
             popup:ClearAllPoints()
             popup:SetPoint("TOPLEFT", popup._trackerPlusOriginalParent, "TOPLEFT", 0, 0)
@@ -44,6 +44,17 @@ function addon:RenderAutoQuestSection(autoQuests)
             completedQuestFrame:Show()
         end
     else
+        -- Defensive cleanup: ensure any lingering child widgets are hidden
+        -- when no auto-quest popups remain.
+        if not InCombatLockdown() then
+            for _, child in ipairs({completedQuestFrame:GetChildren()}) do
+                if not (child.IsProtected and child:IsProtected()) then
+                    pcall(function()
+                        child:Hide()
+                    end)
+                end
+            end
+        end
         completedQuestFrame:SetHeight(1)
         completedQuestFrame:Hide()
     end

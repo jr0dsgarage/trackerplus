@@ -10,35 +10,6 @@ local bit_band = bit.band
 -- Local aliases for addon utilities
 local DebugLayout = function(...) return addon.DebugLayout(...) end
 
-local function EnsureBorrowedScenarioAnchor(owner, borrowedFrame)
-    local scenarioFrame = owner and owner.scenarioFrame
-    if not scenarioFrame or not borrowedFrame then return end
-
-    if not scenarioFrame._borrowAnchorEnforcerInstalled then
-        scenarioFrame:HookScript("OnUpdate", function(frame)
-            local borrowed = frame.borrowedFrame
-            if not borrowed or borrowed:GetParent() ~= frame then return end
-
-            local point, relativeTo, relativePoint, x, y = borrowed:GetPoint(1)
-            local needsReset = borrowed:GetNumPoints() ~= 1
-                or point ~= "TOPRIGHT"
-                or relativeTo ~= frame
-                or relativePoint ~= "TOPRIGHT"
-                or x ~= 0
-                or y ~= 0
-
-            if needsReset then
-                borrowed:ClearAllPoints()
-                borrowed:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
-            end
-        end)
-        scenarioFrame._borrowAnchorEnforcerInstalled = true
-    end
-
-    borrowedFrame:ClearAllPoints()
-    borrowedFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
-end
-
 -------------------------------------------------------------------------------
 -- RenderScenarioSection — manual mirror rendering
 -- Returns: scenarioYOffset (total height consumed by scenario section)
@@ -48,6 +19,8 @@ function addon:RenderScenarioSection()
     local hasManualScenarioData = false
     local scenarioTracker = nil
     local scenarioTrackerName = nil
+    local scenarioAPI = _G and _G.C_Scenario
+    local inScenario = (scenarioAPI and scenarioAPI.IsInScenario and scenarioAPI.IsInScenario()) or false
     
     -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons)
     local candidates = {
@@ -96,101 +69,64 @@ function addon:RenderScenarioSection()
     local scenarioYOffset = 0
 
     ---------------------------------------------------------------------------
-    -- Show Blizzard scenario/delve frame visually
+    -- Scenario frame borrowing (borrow full tracker frame for stable lifetime)
     ---------------------------------------------------------------------------
-    if scenarioTracker and scenarioTracker.ContentsFrame and not hasManualScenarioData then
-        -- Borrow the scenario tracker itself into TrackerPlus so the default
-        -- ObjectiveTracker panel can remain hidden.
+    if scenarioTracker and scenarioTracker.ContentsFrame and not hasManualScenarioData and inScenario then
         local contents = scenarioTracker.ContentsFrame
-        local hostFrame = scenarioTracker
-        local objectiveAlphaBefore = ObjectiveTrackerFrame and ObjectiveTrackerFrame.GetAlpha and ObjectiveTrackerFrame:GetAlpha() or -1
-        local objectiveShownBefore = ObjectiveTrackerFrame and ObjectiveTrackerFrame:IsShown() or false
-        local parentFrame = hostFrame:GetParent()
-        local parentName = parentFrame and parentFrame.GetName and parentFrame:GetName() or "<nil>"
-
-        local visibleChildren = 0
-        for _, child in pairs({contents:GetChildren()}) do
-            if child:IsShown() then
-                visibleChildren = visibleChildren + 1
-            end
-        end
-
-        if addon.LogAt then
-            addon:LogAt("trace", "[SCN-BORROW] pre-show tracker=%s parent=%s hostShown=%s hostAlpha=%.2f contentShown=%s contentAlpha=%.2f widget=%s visibleChildren=%d",
-                tostring(scenarioTrackerName), tostring(parentName), tostring(hostFrame:IsShown()), hostFrame:GetAlpha() or -1,
-                tostring(contents:IsShown()), contents:GetAlpha() or -1, tostring(contents.WidgetContainer ~= nil), visibleChildren)
-        end
-
-        -- Restore any previously borrowed scenario subtree if we are switching trackers.
-        if self.scenarioFrame and self.scenarioFrame.borrowedFrame and self.scenarioFrame.borrowedFrame ~= hostFrame then
-            self:RestoreAllHijackedFrames()
-        end
-
-        -- Borrow the full scenario host so the subtree keeps its natural geometry,
-        -- but enforce our pinned anchors because Blizzard's layout code may try to
-        -- move it after we attach it.
-        if not InCombatLockdown() and not (hostFrame.IsProtected and hostFrame:IsProtected()) then
-            if hostFrame:GetParent() ~= self.scenarioFrame then
-                addon.scenarioHostOriginalParent = hostFrame:GetParent()
-                hostFrame:SetParent(self.scenarioFrame)
-            end
-            self.scenarioFrame.borrowedFrame = hostFrame
-            EnsureBorrowedScenarioAnchor(self, hostFrame)
-        end
-
-        -- Keep the default ObjectiveTracker hidden while the borrowed subtree is
-        -- rendered under TrackerPlus.
-        if ObjectiveTrackerFrame and not InCombatLockdown() then
-            ObjectiveTrackerFrame:SetAlpha(0)
-        end
-
-        -- Keep the owning module alive and visible under TrackerPlus.
-        hostFrame:Show()
-        hostFrame:SetAlpha(1)
-        if hostFrame.SetIgnoreParentAlpha then
-            hostFrame:SetIgnoreParentAlpha(true)
-        end
-        contents:Show()
-        contents:SetAlpha(1)
-        if contents.SetIgnoreParentAlpha then
-            contents:SetIgnoreParentAlpha(true)
-        end
-        if contents.WidgetContainer then 
-            contents.WidgetContainer:Show()
-            contents.WidgetContainer:SetAlpha(1)
-            if contents.WidgetContainer.SetIgnoreParentAlpha then
-                contents.WidgetContainer:SetIgnoreParentAlpha(true)
-            end
-        end
-
-        local objectiveAlphaAfter = ObjectiveTrackerFrame and ObjectiveTrackerFrame.GetAlpha and ObjectiveTrackerFrame:GetAlpha() or -1
-        local objectiveShownAfter = ObjectiveTrackerFrame and ObjectiveTrackerFrame:IsShown() or false
-        local widgetShown = contents.WidgetContainer and contents.WidgetContainer:IsShown() or false
-        local widgetHeight = contents.WidgetContainer and (contents.WidgetContainer:GetHeight() or 0) or 0
-        local hostTop = hostFrame:GetTop() or -1
-        local hostBottom = hostFrame:GetBottom() or -1
-        local contentTop = contents:GetTop() or -1
-        local contentBottom = contents:GetBottom() or -1
-
-        if addon.LogAt then
-            addon:LogAt("trace", "[SCN-BORROW] post-show objShown=%s->%s objAlpha=%.2f->%.2f hostShown=%s cShown=%s widgetShown=%s widgetH=%.1f hostTop=%.1f hostBottom=%.1f cTop=%.1f cBottom=%.1f",
-                tostring(objectiveShownBefore), tostring(objectiveShownAfter), objectiveAlphaBefore, objectiveAlphaAfter,
-                tostring(hostFrame:IsShown()), tostring(contents:IsShown()), tostring(widgetShown), widgetHeight,
-                hostTop, hostBottom, contentTop, contentBottom)
-        end
+        local borrowedFrame = scenarioTracker
         
-        -- Calculate reserved space from the stable host frame.
-        local blizzardHeight = hostFrame:GetHeight() or contents:GetHeight() or 0
-        if blizzardHeight < 20 then blizzardHeight = 60 end
-
-        if addon.LogAt and blizzardHeight >= 20 and not widgetShown and visibleChildren == 0 then
-            addon:LogAt("warn", "[SCN-BORROW] reserved-height-without-widget tracker=%s h=%.1f cH=%.1f", tostring(scenarioTrackerName), hostFrame:GetHeight() or 0, contents:GetHeight() or 0)
+        if addon.LogAt then
+            addon:LogAt("trace", "[SCN-BORROW] borrowing full tracker=%s trackerShown=%s trackerH=%.1f contentsShown=%s contentsH=%.1f",
+                tostring(scenarioTrackerName), tostring(scenarioTracker:IsShown()), tonumber(scenarioTracker:GetHeight() or 0),
+                tostring(contents:IsShown()), tonumber(contents:GetHeight() or 0))
         end
-        
-        scenarioYOffset = blizzardHeight + 15
-        DebugLayout(self, "[SCN] Borrowed Blizzard scenario frame, height=%d", blizzardHeight)
+
+        -- Borrow full tracker frame so its internal subtree remains coherent.
+        if borrowedFrame then
+            -- Store original parent for later restoration
+            if not InCombatLockdown() and not borrowedFrame._trackerPlusOriginalParent then
+                borrowedFrame._trackerPlusOriginalParent = borrowedFrame:GetParent()
+                borrowedFrame._trackerPlusOriginalPoint1,
+                borrowedFrame._trackerPlusOriginalRelTo,
+                borrowedFrame._trackerPlusOriginalPoint2,
+                borrowedFrame._trackerPlusOriginalX,
+                borrowedFrame._trackerPlusOriginalY = borrowedFrame:GetPoint(1)
+                if addon.LogAt then
+                    addon:LogAt("trace", "[SCN-BORROW] stored original parent, reparenting %s to scenarioFrame",
+                        tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"))
+                end
+            end
+            
+            -- Reparent to scenarioFrame (minimal mutation to avoid taint)
+            if not InCombatLockdown() and borrowedFrame:GetParent() ~= self.scenarioFrame then
+                borrowedFrame:SetParent(self.scenarioFrame)
+            end
+            
+            -- Keep anchor fresh out of combat; in combat only size/visibility updates are applied.
+            if not InCombatLockdown() then
+                borrowedFrame:ClearAllPoints()
+                borrowedFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
+            end
+            
+            -- Use the larger of tracker/contents heights so the slot doesn't collapse.
+            local trackerHeight = borrowedFrame:GetHeight() or 0
+            local contentsHeight = contents:GetHeight() or 0
+            local widgetHeight = max(trackerHeight, contentsHeight)
+            if widgetHeight > 20 then
+                self._lastScenarioBorrowHeight = widgetHeight
+            else
+                widgetHeight = self._lastScenarioBorrowHeight or widgetHeight
+            end
+            if widgetHeight < 40 then widgetHeight = 40 end
+            scenarioYOffset = widgetHeight + 5
+            
+            if addon.LogAt then
+                addon:LogAt("trace", "[SCN-BORROW] reparented frame=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
+                    tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"),
+                    tonumber(trackerHeight or 0), tonumber(contentsHeight or 0), tonumber(scenarioYOffset or 0))
+            end
+        end
     elseif hasManualScenarioData then
-        self:RestoreAllHijackedFrames()
         local header = self:GetOrCreateButton(self.scenarioFrame) -- Use scenarioFrame as parent
         header:ClearAllPoints()
         header:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, -scenarioYOffset)
@@ -516,23 +452,13 @@ function addon:RenderScenarioSection()
         end
     end
 
-    -- Hide Blizzard frame if we rendered manual content
-    local scenarioTracker2 = _G and (_G.DelvesObjectiveTracker or _G.DelveObjectiveTracker or _G.ScenarioObjectiveTracker)
-    if scenarioTracker2 and hasManualScenarioData then
-        scenarioTracker2:Hide()
-        if addon.LogAt then
-            local n = scenarioTracker2.GetName and scenarioTracker2:GetName() or "<unknown>"
-            addon:LogAt("trace", "[SCN-BORROW] manual-data-active hiding=%s", tostring(n))
-        end
-    elseif not scenarioTracker then
-        self:RestoreAllHijackedFrames()
-        -- No scenario tracker active and no manual content — hide ObjectiveTrackerFrame
-        if ObjectiveTrackerFrame then
-            ObjectiveTrackerFrame:SetAlpha(0)
-        end
-        if addon.LogAt then
-            addon:LogAt("trace", "[SCN-BORROW] no-active-tracker objectiveTrackerAlphaSet=0")
-        end
+    if not scenarioTracker and addon.LogAt then
+        addon:LogAt("trace", "[SCN-BORROW] no-active-tracker")
+    end
+
+    if (not scenarioTracker or not inScenario) and ObjectiveTrackerFrame and addon.db and addon.db.enabled and not InCombatLockdown() then
+        ObjectiveTrackerFrame:SetAlpha(0)
+        ObjectiveTrackerFrame:EnableMouse(false)
     end
 
     return scenarioYOffset

@@ -266,16 +266,56 @@ function addon:Initialize()
 end
 
 function addon:RestoreAllHijackedFrames()
-    if InCombatLockdown() then return end
-    if addon.scenarioHostOriginalParent and addon.scenarioFrame and addon.scenarioFrame.borrowedFrame then
-        if not (addon.scenarioFrame.borrowedFrame.IsProtected and addon.scenarioFrame.borrowedFrame:IsProtected()) then
-            addon.scenarioFrame.borrowedFrame:SetParent(addon.scenarioHostOriginalParent)
-            addon.scenarioFrame.borrowedFrame:ClearAllPoints()
-            if addon.scenarioFrame.borrowedFrame.SetIgnoreParentAlpha then
-                addon.scenarioFrame.borrowedFrame:SetIgnoreParentAlpha(false)
+    -- Restore any borrowed widget frames back to their original parents.
+    -- Scan current scenario trackers for reparented WidgetContainer frames.
+    if not InCombatLockdown() then
+        local candidates = {
+            "DelvesObjectiveTracker",
+            "DelveObjectiveTracker",
+            "ScenarioObjectiveTracker",
+        }
+        for _, name in ipairs(candidates) do
+            local tracker = _G and _G[name]
+            if tracker then
+                local restoreList = {}
+
+                restoreList[#restoreList + 1] = tracker
+                if tracker.ContentsFrame then
+                    restoreList[#restoreList + 1] = tracker.ContentsFrame
+                    if tracker.ContentsFrame.WidgetContainer then
+                        restoreList[#restoreList + 1] = tracker.ContentsFrame.WidgetContainer
+                    end
+                    for _, child in ipairs({tracker.ContentsFrame:GetChildren()}) do
+                        restoreList[#restoreList + 1] = child
+                    end
+                end
+
+                for _, frameToRestore in ipairs(restoreList) do
+                    if frameToRestore and frameToRestore._trackerPlusOriginalParent then
+                        frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
+                        frameToRestore:ClearAllPoints()
+                        if frameToRestore._trackerPlusOriginalPoint1 then
+                            frameToRestore:SetPoint(
+                                frameToRestore._trackerPlusOriginalPoint1,
+                                frameToRestore._trackerPlusOriginalRelTo,
+                                frameToRestore._trackerPlusOriginalPoint2,
+                                frameToRestore._trackerPlusOriginalX or 0,
+                                frameToRestore._trackerPlusOriginalY or 0
+                            )
+                        end
+                        frameToRestore._trackerPlusOriginalParent = nil
+                        frameToRestore._trackerPlusOriginalPoint1 = nil
+                        frameToRestore._trackerPlusOriginalRelTo = nil
+                        frameToRestore._trackerPlusOriginalPoint2 = nil
+                        frameToRestore._trackerPlusOriginalX = nil
+                        frameToRestore._trackerPlusOriginalY = nil
+                    end
+                end
             end
         end
     end
+    
+    -- Clear cached metadata
     if addon.scenarioFrame then
         addon.scenarioFrame.borrowedFrame = nil
     end
@@ -525,9 +565,10 @@ end
 
 -- Main update function
 function addon:UpdateTracker()
-    -- Defer updates if in combat to prevent taint issues with SecureFrames
+    -- In combat, run a minimal layout-only refresh to avoid protected UI mutations.
     if InCombatLockdown() then
         pendingUpdate = true
+        self:UpdateCombatFrameVisibility()
         return
     end
 
@@ -620,6 +661,61 @@ function addon:UpdateTracker()
         end
         self:SetTrackerVisible(db.enabled)
     end
+end
+
+-- Combat-safe refresh: update top-level frame visibility/size and layout only.
+function addon:UpdateCombatFrameVisibility()
+    if not self.trackerFrame then return end
+
+    local scenarioYOffset = 0
+    if self.RenderScenarioSection then
+        local ok, result = pcall(function()
+            return self:RenderScenarioSection()
+        end)
+        if ok then
+            scenarioYOffset = tonumber(result) or 0
+        end
+    end
+
+    if self.scenarioFrame then
+        if scenarioYOffset > 0 then
+            self.scenarioFrame:SetHeight(scenarioYOffset)
+            if self.db and self.db.minimized then
+                self.scenarioFrame:Hide()
+            else
+                self.scenarioFrame:Show()
+            end
+        else
+            self.scenarioFrame:SetHeight(1)
+            self.scenarioFrame:Hide()
+        end
+    end
+
+    -- Hide completed quest frame immediately if no valid auto-quest popup remains.
+    local hasAutoPopup = false
+    if GetNumAutoQuestPopUps and GetAutoQuestPopUp then
+        for i = 1, GetNumAutoQuestPopUps() do
+            local questID, popUpType = GetAutoQuestPopUp(i)
+            if questID then
+                local alreadyDone = C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(questID)
+                local inLog = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
+                local isCompleteNow = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID)
+                local isStaleCompletePopup = (popUpType == "COMPLETE") and (alreadyDone or not inLog or not isCompleteNow)
+                if not alreadyDone and not isStaleCompletePopup then
+                    hasAutoPopup = true
+                    break
+                end
+            end
+        end
+    end
+
+    if self.completedQuestFrame and not hasAutoPopup then
+        self.completedQuestFrame:SetHeight(1)
+        self.completedQuestFrame:Hide()
+    end
+
+    self:UpdateLayoutAnchors()
+    self:UpdateScrollShadows()
 end
 
 -- Collect all trackables (quests, achievements, etc.)
@@ -1023,8 +1119,13 @@ function addon:CollectAutoQuests(trackables)
     for i = 1, GetNumAutoQuestPopUps() do
         local questID, popUpType = GetAutoQuestPopUp(i)
         if questID then
-             -- Only check if we have a title
-             local title = C_QuestLog.GetTitleForQuestID(questID)
+             -- Skip stale popup entries after completion/turn-in.
+             local alreadyDone = C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(questID)
+             local inLog = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
+             local isCompleteNow = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID)
+             local isStaleCompletePopup = (popUpType == "COMPLETE") and (alreadyDone or not inLog or not isCompleteNow)
+
+             local title = (not alreadyDone and not isStaleCompletePopup) and C_QuestLog.GetTitleForQuestID(questID)
              if title then
                  trackables[#trackables + 1] = {
                      type = "autoquest",

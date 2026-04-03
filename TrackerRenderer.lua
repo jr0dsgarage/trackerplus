@@ -116,7 +116,7 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Delegate to section renderers
     --------------------------------------------------------------------------
 
-    -- Auto-quest popups (stolen from Blizzard frames)
+    -- Auto-quest popups (borrowed from Blizzard frames)
     self:RenderAutoQuestSection(autoQuests)
 
     -- Scenario / Delve / Dungeon
@@ -153,14 +153,22 @@ function addon:UpdateTrackerDisplay(trackables)
     --------------------------------------------------------------------------
     self:UpdateLayoutAnchors()
 
+    if addon.LogAt and self.autoQuestFrame then
+        addon:LogAt("trace", "[AQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.autoQuestFrame:GetHeight() or 0, tostring(self.autoQuestFrame:IsShown()))
+    end
+    if addon.LogAt and self.completedQuestFrame then
+        addon:LogAt("trace", "[CQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.completedQuestFrame:GetHeight() or 0, tostring(self.completedQuestFrame:IsShown()))
+    end
+
     DebugLayout(self,
-        "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f",
+        "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f cqH=%.1f",
         tonumber(scenarioYOffset or 0),
         tonumber(aqYOffset or 0),
         tonumber(campaignYOffset or 0),
         tonumber(bonusYOffset or 0),
         tonumber(wqYOffset or 0),
-        tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0)
+        tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0),
+        tonumber((self.completedQuestFrame and self.completedQuestFrame.GetHeight and self.completedQuestFrame:GetHeight()) or 0)
     )
 
     --------------------------------------------------------------------------
