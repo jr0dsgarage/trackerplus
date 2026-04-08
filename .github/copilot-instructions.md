@@ -128,7 +128,47 @@ local addonName, addon = ...
 - **Libraries**: LibSharedMedia-3.0 (LSM) for status bar textures in progress bars.
 - **Dependencies**: None beyond optional LSM.
 
-## Key Files
+## Blizzard Frame Borrowing (Hijacking) Pattern
+Several sections of TrackerPlus "borrow" Blizzard's native tracker frames (ScenarioObjectiveTracker, BonusObjectiveTracker, WorldQuestTrackerButton, auto-quest popups) and reparent them into TrackerPlus containers instead of rendering from scratch. This pattern is efficient but introduces complexity around ownership and anchor stability.
+
+### Borrowing Lifecycle
+1. **Detection**: Search for active Blizzard tracker frame(s) that match criteria (shown, has content, etc.).
+2. **Original State Capture**: Before reparenting, store the frame's original parent and anchor points:
+   ```lua
+   borrowedFrame._trackerPlusOriginalParent = borrowedFrame:GetParent()
+   borrowedFrame._trackerPlusOriginalPoint1,
+   borrowedFrame._trackerPlusOriginalRelTo,
+   borrowedFrame._trackerPlusOriginalPoint2,
+   borrowedFrame._trackerPlusOriginalX,
+   borrowedFrame._trackerPlusOriginalY = borrowedFrame:GetPoint(1)
+   ```
+3. **Reparent**: Move frame under TrackerPlus parent (only outside combat):
+   ```lua
+   if not InCombatLockdown() then
+       borrowedFrame:SetParent(self.containerFrame)
+   end
+   ```
+4. **Anchor**: Apply our own anchor (see "Borrowed Blizzard Frame Anchor Stability" below).
+5. **Restoration** (on teardown or tracker swap): Restore original parent and anchor:
+   ```lua
+   if frameToRestore._trackerPlusOriginalParent then
+       frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
+       frameToRestore:ClearAllPoints()
+       if frameToRestore._trackerPlusOriginalPoint1 then
+           frameToRestore:SetPoint(
+               frameToRestore._trackerPlusOriginalPoint1,
+               frameToRestore._trackerPlusOriginalRelTo,
+               frameToRestore._trackerPlusOriginalPoint2,
+               frameToRestore._trackerPlusOriginalX or 0,
+               frameToRestore._trackerPlusOriginalY or 0
+           )
+       end
+       -- Clear metadata
+       frameToRestore._trackerPlusOriginal* = nil
+   end
+   ```
+
+### Key Files
 - [TrackerPlus.toc](../TrackerPlus.toc): Manifest and load order.
 - [Core.lua](../Core.lua): Event handling, data collection, update loop.
 - [TrackerRenderer.lua](../TrackerRenderer.lua): Render orchestrator.
@@ -147,6 +187,28 @@ local addonName, addon = ...
 - In `Core.lua` `CollectQuests`, treat quests under the quest-log `WORLD_QUESTS` header as world-quest entries even if `C_QuestLog.IsWorldQuest` is transiently false.
 - Completed/ended world quests should be excluded from collection immediately so the grouped header cannot linger.
 - `RenderWorldQuests.lua` restores hijacked Blizzard frames when no world quests are tracked.
+
+### Borrowed Blizzard Frame Anchor Stability (Critical)
+**Problem**: When borrowing a Blizzard frame (e.g., ScenarioObjectiveTracker) into a TrackerPlus parent, Blizzard's internal update code **continuously injects secondary anchor points** each frame. If we only enforce our primary anchor conditionally, the frame drifts/jumps as competing anchors fight for control.
+
+**Solution Pattern** (implemented in `RenderScenario.lua`, `RenderAutoQuests.lua`, `RenderBonusObjectives.lua`, `RenderWorldQuests.lua`):
+1. **Unconditional anchor normalization**: Run anchor enforcement **every single render tick**, not just when drift is detected.
+   ```lua
+   function EnsureFrameBorrowAnchor(owner, borrowedFrame)
+       if not (owner and owner.parentFrame and borrowedFrame) then return end
+       pcall(function()
+           borrowedFrame:ClearAllPoints()
+           borrowedFrame:SetPoint("TARGETPOINT", owner.parentFrame, "TARGETPOINT", xOffs, yOffs)
+       end)
+   end
+   ```
+2. **Multi-point detection**: Check `GetNumPoints()` on every call. If > 1, strip immediately.
+3. **Protected calls**: Wrap anchor operations in `pcall()` to avoid errors when frames are protected during combat.
+4. **No conditional gates**: Do not gate the normalization behind `if needsAnchorUpdate then ... end`. Blizzard adds anchors too fast for conditional checks to catch them.
+
+**Why this works**: By unconditionally normalizing on every frame, we suppress Blizzard's secondary anchor additions faster than they can cause visible drift (the visual rendering passes between our anchor fix and Blizzard's next injection).
+
+**Prevention**: If adding a new section that hijacks Blizzard frames, always implement aggressive anchor normalization for that frame. Test by watching the frame visually for popping/jumping, and log multi-point detections to verify the fix is triggering.
 
 ### Rendering ownership notes
 - Pinned section rendering lives in dedicated section files (`RenderActiveQuest.lua`, `RenderBonusObjectives.lua`, `RenderWorldQuests.lua`), **not** in `TrackerFrame.lua`.

@@ -691,29 +691,6 @@ function addon:UpdateCombatFrameVisibility()
         end
     end
 
-    -- Hide completed quest frame immediately if no valid auto-quest popup remains.
-    local hasAutoPopup = false
-    if GetNumAutoQuestPopUps and GetAutoQuestPopUp then
-        for i = 1, GetNumAutoQuestPopUps() do
-            local questID, popUpType = GetAutoQuestPopUp(i)
-            if questID then
-                local alreadyDone = C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(questID)
-                local inLog = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
-                local isCompleteNow = C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID)
-                local isStaleCompletePopup = (popUpType == "COMPLETE") and (alreadyDone or not inLog or not isCompleteNow)
-                if not alreadyDone and not isStaleCompletePopup then
-                    hasAutoPopup = true
-                    break
-                end
-            end
-        end
-    end
-
-    if self.completedQuestFrame and not hasAutoPopup then
-        self.completedQuestFrame:SetHeight(1)
-        self.completedQuestFrame:Hide()
-    end
-
     self:UpdateLayoutAnchors()
     self:UpdateScrollShadows()
 end
@@ -921,6 +898,26 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     return questInfo
 end
 
+function addon:IsCampaignQuestLogEntry(logIndex, info)
+    if not logIndex or logIndex <= 0 then return false end
+
+    info = info or C_QuestLog.GetInfo(logIndex)
+    if not info or info.isHeader then return false end
+
+    if (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory then
+        return true
+    end
+
+    for i = logIndex - 1, 1, -1 do
+        local headerInfo = C_QuestLog.GetInfo(i)
+        if headerInfo and headerInfo.isHeader then
+            return (headerInfo.campaignID and headerInfo.campaignID ~= 0) or headerInfo.isCampaign or headerInfo.isStory or false
+        end
+    end
+
+    return false
+end
+
 function addon:GetQuestShortDescription(questID, logIndex)
     -- Resolve log index if not provided
     local idx = logIndex
@@ -995,7 +992,7 @@ function addon:CollectQuests(trackables)
                 end
 
                 if (not info.isHidden or allowHidden) and shouldInclude then
-                    local isCamp = currentHeaderIsCampaign or (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory
+                    local isCamp = currentHeaderIsCampaign or self:IsCampaignQuestLogEntry(i, info)
                     local questType = nil
                     if treatAsWorldQuest then
                         questType = "worldquest"
@@ -1592,6 +1589,10 @@ function addon:CollectSuperTrackedQuest(trackables)
     -- But assuming it's in the log for now:
     local logIndex = C_QuestLog.GetLogIndexForQuestID(superTrackedQuestID)
     if not logIndex then return end
+
+    if not self.db.includeCampaignQuestInActiveQuest and self:IsCampaignQuestLogEntry(logIndex) then
+        return
+    end
 
     local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
     if questInfo then

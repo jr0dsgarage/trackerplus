@@ -48,7 +48,7 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
         elseif dbKey == "headerIconPosition" then
              if addon.UpdateMinMaxState then addon:UpdateMinMaxState() end
              addon:RefreshDisplay()
-        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") then
+        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" then
             addon:RefreshDisplay()
         elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
             addon:RequestUpdate()
@@ -645,6 +645,7 @@ local function InitUI()
     s, sy = StartSection(p4, "Display Options", y)
     sy = CreateCheckbox(s, "Show Quest Level", "showQuestLevel", "Show the level of the quest", sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
+    sy = CreateCheckbox(s, "Include Campaign Quest in Active Quest", "includeCampaignQuestInActiveQuest", "When enabled, a pinned campaign quest also appears in the Active Quest section instead of only in Campaign Quests.", sy)
     sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)
     y = y - EndSection(s, sy)
     

@@ -10,6 +10,64 @@ local bit_band = bit.band
 -- Local aliases for addon utilities
 local DebugLayout = function(...) return addon.DebugLayout(...) end
 
+local function EnsureScenarioBorrowAnchor(owner, borrowedFrame)
+    if not (owner and owner.scenarioFrame and borrowedFrame) then
+        return
+    end
+
+    -- AGGRESSIVE anchor enforcement: ALWAYS normalize, do NOT gate behind a condition.
+    -- Blizzard code adds secondary anchor points every frame; we must strip them EVERY frame.
+    pcall(function()
+        local numPoints = borrowedFrame.GetNumPoints and borrowedFrame:GetNumPoints() or 0
+        
+        -- Only log on drift or extra points for noise reduction
+        if numPoints ~= 1 then
+            local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)
+            if addon.LogAt then
+                addon:LogAt("trace", "[SCN-ANCHOR-FIX] strip %d extra points point=%s x=%.1f y=%.1f",
+                    numPoints, tostring(point), tonumber(xOfs or 0), tonumber(yOfs or 0))
+            end
+        end
+        
+        -- Strip ALL competing anchor points and set ONLY our point
+        borrowedFrame:ClearAllPoints()
+        borrowedFrame:SetPoint("TOPRIGHT", owner.scenarioFrame, "TOPRIGHT", 0, 0)
+    end)
+end
+
+local function DescribeAnchor(frame)
+    if not frame then
+        return "frame=nil"
+    end
+
+    local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint(1)
+    local relName = relativeTo and (relativeTo.GetName and relativeTo:GetName() or tostring(relativeTo)) or "nil"
+    local frameName = frame.GetName and frame:GetName() or "<unnamed>"
+    local top = frame.GetTop and (frame:GetTop() or 0) or 0
+    local bottom = frame.GetBottom and (frame:GetBottom() or 0) or 0
+    local height = frame.GetHeight and (frame:GetHeight() or 0) or 0
+    local shown = frame.IsShown and frame:IsShown() or false
+    local parent = frame.GetParent and frame:GetParent() or nil
+    local parentName = parent and (parent.GetName and parent:GetName() or tostring(parent)) or "nil"
+    local numPoints = frame.GetNumPoints and frame:GetNumPoints() or 0
+
+    return format(
+        "%s parent=%s p=%s rel=%s rp=%s x=%.1f y=%.1f top=%.1f bottom=%.1f h=%.1f shown=%s pts=%d",
+        tostring(frameName),
+        tostring(parentName),
+        tostring(point),
+        tostring(relName),
+        tostring(relativePoint),
+        tonumber(xOfs or 0),
+        tonumber(yOfs or 0),
+        tonumber(top or 0),
+        tonumber(bottom or 0),
+        tonumber(height or 0),
+        tostring(shown),
+        tonumber(numPoints or 0)
+    )
+end
+
 -------------------------------------------------------------------------------
 -- RenderScenarioSection — manual mirror rendering
 -- Returns: scenarioYOffset (total height consumed by scenario section)
@@ -74,6 +132,7 @@ function addon:RenderScenarioSection()
     if scenarioTracker and scenarioTracker.ContentsFrame and not hasManualScenarioData and inScenario then
         local contents = scenarioTracker.ContentsFrame
         local borrowedFrame = scenarioTracker
+        local trackerChanged = self._activeScenarioBorrowedTracker ~= borrowedFrame
         
         if addon.LogAt then
             addon:LogAt("trace", "[SCN-BORROW] borrowing full tracker=%s trackerShown=%s trackerH=%.1f contentsShown=%s contentsH=%.1f",
@@ -83,6 +142,10 @@ function addon:RenderScenarioSection()
 
         -- Borrow full tracker frame so its internal subtree remains coherent.
         if borrowedFrame then
+            if trackerChanged and self._activeScenarioBorrowedTracker and self.RestoreBorrowedFrames then
+                self:RestoreBorrowedFrames()
+            end
+
             -- Store original parent for later restoration
             if not InCombatLockdown() and not borrowedFrame._trackerPlusOriginalParent then
                 borrowedFrame._trackerPlusOriginalParent = borrowedFrame:GetParent()
@@ -97,16 +160,16 @@ function addon:RenderScenarioSection()
                 end
             end
             
-            -- Reparent to scenarioFrame (minimal mutation to avoid taint)
+            -- Reparent/anchor only when needed to avoid visible popping from
+            -- repeated mutation each render tick.
             if not InCombatLockdown() and borrowedFrame:GetParent() ~= self.scenarioFrame then
                 borrowedFrame:SetParent(self.scenarioFrame)
             end
-            
-            -- Keep anchor fresh out of combat; in combat only size/visibility updates are applied.
-            if not InCombatLockdown() then
-                borrowedFrame:ClearAllPoints()
-                borrowedFrame:SetPoint("TOPRIGHT", self.scenarioFrame, "TOPRIGHT", 0, 0)
-            end
+
+            -- Keep anchor stable without forcing a full re-anchor every frame.
+            EnsureScenarioBorrowAnchor(self, borrowedFrame)
+
+            self._activeScenarioBorrowedTracker = borrowedFrame
             
             -- Use the larger of tracker/contents heights so the slot doesn't collapse.
             local trackerHeight = borrowedFrame:GetHeight() or 0
@@ -121,9 +184,12 @@ function addon:RenderScenarioSection()
             scenarioYOffset = widgetHeight + 5
             
             if addon.LogAt then
-                addon:LogAt("trace", "[SCN-BORROW] reparented frame=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
+                addon:LogAt("trace", "[SCN-BORROW] active frame=%s trackerChanged=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
                     tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"),
-                    tonumber(trackerHeight or 0), tonumber(contentsHeight or 0), tonumber(scenarioYOffset or 0))
+                    tostring(trackerChanged), tonumber(trackerHeight or 0), tonumber(contentsHeight or 0), tonumber(scenarioYOffset or 0))
+                addon:LogAt("trace", "[SCN-ANCHOR] scenario=%s", DescribeAnchor(self.scenarioFrame))
+                addon:LogAt("trace", "[SCN-ANCHOR] tracker=%s", DescribeAnchor(borrowedFrame))
+                addon:LogAt("trace", "[SCN-ANCHOR] contents=%s", DescribeAnchor(contents))
             end
         end
     elseif hasManualScenarioData then
@@ -450,6 +516,11 @@ function addon:RenderScenarioSection()
                button._scriptMode = "scenarioRow"
                scenarioYOffset = scenarioYOffset + height + 8
         end
+    end
+
+    if (not scenarioTracker or not inScenario) and self._activeScenarioBorrowedTracker and self.RestoreBorrowedFrames then
+        self:RestoreBorrowedFrames()
+        self._activeScenarioBorrowedTracker = nil
     end
 
     if not scenarioTracker and addon.LogAt then

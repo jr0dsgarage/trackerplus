@@ -197,11 +197,12 @@ function addon:CreateTrackerFrame()
     autoQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     self.autoQuestFrame = autoQuestFrame
     
-    -- Completed Quest Frame (Below auto/active quest if visible, outside scroll frame)
+    -- Completed Quest Frame (Pinned to the scenario frame so borrowed popups stay fixed)
     completedQuestFrame = CreateFrame("Frame", nil, trackerFrame)
-    completedQuestFrame:SetPoint("TOPLEFT", autoQuestFrame, "BOTTOMLEFT", 0, 0)
-    completedQuestFrame:SetPoint("TOPRIGHT", autoQuestFrame, "BOTTOMRIGHT", 0, 0)
+    completedQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
+    completedQuestFrame:SetWidth((self.db and self.db.frameWidth and (self.db.frameWidth - 10)) or 300)
     completedQuestFrame:SetHeight(1)
+    completedQuestFrame:SetFrameStrata("HIGH")
     self.completedQuestFrame = completedQuestFrame
 
     -- World Quest Frame (Pinned to absolute bottom)
@@ -521,8 +522,6 @@ function addon:UpdateLayoutAnchors()
     if acqVisible   then topSections[#topSections + 1] = self.activeQuestFrame end
     if campVisible  then topSections[#topSections + 1] = self.campaignFrame    end
     if aqVisible    then topSections[#topSections + 1] = self.autoQuestFrame   end
-    if cqVisible    then topSections[#topSections + 1] = self.completedQuestFrame end
-
     local prevFrame  = self.trackerFrame
     local prevPoint  = "TOPLEFT"
     local prevPointR = "TOPRIGHT"
