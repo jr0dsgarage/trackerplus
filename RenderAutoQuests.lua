@@ -4,6 +4,9 @@ local addonName, addon = ...
 local ipairs, pairs = ipairs, pairs
 local max = math.max
 local GetTime = GetTime
+local hooksecurefunc = hooksecurefunc
+
+local COMPLETED_QUEST_POPUP_X = -20
 
 local AUTO_QUEST_POPUP_PREFIXES = {
     "WatchFrameAutoQuestPopUp",
@@ -13,6 +16,83 @@ local AUTO_QUEST_POPUP_PREFIXES = {
 }
 
 local FindAutoQuestPopupFrame
+
+local function NormalizeCompletedQuestPopupAnchor(owner, popup)
+    local completedQuestFrame = owner and owner.completedQuestFrame
+    if not (completedQuestFrame and popup and popup._trackerPlusAnchorLockEnabled) then
+        return
+    end
+
+    local targetX = tonumber(popup._trackerPlusLockedAnchorX or COMPLETED_QUEST_POPUP_X) or COMPLETED_QUEST_POPUP_X
+    local targetY = tonumber(popup._trackerPlusLockedAnchorY or 0) or 0
+
+    if popup:GetParent() ~= completedQuestFrame then
+        popup:SetParent(completedQuestFrame)
+    end
+
+    local point, relativeTo, relativePoint, xOfs, yOfs = popup:GetPoint(1)
+    local numPoints = popup.GetNumPoints and popup:GetNumPoints() or 0
+    local isDirty =
+        numPoints ~= 1
+        or point ~= "TOPRIGHT"
+        or relativeTo ~= completedQuestFrame
+        or relativePoint ~= "TOPRIGHT"
+        or tonumber(xOfs or 0) ~= targetX
+        or tonumber(yOfs or 0) ~= targetY
+
+    if not isDirty then
+        return
+    end
+
+    popup:ClearAllPoints()
+    popup:SetPoint("TOPRIGHT", completedQuestFrame, "TOPRIGHT", targetX, targetY)
+
+    if addon.LogAt then
+        addon:LogAt("trace", "[CQ-ANCHOR-FIX] normalize popup=%s points=%d p=%s rp=%s x=%.1f y=%.1f targetX=%.1f targetY=%.1f",
+            tostring(popup.GetName and popup:GetName() or "<unnamed>"),
+            tonumber(numPoints or 0),
+            tostring(point),
+            tostring(relativePoint),
+            tonumber(xOfs or 0),
+            tonumber(yOfs or 0),
+            tonumber(targetX or 0),
+            tonumber(targetY or 0))
+    end
+end
+
+local function InstallCompletedQuestPopupAnchorGuards(owner, popup)
+    if not (owner and popup and hooksecurefunc) then
+        return
+    end
+    if popup._trackerPlusAnchorGuardsInstalled then
+        return
+    end
+
+    popup._trackerPlusAnchorGuardsInstalled = true
+
+    local function normalizeFromGuard(frame)
+        if not (frame and frame._trackerPlusAnchorLockEnabled) then
+            return
+        end
+        if frame._trackerPlusGuardApplying then
+            return
+        end
+
+        frame._trackerPlusGuardApplying = true
+        pcall(function()
+            NormalizeCompletedQuestPopupAnchor(owner, frame)
+        end)
+        frame._trackerPlusGuardApplying = nil
+    end
+
+    hooksecurefunc(popup, "SetPoint", function(frame)
+        normalizeFromGuard(frame)
+    end)
+
+    hooksecurefunc(popup, "ClearAllPoints", function(frame)
+        normalizeFromGuard(frame)
+    end)
+end
 
 local function IsLikelyAutoQuestPopupFrame(frame)
     if not frame then
@@ -226,6 +306,9 @@ local function RestoreStaleBorrowedPopups(owner, keep)
     for popup, _ in pairs(owner._borrowedAutoQuestPopups) do
         if not keep or not keep[popup] then
             if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
+                popup._trackerPlusAnchorLockEnabled = nil
+                popup._trackerPlusLockedAnchorX = nil
+                popup._trackerPlusLockedAnchorY = nil
                 popup:SetParent(popup._trackerPlusOriginalParent)
                 popup:ClearAllPoints()
 
@@ -277,21 +360,14 @@ local function HideLegacyCompletedQuestChildren(frame, keep)
 end
 
 local function EnsureCompletedQuestFrameAnchor(owner)
+    -- Position is managed by UpdateLayoutAnchors (completedQuestFrame is in the topSections chain).
+    -- This function only ensures the frame level is elevated so popups render above sibling sections.
     local completedQuestFrame = owner and owner.completedQuestFrame
     local scenarioFrame = owner and owner.scenarioFrame
     if not (completedQuestFrame and scenarioFrame) then
         return
     end
-
-    local targetWidth = max(1, (scenarioFrame.GetWidth and scenarioFrame:GetWidth()) or completedQuestFrame:GetWidth() or 1)
-    local anchorSig = tostring(scenarioFrame) .. "|" .. tostring(targetWidth)
-    if completedQuestFrame._tpPopupAnchorSig ~= anchorSig then
-        completedQuestFrame:ClearAllPoints()
-        completedQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
-        completedQuestFrame:SetWidth(targetWidth)
-        completedQuestFrame:SetFrameLevel((scenarioFrame:GetFrameLevel() or 0) + 10)
-        completedQuestFrame._tpPopupAnchorSig = anchorSig
-    end
+    completedQuestFrame:SetFrameLevel((scenarioFrame:GetFrameLevel() or 0) + 10)
 end
 
 -------------------------------------------------------------------------------
@@ -310,6 +386,21 @@ function addon:RenderAutoQuestSection(autoQuests)
         self._autoQuestBorrowSessionUntil = nil
         completedQuestFrame:SetHeight(1)
         completedQuestFrame:Hide()
+        return
+    end
+
+    -- If no auto quests are currently tracked, do not keep any persisted borrowed
+    -- completion popup alive. This prevents stale frames from lingering after quest
+    -- completion when Blizzard leaves a visible shell frame behind.
+    if not autoQuests or #autoQuests == 0 then
+        RestoreStaleBorrowedPopups(self, nil)
+        HideLegacyCompletedQuestChildren(completedQuestFrame, nil)
+        self._autoQuestBorrowSessionUntil = nil
+        completedQuestFrame:SetHeight(1)
+        completedQuestFrame:Hide()
+        if addon.LogAt then
+            addon:LogAt("trace", "[AQ-PATH] no tracked autoQuests, force hiding completedQuestFrame")
+        end
         return
     end
 
@@ -332,7 +423,13 @@ function addon:RenderAutoQuestSection(autoQuests)
 
     for _, popup in ipairs(popups) do
         if popup and not (popup.IsProtected and popup:IsProtected()) then
-            popup._trackerPlusLastAutoQuestSeenAt = now
+            -- Only refresh grace timers for popups that currently have real content.
+            -- If we refresh for non-renderable (empty/hidden) popups the session window
+            -- and "recently seen" timers perpetually self-extend, keeping the frame alive
+            -- forever after quest completion.
+            if IsRenderableBorrowedAutoQuestPopup(popup) then
+                popup._trackerPlusLastAutoQuestSeenAt = now
+            end
 
             if not popup._trackerPlusOriginalParent then
                 popup._trackerPlusOriginalParent = popup:GetParent()
@@ -356,8 +453,12 @@ function addon:RenderAutoQuestSection(autoQuests)
                 popup:SetParent(completedQuestFrame)
             end
 
-            popup:ClearAllPoints()
-            popup:SetPoint("TOPRIGHT", completedQuestFrame, "TOPRIGHT", 0, -yOff)
+            popup._trackerPlusLockedAnchorX = COMPLETED_QUEST_POPUP_X
+            popup._trackerPlusLockedAnchorY = -yOff
+            InstallCompletedQuestPopupAnchorGuards(self, popup)
+            popup._trackerPlusAnchorLockEnabled = true
+
+            NormalizeCompletedQuestPopupAnchor(self, popup)
 
             EnsureAutoQuestPopupVisible(popup)
 
@@ -371,7 +472,19 @@ function addon:RenderAutoQuestSection(autoQuests)
     end
 
     if borrowedCount > 0 then
-        self._autoQuestBorrowSessionUntil = now + 0.9
+        -- Only extend session window when we have popups with real content.
+        -- Checking whether any active borrowed popup is actually renderable prevents
+        -- the session from being extended indefinitely by empty/hidden leftover frames.
+        local hasRenderable = false
+        for popup, _ in pairs(activeBorrowed) do
+            if IsRenderableBorrowedAutoQuestPopup(popup) then
+                hasRenderable = true
+                break
+            end
+        end
+        if hasRenderable then
+            self._autoQuestBorrowSessionUntil = now + 0.9
+        end
     end
 
     RestoreStaleBorrowedPopups(self, activeBorrowed)

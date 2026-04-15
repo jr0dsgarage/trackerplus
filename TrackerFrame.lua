@@ -522,6 +522,7 @@ function addon:UpdateLayoutAnchors()
     if acqVisible   then topSections[#topSections + 1] = self.activeQuestFrame end
     if campVisible  then topSections[#topSections + 1] = self.campaignFrame    end
     if aqVisible    then topSections[#topSections + 1] = self.autoQuestFrame   end
+    if cqVisible    then topSections[#topSections + 1] = self.completedQuestFrame end
     local prevFrame  = self.trackerFrame
     local prevPoint  = "TOPLEFT"
     local prevPointR = "TOPRIGHT"

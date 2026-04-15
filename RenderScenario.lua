@@ -6,6 +6,7 @@ local ipairs, pairs, pcall, tostring = ipairs, pairs, pcall, tostring
 local format, match = string.format, string.match
 local max, floor = math.max, math.floor
 local bit_band = bit.band
+local hooksecurefunc = hooksecurefunc
 
 -- Local aliases for addon utilities
 local DebugLayout = function(...) return addon.DebugLayout(...) end
@@ -15,23 +16,72 @@ local function EnsureScenarioBorrowAnchor(owner, borrowedFrame)
         return
     end
 
-    -- AGGRESSIVE anchor enforcement: ALWAYS normalize, do NOT gate behind a condition.
-    -- Blizzard code adds secondary anchor points every frame; we must strip them EVERY frame.
+    -- Canonical borrow anchor: one point only, pinned to scenarioFrame TOPRIGHT (0, 0).
+    -- Repair only when dirty to minimize churn, but strip immediately if Blizzard injects
+    -- extra points or wrong offsets.
     pcall(function()
+        local parent = borrowedFrame:GetParent()
         local numPoints = borrowedFrame.GetNumPoints and borrowedFrame:GetNumPoints() or 0
-        
-        -- Only log on drift or extra points for noise reduction
-        if numPoints ~= 1 then
-            local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)
-            if addon.LogAt then
-                addon:LogAt("trace", "[SCN-ANCHOR-FIX] strip %d extra points point=%s x=%.1f y=%.1f",
-                    numPoints, tostring(point), tonumber(xOfs or 0), tonumber(yOfs or 0))
-            end
+        local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)
+        local isDirty =
+            parent ~= owner.scenarioFrame
+            or numPoints ~= 1
+            or point ~= "TOPRIGHT"
+            or relativeTo ~= owner.scenarioFrame
+            or relativePoint ~= "TOPRIGHT"
+            or tonumber(xOfs or 0) ~= 0
+            or tonumber(yOfs or 0) ~= 0
+
+        if not isDirty then
+            return
         end
-        
-        -- Strip ALL competing anchor points and set ONLY our point
+
+        if addon.LogAt then
+            addon:LogAt("trace", "[SCN-ANCHOR-FIX] normalize parent=%s points=%d p=%s rp=%s x=%.1f y=%.1f",
+                tostring(parent), tonumber(numPoints or 0), tostring(point), tostring(relativePoint), tonumber(xOfs or 0), tonumber(yOfs or 0))
+        end
+
         borrowedFrame:ClearAllPoints()
         borrowedFrame:SetPoint("TOPRIGHT", owner.scenarioFrame, "TOPRIGHT", 0, 0)
+    end)
+end
+
+local function InstallScenarioAnchorGuards(owner, borrowedFrame)
+    if not (owner and borrowedFrame and hooksecurefunc) then
+        return
+    end
+    if borrowedFrame._trackerPlusAnchorGuardsInstalled then
+        return
+    end
+
+    borrowedFrame._trackerPlusAnchorGuardsInstalled = true
+
+    local function shouldGuard(frame)
+        return frame
+            and frame == owner._activeScenarioBorrowedTracker
+            and frame:GetParent() == owner.scenarioFrame
+            and frame._trackerPlusAnchorLockEnabled
+    end
+
+    local function normalizeFromGuard(frame)
+        if not shouldGuard(frame) then
+            return
+        end
+        if frame._trackerPlusGuardApplying then
+            return
+        end
+
+        frame._trackerPlusGuardApplying = true
+        EnsureScenarioBorrowAnchor(owner, frame)
+        frame._trackerPlusGuardApplying = nil
+    end
+
+    hooksecurefunc(borrowedFrame, "SetPoint", function(frame)
+        normalizeFromGuard(frame)
+    end)
+
+    hooksecurefunc(borrowedFrame, "ClearAllPoints", function(frame)
+        normalizeFromGuard(frame)
     end)
 end
 
@@ -143,6 +193,7 @@ function addon:RenderScenarioSection()
         -- Borrow full tracker frame so its internal subtree remains coherent.
         if borrowedFrame then
             if trackerChanged and self._activeScenarioBorrowedTracker and self.RestoreBorrowedFrames then
+                self._activeScenarioBorrowedTracker._trackerPlusAnchorLockEnabled = nil
                 self:RestoreBorrowedFrames()
             end
 
@@ -154,6 +205,7 @@ function addon:RenderScenarioSection()
                 borrowedFrame._trackerPlusOriginalPoint2,
                 borrowedFrame._trackerPlusOriginalX,
                 borrowedFrame._trackerPlusOriginalY = borrowedFrame:GetPoint(1)
+
                 if addon.LogAt then
                     addon:LogAt("trace", "[SCN-BORROW] stored original parent, reparenting %s to scenarioFrame",
                         tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"))
@@ -165,6 +217,9 @@ function addon:RenderScenarioSection()
             if not InCombatLockdown() and borrowedFrame:GetParent() ~= self.scenarioFrame then
                 borrowedFrame:SetParent(self.scenarioFrame)
             end
+
+            InstallScenarioAnchorGuards(self, borrowedFrame)
+            borrowedFrame._trackerPlusAnchorLockEnabled = true
 
             -- Keep anchor stable without forcing a full re-anchor every frame.
             EnsureScenarioBorrowAnchor(self, borrowedFrame)
@@ -519,6 +574,7 @@ function addon:RenderScenarioSection()
     end
 
     if (not scenarioTracker or not inScenario) and self._activeScenarioBorrowedTracker and self.RestoreBorrowedFrames then
+        self._activeScenarioBorrowedTracker._trackerPlusAnchorLockEnabled = nil
         self:RestoreBorrowedFrames()
         self._activeScenarioBorrowedTracker = nil
     end

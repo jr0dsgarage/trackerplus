@@ -21,6 +21,12 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
     local renderedNormalItems = 0
     local renderedHeaders = 0
 
+    -- Compatibility: Auctionator Crafting Search Button — pre-hide before render pass.
+    -- Will be reparented and shown when the Professions major header is encountered below.
+    if AuctionatorCraftingInfoObjectiveTrackerFrame then
+        AuctionatorCraftingInfoObjectiveTrackerFrame:Hide()
+    end
+
     -- Display trackables
     for _, item in ipairs(trackables) do
         if item.isHeader then
@@ -69,10 +75,18 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             -- Compatibility: Auctionator Crafting Search Button
             if isMajor and item.key == "MAJOR_profession" then
                 if AuctionatorCraftingInfoObjectiveTrackerFrame then
-                     if not (AuctionatorCraftingInfoObjectiveTrackerFrame.IsProtected and AuctionatorCraftingInfoObjectiveTrackerFrame:IsProtected()) then
-                            -- Mirror-only mode: do not reparent external tracker widgets.
-                            AuctionatorCraftingInfoObjectiveTrackerFrame:Hide()
-                     end
+                    if not (AuctionatorCraftingInfoObjectiveTrackerFrame.IsProtected and AuctionatorCraftingInfoObjectiveTrackerFrame:IsProtected()) then
+                        -- Reparent onto this TrackerPlus header so the Search button is visible
+                        -- when the Auction House is open and recipes are tracked.
+                        if AuctionatorCraftingInfoObjectiveTrackerFrame:GetParent() ~= header then
+                            AuctionatorCraftingInfoObjectiveTrackerFrame:SetParent(header)
+                        end
+                        AuctionatorCraftingInfoObjectiveTrackerFrame:ClearAllPoints()
+                        AuctionatorCraftingInfoObjectiveTrackerFrame:SetPoint("TOPRIGHT", header, "TOPRIGHT", -20, -1)
+                        AuctionatorCraftingInfoObjectiveTrackerFrame:SetFrameLevel(header:GetFrameLevel() + 5)
+                        -- Let Auctionator manage its own visibility (only shows when AH is open + recipes tracked)
+                        AuctionatorCraftingInfoObjectiveTrackerFrame:ShowIfRelevant()
+                    end
                 end
             end
             
