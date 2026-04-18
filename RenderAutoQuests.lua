@@ -367,7 +367,7 @@ local function EnsureCompletedQuestFrameAnchor(owner)
     if not (completedQuestFrame and scenarioFrame) then
         return
     end
-    completedQuestFrame:SetFrameLevel((scenarioFrame:GetFrameLevel() or 0) + 10)
+    completedQuestFrame:SetFrameLevel((scenarioFrame:GetFrameLevel() or 0) + 2)
 end
 
 -------------------------------------------------------------------------------

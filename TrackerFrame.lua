@@ -39,8 +39,9 @@ function addon:CreateTrackerFrame()
     -- Main frame
     trackerFrame = CreateFrame("Frame", "TrackerPlusFrame", UIParent)
     trackerFrame:SetSize(self.db.frameWidth, self.db.frameHeight)
-    trackerFrame:SetFrameStrata("MEDIUM")
-    trackerFrame:SetFrameLevel(10)
+    -- Keep the whole tracker behind normal UI panels; internal children sit above this base.
+    trackerFrame:SetFrameStrata("BACKGROUND")
+    trackerFrame:SetFrameLevel(1)
     trackerFrame:SetClampedToScreen(true)
     
     -- Make draggable & resizable (Must be set before SetUserPlaced)
@@ -170,7 +171,7 @@ function addon:CreateTrackerFrame()
     
     -- Scenario Frame (Top-pinned, outside scroll frame, anchored dynamically by layout)
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
-    scenarioFrame:SetFrameStrata("HIGH") -- Ensure it sits above scrolling content
+    scenarioFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
     scenarioFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
     scenarioFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
     scenarioFrame:SetHeight(1) -- Dynamic, set by renderer + layout
@@ -178,14 +179,14 @@ function addon:CreateTrackerFrame()
 
     -- Active Quest Frame (Super-tracked quest, sits between Scenario and auto-quest popups)
     local activeQuestFrame = CreateFrame("Frame", nil, trackerFrame)
-    activeQuestFrame:SetFrameStrata("HIGH")
+    activeQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
     activeQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     activeQuestFrame:Hide()
     self.activeQuestFrame = activeQuestFrame
 
     -- Campaign Frame (Pinned below Active Quest when campaign quests are present)
     local campaignFrame = CreateFrame("Frame", nil, trackerFrame)
-    campaignFrame:SetFrameStrata("HIGH")
+    campaignFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
     campaignFrame:SetHeight(1)
     campaignFrame:Hide()
     self.campaignFrame = campaignFrame
@@ -202,7 +203,7 @@ function addon:CreateTrackerFrame()
     completedQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
     completedQuestFrame:SetWidth((self.db and self.db.frameWidth and (self.db.frameWidth - 10)) or 300)
     completedQuestFrame:SetHeight(1)
-    completedQuestFrame:SetFrameStrata("HIGH")
+    completedQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 2)
     self.completedQuestFrame = completedQuestFrame
 
     -- World Quest Frame (Pinned to absolute bottom)
