@@ -7,16 +7,6 @@ local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
 panel.name = "TrackerPlus"
 local refreshDebugControlsUI = nil
 
--- Modern scroll frame setup
-local scrollFrame = CreateFrame("ScrollFrame", addonName .. "SettingsScrollFrame", panel, "UIPanelScrollFrameTemplate")
-scrollFrame:SetPoint("TOPLEFT", 5, -35) -- Adjusted for Tabs
-scrollFrame:SetPoint("BOTTOMRIGHT", -27, 4)
-
--- Content frame (this will hold all our controls)
-local content = CreateFrame("Frame", nil, scrollFrame)
-content:SetSize(600, 1000) -- Initial height, will be adjusted dynamically
-scrollFrame:SetScrollChild(content)
-
 -- Helper: Create Header
 local function CreateHeader(parent, text, yOffset)
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -371,94 +361,61 @@ local function InitUI()
     version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 8, 2)
     version:SetText("v1.0.0") -- Should ideally pull from TOC
 
-    -- Global Settings (Outside Tabs)
+    -- Global Settings (Parent page)
     local globalFrame, gY = StartSection(panel, "Global Settings", -45)
     gY = CreateCheckbox(globalFrame, "Enable TrackerPlus", "enabled", "Enable or disable the tracker", gY)
     gY = CreateCheckbox(globalFrame, "Lock Panel", "locked", "Lock the tracker frame position", gY)
-    local globalHeight = EndSection(globalFrame, gY)
+    EndSection(globalFrame, gY)
 
-    local pages = {}
-    local tabs = {}
-    
-    local function SelectTab(id)
-        for i, tab in ipairs(tabs) do
-            if i == id then
-                if PanelTemplates_SelectTab then
-                    PanelTemplates_SelectTab(tab)
-                else
-                    tab:Disable() -- Visual indication for selected
-                end
-                
-                if pages[i] then 
-                    pages[i]:Show() 
-                    -- Update content height
-                    if pages[i].finalHeight then
-                         content:SetHeight(pages[i].finalHeight)
-                    end
-                end
-            else
-                if PanelTemplates_DeselectTab then
-                    PanelTemplates_DeselectTab(tab)
-                else
-                    tab:Enable()
-                end
-                
-                if pages[i] then pages[i]:Hide() end
-            end
-        end
-        scrollFrame:SetVerticalScroll(0)
-    end
-    
-    local function CreateTabs(parent)
-        local tabNames = {"General", "Appearance", "Layout", "Tracking", "Debug"}
-        local prevTab
-        
-        for i, name in ipairs(tabNames) do
-            local tab = CreateFrame("Button", addonName.."Tab"..i, parent, "PanelTopTabButtonTemplate")
-            tab:SetID(i)
-            tab:SetText(name)
-            tab:SetScript("OnClick", function(self) SelectTab(self:GetID()) end)
-            
-            if i == 1 then
-                -- Anchor tabs below global settings
-                tab:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -(45 + globalHeight + 10)) 
-            else
-                tab:SetPoint("LEFT", prevTab, "RIGHT", -5, 0)
-            end
-            
-            if PanelTemplates_TabResize then
-                PanelTemplates_TabResize(tab, 0)
-            else
-                 local textWidth = tab:GetFontString():GetStringWidth()
-                 tab:SetWidth(textWidth + 20)
-            end
+    local overview = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    overview:SetPoint("TOPLEFT", globalFrame, "BOTTOMLEFT", 8, -8)
+    overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
+    overview:SetJustifyH("LEFT")
+    overview:SetText("Expand TrackerPlus in the Settings list to open General, Appearance, Layout, Tracking, and Debug pages.")
 
-            table.insert(tabs, tab)
-            prevTab = tab
-        end
-        return -(45 + globalHeight + 40) -- Return Y start for scrollframe
-    end
+    local orderedPages = {}
 
-    local startY = CreateTabs(panel)
+    local function CreateSettingsPage(id, pageTitle, pageDescription)
+        local page = CreateFrame("Frame", "TrackerPlusOptionsPage" .. id)
+        page.name = pageTitle
+        page.parent = panel.name
 
-    -- Adjust ScrollFrame to be below tabs
-    scrollFrame:ClearAllPoints()
-    scrollFrame:SetPoint("TOPLEFT", 5, startY) 
-    scrollFrame:SetPoint("BOTTOMRIGHT", -27, 4)
+        local titleText = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        titleText:SetPoint("TOPLEFT", 16, -16)
+        titleText:SetText(pageTitle)
 
-    
-    local function CreatePage()
-        local page = CreateFrame("Frame", nil, content)
-        page:SetSize(600, 100)
-        page:SetPoint("TOPLEFT")
-        page:SetPoint("TOPRIGHT")
-        page:Hide()
-        table.insert(pages, page)
-        return page
+        local descText = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        descText:SetPoint("TOPLEFT", titleText, "BOTTOMLEFT", 0, -8)
+        descText:SetPoint("RIGHT", page, "RIGHT", -16, 0)
+        descText:SetJustifyH("LEFT")
+        descText:SetText(pageDescription or "")
+
+        local scrollFrame = CreateFrame("ScrollFrame", addonName .. "SettingsScrollFrame" .. id, page, "UIPanelScrollFrameTemplate")
+        scrollFrame:SetPoint("TOPLEFT", 5, -55)
+        scrollFrame:SetPoint("BOTTOMRIGHT", -27, 4)
+
+        local content = CreateFrame("Frame", nil, scrollFrame)
+        content:SetSize(600, 100)
+        scrollFrame:SetScrollChild(content)
+
+        scrollFrame:SetScript("OnShow", function(self)
+            self:SetVerticalScroll(0)
+        end)
+
+        local pageInfo = {
+            id = id,
+            name = pageTitle,
+            frame = page,
+            content = content,
+        }
+
+        table.insert(orderedPages, pageInfo)
+        return pageInfo
     end
     
     -- Page 1: General (Advanced)
-    local p1 = CreatePage()
+    local generalPageInfo = CreateSettingsPage("General", "General", "Visibility and baseline behavior options.")
+    local p1 = generalPageInfo.content
     local y = -5
     local s, sy
     
@@ -479,10 +436,11 @@ local function InitUI()
     sy = sy - 35
     y = y - EndSection(s, sy)
     
-    p1.finalHeight = math.abs(y) + 20
+    p1:SetHeight(math.abs(y) + 20)
     
     -- Page 2: Appearance
-    local p2 = CreatePage()
+    local appearancePageInfo = CreateSettingsPage("Appearance", "Appearance", "Frame dimensions, styling, fonts, and colors.")
+    local p2 = appearancePageInfo.content
     y = -5
     
     s, sy = StartSection(p2, "Dimensions", y)
@@ -613,10 +571,11 @@ local function InitUI()
     sy = CreateColorPicker(s, "Failed Color", "failedColor", updateDisplay, sy)
     y = y - EndSection(s, sy)
     
-    p2.finalHeight = math.abs(y) + 20
+    p2:SetHeight(math.abs(y) + 20)
     
     -- Page 3: Layout & Spacing
-    local p3 = CreatePage()
+    local layoutPageInfo = CreateSettingsPage("Layout", "Layout", "Fine-tune horizontal and vertical spacing rules.")
+    local p3 = layoutPageInfo.content
     y = -5
     
     s, sy = StartSection(p3, "Horizontal Spacing", y)
@@ -636,10 +595,11 @@ local function InitUI()
     sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers", sy)
     y = y - EndSection(s, sy)
     
-    p3.finalHeight = math.abs(y) + 20
+    p3:SetHeight(math.abs(y) + 20)
     
     -- Page 4: Tracking
-    local p4 = CreatePage()
+    local trackingPageInfo = CreateSettingsPage("Tracking", "Tracking", "Choose which content types are tracked and how they are grouped.")
+    local p4 = trackingPageInfo.content
     y = -5
     
     s, sy = StartSection(p4, "Display Options", y)
@@ -660,10 +620,11 @@ local function InitUI()
     sy = CreateCheckbox(s, "Endeavors", "showEndeavors", "Track housing endeavors", sy)
     y = y - EndSection(s, sy)
     
-    p4.finalHeight = math.abs(y) + 20
+    p4:SetHeight(math.abs(y) + 20)
 
     -- Page 5: Debug
-    local p5 = CreatePage()
+    local debugPageInfo = CreateSettingsPage("Debug", "Debug", "Diagnostic logging and debug overlay controls.")
+    local p5 = debugPageInfo.content
     y = -5
 
     s, sy = StartSection(p5, "Debug Options", y)
@@ -746,9 +707,13 @@ local function InitUI()
     refreshDebugControlsUI()
 
     y = y - EndSection(s, sy)
-    p5.finalHeight = math.abs(y) + 20
+    p5:SetHeight(math.abs(y) + 20)
 
-    SelectTab(1)
+    addon.settingsPageOrder = orderedPages
+    addon.settingsPages = {}
+    for _, page in ipairs(orderedPages) do
+        addon.settingsPages[page.id] = page
+    end
 end
 
 -- Confirmation dialog
@@ -769,6 +734,8 @@ StaticPopupDialogs["TRACKERPLUS_RESET_CONFIRM"] = {
 
 -- Register settings
 local settingsLoaded = false
+addon.settingsCategory = nil
+addon.settingsSubcategories = addon.settingsSubcategories or {}
 local settingsFrame = CreateFrame("Frame")
 settingsFrame:RegisterEvent("PLAYER_LOGIN")
 settingsFrame:SetScript("OnEvent", function(self, event)
@@ -784,13 +751,44 @@ settingsFrame:SetScript("OnEvent", function(self, event)
         -- Build the UI
         InitUI() 
         
-        -- Register with modern Settings API
-        local category = Settings.RegisterCanvasLayoutCategory(panel, "TrackerPlus")
-        Settings.RegisterAddOnCategory(category)
+        -- Register with modern Settings API (parent + subpages)
+        if Settings and Settings.RegisterCanvasLayoutCategory then
+            local category = Settings.RegisterCanvasLayoutCategory(panel, "TrackerPlus")
+            Settings.RegisterAddOnCategory(category)
+            addon.settingsCategory = category
+
+            for _, page in ipairs(addon.settingsPageOrder or {}) do
+                local subcategory = Settings.RegisterCanvasLayoutSubcategory(category, page.frame, page.name)
+                addon.settingsSubcategories[page.id] = subcategory
+            end
+        else
+            InterfaceOptions_AddCategory(panel)
+            for _, page in ipairs(addon.settingsPageOrder or {}) do
+                page.frame.parent = panel.name
+                page.frame.name = page.name
+                InterfaceOptions_AddCategory(page.frame)
+            end
+        end
         
         -- Add slash command shortcut
         addon.OpenSettings = function()
-            Settings.OpenToCategory(category:GetID())
+            local defaultPageID = "General"
+
+            if Settings and Settings.OpenToCategory then
+                local targetCategory = addon.settingsSubcategories and addon.settingsSubcategories[defaultPageID]
+                if not targetCategory then
+                    targetCategory = addon.settingsCategory
+                end
+
+                local id = targetCategory and targetCategory:GetID()
+                if id then
+                    Settings.OpenToCategory(id)
+                end
+            elseif InterfaceOptionsFrame_OpenToCategory then
+                local targetPanel = (addon.settingsPages and addon.settingsPages[defaultPageID] and addon.settingsPages[defaultPageID].frame) or panel
+                InterfaceOptionsFrame_OpenToCategory(targetPanel)
+                InterfaceOptionsFrame_OpenToCategory(targetPanel)
+            end
         end
     end
 end)
