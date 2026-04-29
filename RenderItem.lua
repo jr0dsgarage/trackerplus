@@ -39,6 +39,10 @@ local function IsQuestTypeRedundant(item, typeText)
     return false
 end
 
+local function HasVisibleText(value)
+    return type(value) == "string" and value:match("%S") ~= nil
+end
+
 -------------------------------------------------------------------------------
 -- RenderTrackableItem — renders a single quest/achievement row
 -------------------------------------------------------------------------------
@@ -58,6 +62,10 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     if button.objectivePrefixes then
         local arr = button.objectivePrefixes
+        for i = 1, #arr do arr[i]:Hide() end
+    end
+    if button.objectiveProgresses then
+        local arr = button.objectiveProgresses
         for i = 1, #arr do arr[i]:Hide() end
     end
     if button.progressBars then
@@ -349,7 +357,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     local textHeight = button.text:GetStringHeight()
-    button.text:SetWidth(0) -- Release fixed width to allow anchors to work on resize
     local height = max(db.fontSize + 4, textHeight + 4)
     
     -- Objectives
@@ -360,6 +367,16 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             local parsed = ParseObjectiveDisplay(item, obj, objIndex)
             local prefixText = parsed.prefixText
             local bodyText = parsed.bodyText
+            local isAchievementObjective = (item.type == "achievement")
+            local achievementBodyText = bodyText
+            if isAchievementObjective and not HasVisibleText(achievementBodyText) then
+                if HasVisibleText(obj.text) then
+                    achievementBodyText = obj.text
+                else
+                    achievementBodyText = item.title or ""
+                end
+            end
+            local isAchievementTextThenProgress = (isAchievementObjective and prefixText ~= "" and HasVisibleText(achievementBodyText))
             local isProgressBar = parsed.isProgressBar
             local progressValue = parsed.progressValue
             local progressMax = parsed.progressMax
@@ -373,13 +390,16 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
             
             local indentAmount = 14 -- Roughly width of "  - "
-            
-            bulletLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
-            bulletLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
             local objColor = obj.finished and db.completeColor or db.objectiveColor
-            bulletLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
-            bulletLine:SetText("  -")
-            bulletLine:Show()
+            if isAchievementObjective then
+                bulletLine:Hide()
+            else
+                bulletLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
+                bulletLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                bulletLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
+                bulletLine:SetText("  -")
+                bulletLine:Show()
+            end
 
             -- Prepare Prefix
             if not button.objectivePrefixes then button.objectivePrefixes = {} end
@@ -390,7 +410,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
             
             local prefixWidth = 0
-            if prefixText ~= "" then
+            if prefixText ~= "" and not isAchievementTextThenProgress then
                 prefixLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
                 prefixLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
                 prefixLine:SetText(prefixText)
@@ -412,8 +432,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             
             -- Gap between prefix and body (Reduced to match request)
             local gap = (prefixText ~= "") and 1 or 0
+            if isAchievementTextThenProgress then
+                gap = 0
+            end
             
             local bodyIndent = leftPadding + db.spacingObjectiveIndent + indentAmount + prefixWidth + gap
+            if isAchievementObjective then
+                bodyIndent = leftPadding + db.spacingObjectiveIndent + 2
+            end
             
             -- Width reduced by indent to account for hanging indent
             -- use buttonWidth (calculated from parent) instead of button:GetWidth() which is 0 on first render
@@ -425,17 +451,51 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
             --local objColor = obj.finished and db.completeColor or db.objectiveColor -- Already set above
             objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
-            objLine:SetText(bodyText)
+            objLine:SetText(isAchievementObjective and achievementBodyText or bodyText)
             objLine:SetJustifyH("LEFT")
-            objLine:Show()
+            if isAchievementObjective and not HasVisibleText(achievementBodyText) then
+                objLine:Hide()
+            else
+                objLine:Show()
+            end
             
             local lineH = objLine:GetStringHeight()
             local minLineH = max(1, db.fontSize - 1)
             if lineH < minLineH then
                 lineH = minLineH
             end
-            currentY = currentY - (lineH + 2)
-            height = height + (lineH + 2)
+            if not isAchievementObjective or HasVisibleText(achievementBodyText) then
+                currentY = currentY - (lineH + 2)
+                height = height + (lineH + 2)
+            end
+
+            if isAchievementTextThenProgress then
+                if not button.objectiveProgresses then button.objectiveProgresses = {} end
+                local progressLine = button.objectiveProgresses[objIndex]
+                if not progressLine then
+                    progressLine = button:CreateFontString(nil, "OVERLAY")
+                    button.objectiveProgresses[objIndex] = progressLine
+                end
+
+                progressLine:SetWidth(buttonWidth - bodyIndent - 5)
+                progressLine:SetWordWrap(true)
+                progressLine:ClearAllPoints()
+                progressLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)
+                progressLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                progressLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
+                progressLine:SetText(" - " .. prefixText)
+                progressLine:SetJustifyH("LEFT")
+                progressLine:Show()
+
+                local progressLineH = progressLine:GetStringHeight()
+                if progressLineH < minLineH then
+                    progressLineH = minLineH
+                end
+                currentY = currentY - (progressLineH + 2)
+                height = height + (progressLineH + 2)
+            elseif button.objectiveProgresses and button.objectiveProgresses[objIndex] then
+                button.objectiveProgresses[objIndex]:Hide()
+            end
 
             if isProgressBar then
                 if not button.progressBars then button.progressBars = {} end

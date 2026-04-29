@@ -135,11 +135,27 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
         end
         parsed.bodyText = (cleanText or "Progress")
     elseif obj.quantityString and obj.quantityString ~= "" then
-        parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
-        parsed.prefixText = obj.quantityString
+        -- Only show a numeric prefix if the quantity string actually contains a number.
+        -- Some objectives have a quantityString like "Defeated" which shouldn't become a prefix.
+        if obj.quantityString:match("%d") then
+            parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+            parsed.prefixText = obj.quantityString
+        else
+            parsed.bodyText = (obj.text or "")
+        end
     elseif obj.numRequired and obj.numRequired > 0 then
-        parsed.bodyText = (obj.text or ""):gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
-        parsed.prefixText = format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
+        -- Only generate a numeric prefix when the objective text itself leads with a number
+        -- (e.g. "0/1 Kill Degentrius"). Text-only objectives like "Degentrius defeated"
+        -- should not get a synthetic "1/1" prefix.
+        local rawText = obj.text or ""
+        local isAchievementObjective = (item and item.type == "achievement")
+        local textHasNumericPrefix = rawText:match("^%s*%d+%s*/%s*%d+")
+        if textHasNumericPrefix or isAchievementObjective then
+            parsed.bodyText = rawText:gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
+            parsed.prefixText = format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
+        else
+            parsed.bodyText = rawText
+        end
     else
         local p, b = (obj.text or ""):match("^%s*([%d]+/[%d]+)%s+(.*)$")
         if p then

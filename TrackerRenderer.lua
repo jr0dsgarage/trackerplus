@@ -265,6 +265,34 @@ function addon:ShowTrackableTooltip(button, trackable)
         if trackable.description then
             tooltip:AddLine(trackable.description, 1, 1, 1, true)
         end
+
+        if trackable.objectives and #trackable.objectives > 0 then
+            tooltip:AddLine(" ")
+            for i, objective in ipairs(trackable.objectives) do
+                if i > 8 then
+                    break
+                end
+
+                local parsed = addon.ParseObjectiveDisplay(trackable, objective, i)
+                local lineColor = objective.finished and { r = 0.5, g = 1, b = 0.5 } or { r = 1, g = 1, b = 1 }
+                local bodyText = parsed.bodyText
+                if type(bodyText) ~= "string" or bodyText:match("%S") == nil then
+                    if type(objective.text) == "string" and objective.text:match("%S") then
+                        bodyText = objective.text
+                    else
+                        bodyText = trackable.title
+                    end
+                end
+
+                if bodyText and bodyText ~= "" then
+                    tooltip:AddLine("• " .. bodyText, lineColor.r, lineColor.g, lineColor.b, true)
+                end
+                if parsed.prefixText and parsed.prefixText ~= "" then
+                    tooltip:AddLine("  - " .. parsed.prefixText, lineColor.r, lineColor.g, lineColor.b, true)
+                end
+            end
+        end
+
         tooltip:AddLine(" ")
         tooltip:AddLine(format("%d points", trackable.points or 0), 1, 0.82, 0)
     end

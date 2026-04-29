@@ -63,6 +63,30 @@ local function AppendBucket(dest, source)
     end
 end
 
+local function ShouldForceObjectiveIncomplete(objectiveText)
+    if type(objectiveText) ~= "string" then
+        return false
+    end
+
+    local text = objectiveText:gsub("^%s+", "")
+    if text == "" then
+        return false
+    end
+
+    local lowered = text:lower()
+    if lowered:find("ready to turn-in", 1, true) then
+        return false
+    end
+
+    local hasLeadingNumericPrefix =
+        text:match("^%d+%s*/%s*%d+")
+        or text:match("^%(%s*%d+%s*/%s*%d+%s*%)")
+        or text:match("^%d+%%")
+        or text:match("^%(%s*%d+%%%s*%)")
+
+    return not hasLeadingNumericPrefix
+end
+
 local function MoveObjectiveTrackerOffscreen(owner)
     if not ObjectiveTrackerFrame then return end
     
@@ -850,11 +874,17 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
             if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
                 hasProgressBarObj = true
             end
+
+            local objectiveFinished = (obj.finished == true)
+            -- Blizzard can flag text-only objectives as finished before they flip to Ready to Turn-in.
+            if objectiveFinished and ShouldForceObjectiveIncomplete(obj.text) then
+                objectiveFinished = false
+            end
             
             questInfo.objectives[#questInfo.objectives + 1] = {
                 text = obj.text,
                 type = obj.type,
-                finished = obj.finished,
+                finished = objectiveFinished,
                 numFulfilled = obj.numFulfilled,
                 numRequired = obj.numRequired,
                 flags = obj.flags,
@@ -884,10 +914,14 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         for j=1, numLeaderBoards do
              local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
              if text then
+                 local objectiveFinished = (finished == true)
+                 if objectiveFinished and ShouldForceObjectiveIncomplete(text) then
+                     objectiveFinished = false
+                 end
                  questInfo.objectives[#questInfo.objectives + 1] = {
                      text = text,
                      type = type,
-                     finished = finished,
+                     finished = objectiveFinished,
                      numFulfilled = 0,
                      numRequired = 0,
                  }
