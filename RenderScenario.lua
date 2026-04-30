@@ -279,6 +279,7 @@ function addon:RenderScenarioSection()
         if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
         if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
         if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
+        if header.objectiveProgresses then for _, obj in ipairs(header.objectiveProgresses) do obj:Hide() end end
         if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
         if header.distance then header.distance:Hide() end
         
@@ -307,6 +308,7 @@ function addon:RenderScenarioSection()
               if button.objectives then for _, obj in ipairs(button.objectives) do obj:Hide() end end
               if button.objectiveBullets then for _, obj in ipairs(button.objectiveBullets) do obj:Hide() end end
               if button.objectivePrefixes then for _, obj in ipairs(button.objectivePrefixes) do obj:Hide() end end
+              if button.objectiveProgresses then for _, obj in ipairs(button.objectiveProgresses) do obj:Hide() end end
               if button.progressBars then for _, bar in ipairs(button.progressBars) do bar:Hide() end end
               
               local height = db.fontSize + 6

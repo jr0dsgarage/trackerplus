@@ -43,6 +43,27 @@ local function HasVisibleText(value)
     return type(value) == "string" and value:match("%S") ~= nil
 end
 
+local function ResolveAchievementObjectiveText(item, objectiveText, parsedBodyText)
+    local bodyText = parsedBodyText
+    if not HasVisibleText(bodyText) and HasVisibleText(objectiveText) then
+        bodyText = objectiveText
+    end
+
+    local titleMatches = HasVisibleText(bodyText)
+        and HasVisibleText(item and item.title)
+        and bodyText == item.title
+
+    if (not HasVisibleText(bodyText) or titleMatches) and HasVisibleText(item and item.description) then
+        bodyText = item.description
+    end
+
+    if not HasVisibleText(bodyText) and HasVisibleText(item and item.title) then
+        bodyText = item.title
+    end
+
+    return bodyText or ""
+end
+
 -------------------------------------------------------------------------------
 -- RenderTrackableItem — renders a single quest/achievement row
 -------------------------------------------------------------------------------
@@ -369,12 +390,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             local bodyText = parsed.bodyText
             local isAchievementObjective = (item.type == "achievement")
             local achievementBodyText = bodyText
-            if isAchievementObjective and not HasVisibleText(achievementBodyText) then
-                if HasVisibleText(obj.text) then
-                    achievementBodyText = obj.text
-                else
-                    achievementBodyText = item.title or ""
-                end
+            if isAchievementObjective then
+                achievementBodyText = ResolveAchievementObjectiveText(item, obj.text, bodyText)
             end
             local isAchievementTextThenProgress = (isAchievementObjective and prefixText ~= "" and HasVisibleText(achievementBodyText))
             local isProgressBar = parsed.isProgressBar

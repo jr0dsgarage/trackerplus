@@ -1055,7 +1055,7 @@ function addon:CollectAchievements(trackables)
     end
     
     for _, achievementID in ipairs(trackedAchievements) do
-        local id, name, points, completed, icon, isGuild
+        local id, name, description, points, completed, icon, isGuild
         
         -- Try C_AchievementInfo (Modern API)
         if C_AchievementInfo and C_AchievementInfo.GetInfo then
@@ -1063,6 +1063,7 @@ function addon:CollectAchievements(trackables)
             if info then
                 id = info.id
                 name = info.title
+                description = info.description
                 points = info.points
                 completed = info.completed
                 icon = info.icon
@@ -1070,7 +1071,7 @@ function addon:CollectAchievements(trackables)
             end
         elseif GetAchievementInfo then
             local _
-            id, name, points, completed, _, _, _, _, _, icon, _, isGuild = GetAchievementInfo(achievementID)
+            id, name, points, completed, _, _, _, description, _, icon, _, isGuild = GetAchievementInfo(achievementID)
         end
         
         if id then
@@ -1097,6 +1098,7 @@ function addon:CollectAchievements(trackables)
                 type = "achievement",
                 id = achievementID,
                 title = name,
+                description = description,
                 isComplete = completed,
                 icon = icon,
                 points = points,

@@ -276,15 +276,27 @@ function addon:ShowTrackableTooltip(button, trackable)
                 local parsed = addon.ParseObjectiveDisplay(trackable, objective, i)
                 local lineColor = objective.finished and { r = 0.5, g = 1, b = 0.5 } or { r = 1, g = 1, b = 1 }
                 local bodyText = parsed.bodyText
-                if type(bodyText) ~= "string" or bodyText:match("%S") == nil then
-                    if type(objective.text) == "string" and objective.text:match("%S") then
-                        bodyText = objective.text
-                    else
-                        bodyText = trackable.title
-                    end
+                local titleMatches = type(bodyText) == "string"
+                    and type(trackable.title) == "string"
+                    and bodyText == trackable.title
+                if (type(bodyText) ~= "string" or bodyText:match("%S") == nil or titleMatches) and type(objective.text) == "string" and objective.text:match("%S") then
+                    bodyText = objective.text
+                end
+                titleMatches = type(bodyText) == "string"
+                    and type(trackable.title) == "string"
+                    and bodyText == trackable.title
+                if (type(bodyText) ~= "string" or bodyText:match("%S") == nil or titleMatches) and type(trackable.description) == "string" and trackable.description:match("%S") then
+                    bodyText = trackable.description
+                end
+                if (type(bodyText) ~= "string" or bodyText:match("%S") == nil) and type(trackable.title) == "string" then
+                    bodyText = trackable.title
                 end
 
-                if bodyText and bodyText ~= "" then
+                local bodyDuplicatesDescription = type(bodyText) == "string"
+                    and type(trackable.description) == "string"
+                    and bodyText == trackable.description
+
+                if bodyText and bodyText ~= "" and not bodyDuplicatesDescription then
                     tooltip:AddLine("• " .. bodyText, lineColor.r, lineColor.g, lineColor.b, true)
                 end
                 if parsed.prefixText and parsed.prefixText ~= "" then

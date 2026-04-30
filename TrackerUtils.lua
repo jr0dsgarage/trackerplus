@@ -259,6 +259,10 @@ function addon:GetOrCreateButton(parent)
         local arr = btn.objectives
         for i = 1, #arr do arr[i]:Hide() end
     end
+    if btn.objectiveProgresses then
+        local arr = btn.objectiveProgresses
+        for i = 1, #arr do arr[i]:Hide() end
+    end
     if btn.distance then btn.distance:Hide() end
     if btn.styledBackdrop then btn.styledBackdrop:Hide() end
     if btn.SetBackdrop then btn:SetBackdrop(nil) end

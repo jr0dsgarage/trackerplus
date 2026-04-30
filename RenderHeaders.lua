@@ -316,6 +316,7 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
             if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
             if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
+            if header.objectiveProgresses then for _, obj in ipairs(header.objectiveProgresses) do obj:Hide() end end
             if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
             if header.distance then header.distance:Hide() end
             

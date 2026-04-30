@@ -72,6 +72,7 @@ function addon:RenderBonusSection(bonusObjectives)
          if header.itemButton then header.itemButton:Hide() end
          if header.icon then header.icon:Hide() end
          if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
+         if header.objectiveProgresses then for _, obj in ipairs(header.objectiveProgresses) do obj:Hide() end end
          if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
 
          local bonusStartY = bonusYOffset
