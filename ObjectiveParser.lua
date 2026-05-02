@@ -149,8 +149,9 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
         -- should not get a synthetic "1/1" prefix.
         local rawText = obj.text or ""
         local isAchievementObjective = (item and item.type == "achievement")
+        local isProfessionObjective = (item and item.type == "profession")
         local textHasNumericPrefix = rawText:match("^%s*%d+%s*/%s*%d+")
-        if textHasNumericPrefix or isAchievementObjective then
+        if textHasNumericPrefix or isAchievementObjective or isProfessionObjective then
             parsed.bodyText = rawText:gsub("^%d+/%d+%s*", ""):gsub("^%s+", "")
             parsed.prefixText = format("%d/%d", obj.numFulfilled or 0, obj.numRequired)
         else
