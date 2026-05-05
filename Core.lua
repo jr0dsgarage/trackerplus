@@ -633,7 +633,7 @@ function addon:UpdateTracker()
         local now = GetTime()
         if self._nextScenarioRefreshAt == nil or now >= self._nextScenarioRefreshAt then
             forceDisplayRefresh = true
-            self._nextScenarioRefreshAt = now + 2.0
+            self._nextScenarioRefreshAt = now + 0.2
         end
     else
         self._nextScenarioRefreshAt = nil

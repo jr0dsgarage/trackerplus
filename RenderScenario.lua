@@ -85,6 +85,58 @@ local function InstallScenarioAnchorGuards(owner, borrowedFrame)
     end)
 end
 
+local function InstallScenarioSizeObservers(owner, trackerFrame, contentsFrame)
+    if not owner then
+        return
+    end
+
+    local function install(frame)
+        if not frame or frame._trackerPlusScenarioSizeObserverInstalled then
+            return
+        end
+
+        frame._trackerPlusScenarioSizeObserverInstalled = true
+
+        local function notifyIfChanged(observedFrame)
+            if not observedFrame then
+                return
+            end
+
+            local activeTracker = owner._activeScenarioBorrowedTracker
+            if not activeTracker or (observedFrame ~= activeTracker and observedFrame:GetParent() ~= activeTracker) then
+                return
+            end
+
+            local height = observedFrame.GetHeight and (observedFrame:GetHeight() or 0) or 0
+            local shown = observedFrame.IsShown and observedFrame:IsShown() or false
+            if observedFrame._trackerPlusObservedHeight == height and observedFrame._trackerPlusObservedShown == shown then
+                return
+            end
+
+            observedFrame._trackerPlusObservedHeight = height
+            observedFrame._trackerPlusObservedShown = shown
+
+            owner._lastScenarioBorrowHeight = nil
+            owner._layoutDirty = true
+            owner._nextScenarioRefreshAt = 0
+            owner:RequestUpdate("scenarios")
+        end
+
+        frame:HookScript("OnSizeChanged", function(observedFrame)
+            notifyIfChanged(observedFrame)
+        end)
+        frame:HookScript("OnShow", function(observedFrame)
+            notifyIfChanged(observedFrame)
+        end)
+        frame:HookScript("OnHide", function(observedFrame)
+            notifyIfChanged(observedFrame)
+        end)
+    end
+
+    install(trackerFrame)
+    install(contentsFrame)
+end
+
 local function DescribeAnchor(frame)
     if not frame then
         return "frame=nil"
@@ -220,6 +272,7 @@ function addon:RenderScenarioSection()
 
             InstallScenarioAnchorGuards(self, borrowedFrame)
             borrowedFrame._trackerPlusAnchorLockEnabled = true
+            InstallScenarioSizeObservers(self, borrowedFrame, contents)
 
             -- Keep anchor stable without forcing a full re-anchor every frame.
             EnsureScenarioBorrowAnchor(self, borrowedFrame)
