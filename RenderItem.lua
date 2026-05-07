@@ -4,7 +4,7 @@ local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 -- Localize hot-path globals
 local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
 local format, match = string.format, string.match
-local max, floor = math.max, math.floor
+local max, min, floor = math.max, math.min, math.floor
 
 -- Local aliases for addon utilities (populated after load)
 local ParseObjectiveDisplay = function(...) return addon.ParseObjectiveDisplay(...) end
@@ -106,26 +106,45 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- POI Button logic
     local leftPadding = db.spacingPOIButton  -- Internal padding within the button for the icon check
 
-     -- POI Button (Using Blizzard Template for authenticity)
+    -- Taint-safe POI indicator: avoid Blizzard POI templates on custom tracker rows.
     if not button.poiButton then
-        -- Use POIButtonTemplate to get exact Blizzard look/behavior
-        button.poiButton = CreateFrame("Button", nil, button, "POIButtonTemplate")
-        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, 0) -- Nudged left
-        button.poiButton:SetScale(0.75) -- Slightly smaller
-        
-        -- Override click handling to our logic
+        button.poiButton = CreateFrame("Button", nil, button)
+        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -1, -1)
+        button.poiButton:SetSize(12, 12)
+
+        button.poiButton.icon = button.poiButton:CreateTexture(nil, "ARTWORK")
+        button.poiButton.icon:SetAllPoints()
+        button.poiButton.icon:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+        button.poiButton.ring = button.poiButton:CreateTexture(nil, "OVERLAY")
+        button.poiButton.ring:SetPoint("TOPLEFT", button.poiButton, "TOPLEFT", -1, 1)
+        button.poiButton.ring:SetPoint("BOTTOMRIGHT", button.poiButton, "BOTTOMRIGHT", 1, -1)
+        button.poiButton.ring:SetTexture("Interface\\Buttons\\WHITE8X8")
+        button.poiButton.ring:SetVertexColor(0, 0, 0, 0.65)
+
         button.poiButton:SetScript("OnClick", function(self)
-             if self.questID then
-                 -- Toggle super tracking
-                 if C_SuperTrack.GetSuperTrackedQuestID() == self.questID then
-                     C_SuperTrack.SetSuperTrackedQuestID(0)
-                 else
-                     C_SuperTrack.SetSuperTrackedQuestID(self.questID)
-                 end
-                 PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-             end
+            if self.questID then
+                if C_SuperTrack.GetSuperTrackedQuestID() == self.questID then
+                    C_SuperTrack.SetSuperTrackedQuestID(0)
+                else
+                    C_SuperTrack.SetSuperTrackedQuestID(self.questID)
+                end
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            end
         end)
-        
+
+        button.poiButton:SetScript("OnEnter", function(self)
+            local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            tooltip:SetText("Quest Marker")
+            if self.questID then
+                tooltip:AddLine("Click to focus this quest", 0.9, 0.9, 0.9)
+            end
+            tooltip:Show()
+        end)
+        button.poiButton:SetScript("OnLeave", function()
+            addon:HideSharedTooltip()
+        end)
+
         button.poiButton:RegisterForClicks("LeftButtonUp")
     end
     
@@ -225,49 +244,32 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- Configure POI Button Appearance
     local isQuest = (item.type == "quest" or item.type == "campaign" or item.isWorldQuest or item.type == "supertrack")
     local superTrackedQuestID = self._cachedSuperTrackedQuestID or 0
-    
-    if isQuest and POIButtonUtil then
+
+    if isQuest then
         button.poiButton:Show()
         if button.icon then button.icon:Hide() end
-        
+
         button.poiButton.questID = item.id
-        if button.poiButton.SetQuestID then
-            button.poiButton:SetQuestID(item.id)
-        end
-        
-        local style = POIButtonUtil.Style.QuestInProgress
-        if item.isComplete then
-            style = POIButtonUtil.Style.QuestComplete
-        elseif item.isWorldQuest then
-            style = POIButtonUtil.Style.WorldQuest
-        end
 
-        if button.poiButton.SetStyle then
-            button.poiButton:SetStyle(style)
-        end
-        
-        if button.poiButton.UpdateButtonStyle then
-            button.poiButton:UpdateButtonStyle()
-        end
-        
-        -- Force selection if this is the Active Quest item, or if IDs match
         local isSelected = (item.id == superTrackedQuestID) or (item.type == "supertrack")
-        
-        if button.poiButton.SetSelected then
-            button.poiButton:SetSelected(isSelected)
+        local r, g, b = 1, 0.82, 0
+
+        if item.isComplete then
+            r, g, b = 0.2, 0.95, 0.2
+        elseif item.isWorldQuest then
+            r, g, b = 0.25, 0.78, 0.92
         end
 
-        -- Ensure visual consistency for active state, forcing the glow if the template allows
-        if button.poiButton.SelectionGlow then
-            if isSelected then
-                button.poiButton.SelectionGlow:Show()
-            else
-                button.poiButton.SelectionGlow:Hide()
-            end
+        if isSelected then
+            r = min(1, r + 0.25)
+            g = min(1, g + 0.25)
+            b = min(1, b + 0.25)
         end
-        
-         if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
 
+        button.poiButton.icon:SetVertexColor(r, g, b, 1)
+        button.poiButton.ring:SetVertexColor(0, 0, 0, isSelected and 1 or 0.65)
+
+        if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
     else
         button.poiButton:Hide()
         if button.icon then button.icon:Hide() end
