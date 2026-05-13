@@ -231,16 +231,16 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
 
                 if iconStyle == "none" then
                      -- No icon: Text fills full width with small padding
-                    header.text:SetPoint("LEFT", 5, 0)
-                    header.text:SetPoint("RIGHT", -5, 0)
+                    header.text:SetPoint("TOPLEFT", 5, -2)
+                    header.text:SetPoint("TOPRIGHT", -5, -2)
                 elseif iconPos == "right" then
                     -- Icon on Right: Text starts Left, ends before icon
-                    header.text:SetPoint("LEFT", 5, 0)
-                    header.text:SetPoint("RIGHT", -22, 0)
+                    header.text:SetPoint("TOPLEFT", 5, -2)
+                    header.text:SetPoint("TOPRIGHT", -22, -2)
                 else
                     -- Icon on Left (Default): Text starts after icon
-                    header.text:SetPoint("LEFT", 22, 0)
-                    header.text:SetPoint("RIGHT", -5, 0)
+                    header.text:SetPoint("TOPLEFT", 22, -2)
+                    header.text:SetPoint("TOPRIGHT", -5, -2)
                 end
                 header._textLayoutSignature = headerTextLayoutSignature
             end
