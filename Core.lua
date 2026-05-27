@@ -277,6 +277,7 @@ function addon:Initialize()
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
                 if addon.db.enabled and not InCombatLockdown() then
                     self:SetAlpha(0)
+                    self:EnableMouse(false)
                 end
             end)
             addon.hookedTracker = true
@@ -355,6 +356,7 @@ function addon:UpdateDefaultTrackerVisibility()
     if self.db.enabled then
         if not InCombatLockdown() then
             ObjectiveTrackerFrame:SetAlpha(0)
+            ObjectiveTrackerFrame:EnableMouse(false)
             if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame hidden") end
         end
     else
