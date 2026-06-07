@@ -54,6 +54,7 @@ local DEFAULTS = {
     showZoneHeaders = true,
     collapseCompleted = false,
     includeCampaignQuestInActiveQuest = false,
+    includeFTAQuests = false,
     
     -- Grouping & Sorting
     groupByZone = true,

@@ -17,6 +17,7 @@ RenderItem.lua
 RenderAutoQuests.lua
 RenderScenario.lua
 RenderActiveQuest.lua
+RenderFollowTheArrow.lua
 RenderCampaign.lua
 RenderBonusObjectives.lua
 RenderWorldQuests.lua

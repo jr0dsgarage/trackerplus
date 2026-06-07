@@ -125,6 +125,9 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Active (super-tracked) quest
     local aqYOffset = self:RenderActiveQuestSection(superTrackedItems)
 
+    -- Follow the Arrow guide (between Active Quest and Campaign)
+    self:RenderFollowTheArrowSection()
+
     -- Campaign quests (dedicated pinned section below Active Quest)
     local campaignYOffset = self:RenderCampaignSection(campaignItems)
 

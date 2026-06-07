@@ -275,12 +275,25 @@ function addon:Initialize()
         -- Hook Show to control visibility based on our enabled state
         if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
-                if addon.db.enabled and not InCombatLockdown() then
-                    self:SetAlpha(0)
+                if addon.db.enabled then
                     self:EnableMouse(false)
+                    if not InCombatLockdown() then
+                        self:SetAlpha(0)
+                    end
                 end
             end)
             addon.hookedTracker = true
+        end
+
+        -- If any code path flips ObjectiveTracker mouse back on while TrackerPlus is enabled,
+        -- immediately turn it back off to prevent click-through behavior.
+        if not addon.hookedTrackerMouse and not addon.disableObjectiveTrackerHooks then
+            hooksecurefunc(ObjectiveTrackerFrame, "EnableMouse", function(self, enabled)
+                if addon.db.enabled and enabled then
+                    self:EnableMouse(false)
+                end
+            end)
+            addon.hookedTrackerMouse = true
         end
 
         -- Initial visibility check
@@ -354,9 +367,9 @@ function addon:UpdateDefaultTrackerVisibility()
     if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
 
     if self.db.enabled then
+        ObjectiveTrackerFrame:EnableMouse(false)
         if not InCombatLockdown() then
             ObjectiveTrackerFrame:SetAlpha(0)
-            ObjectiveTrackerFrame:EnableMouse(false)
             if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame hidden") end
         end
     else
@@ -448,6 +461,11 @@ function addon:RegisterEvents()
     pcall(function() frame:RegisterEvent("CONTENT_TRACKING_UPDATE") end)
     pcall(function() frame:RegisterEvent("TRACKABLE_INFO_UPDATE") end)
 
+    -- FollowTheArrow addon events (safe registration; events may not exist)
+    pcall(function() frame:RegisterEvent("FTA_GUIDE_CHANGED") end)
+    pcall(function() frame:RegisterEvent("FTA_STEP_CHANGED") end)
+    pcall(function() frame:RegisterEvent("FTA_PROGRESS_UPDATED") end)
+
     frame:SetScript("OnEvent", function(_, event, ...)
         addon:OnEvent(event, ...)
     end)
@@ -473,6 +491,9 @@ function addon:OnEvent(event, ...)
         if self.db.hideInCombat then
             self:SetTrackerVisible(true)
         end
+
+        -- Re-assert suppression now that combat restrictions are lifted.
+        self:UpdateDefaultTrackerVisibility()
         
         -- Process pending updates
         if pendingUpdate then
@@ -531,6 +552,10 @@ function addon:OnEvent(event, ...)
             or event == "NEIGHBORHOOD_INITIATIVE_TRACKING_UPDATE"
             or event == "NEIGHBORHOOD_INITIATIVE_UPDATE" then
             self:RequestUpdate("endeavors")
+            elseif event == "FTA_GUIDE_CHANGED"
+            or event == "FTA_STEP_CHANGED"
+            or event == "FTA_PROGRESS_UPDATED" then
+            self:RequestUpdate("fta")
         elseif event == "CONTENT_TRACKING_UPDATE" or event == "TRACKABLE_INFO_UPDATE" then
             -- Broad content tracking changes can affect multiple sections.
             self:RequestUpdate("full")

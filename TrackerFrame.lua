@@ -184,6 +184,13 @@ function addon:CreateTrackerFrame()
     activeQuestFrame:Hide()
     self.activeQuestFrame = activeQuestFrame
 
+    -- FTA Frame (Follow the Arrow guide, pinned between Active Quest and Campaign)
+    local ftaFrame = CreateFrame("Frame", nil, trackerFrame)
+    ftaFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
+    ftaFrame:SetHeight(1)
+    ftaFrame:Hide()
+    self.ftaFrame = ftaFrame
+
     -- Campaign Frame (Pinned below Active Quest when campaign quests are present)
     local campaignFrame = CreateFrame("Frame", nil, trackerFrame)
     campaignFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
@@ -491,6 +498,7 @@ function addon:UpdateLayoutAnchors()
     -- Determine section visibility
     local scenVisible  = self.scenarioFrame    and self.scenarioFrame:IsShown()    and self.scenarioFrame:GetHeight()    > 1
     local acqVisible   = self.activeQuestFrame and self.activeQuestFrame:IsShown() and self.activeQuestFrame:GetHeight() > 1
+    local ftaVisible   = self.ftaFrame         and self.ftaFrame:IsShown()         and self.ftaFrame:GetHeight()         > 1
     local campVisible  = self.campaignFrame    and self.campaignFrame:IsShown()    and self.campaignFrame:GetHeight()    > 1
     local aqVisible    = self.autoQuestFrame   and self.autoQuestFrame:IsShown()   and self.autoQuestFrame:GetHeight()   > 1
     local cqVisible    = self.completedQuestFrame and self.completedQuestFrame:IsShown() and self.completedQuestFrame:GetHeight() > 1
@@ -498,14 +506,16 @@ function addon:UpdateLayoutAnchors()
     local wqVisible    = self.worldQuestFrame and self.worldQuestFrame:IsShown() and self.worldQuestFrame:GetHeight() > 1
 
     -- Build a change-detection signature so we only touch anchors when needed.
-    local sig = format("%s|%s|%s|%s|%s|%.0f|%.0f|%.0f|%.0f|%.0f|%s|%s",
+    local sig = format("%s|%s|%s|%s|%s|%s|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%s|%s",
         tostring(scenVisible),
         tostring(acqVisible),
+        tostring(ftaVisible),
         tostring(campVisible),
         tostring(aqVisible),
         tostring(cqVisible),
         scenVisible  and self.scenarioFrame:GetHeight()    or 0,
         acqVisible   and self.activeQuestFrame:GetHeight() or 0,
+        ftaVisible   and self.ftaFrame:GetHeight()         or 0,
         campVisible  and self.campaignFrame:GetHeight()    or 0,
         aqVisible    and self.autoQuestFrame:GetHeight()   or 0,
         cqVisible    and self.completedQuestFrame:GetHeight() or 0,
@@ -521,6 +531,7 @@ function addon:UpdateLayoutAnchors()
     local topSections = {}
     if scenVisible  then topSections[#topSections + 1] = self.scenarioFrame    end
     if acqVisible   then topSections[#topSections + 1] = self.activeQuestFrame end
+    if ftaVisible   then topSections[#topSections + 1] = self.ftaFrame         end
     if campVisible  then topSections[#topSections + 1] = self.campaignFrame    end
     if aqVisible    then topSections[#topSections + 1] = self.autoQuestFrame   end
     if cqVisible    then topSections[#topSections + 1] = self.completedQuestFrame end
