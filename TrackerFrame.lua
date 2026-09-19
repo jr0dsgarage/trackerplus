@@ -290,9 +290,40 @@ function addon:CreateTrackerFrame()
     )
     trackerFrame.title:SetText("Tracker Plus")
 
+    -- FTA Toggle Button (arrow icon, to the left of the settings button)
+    trackerFrame.ftaToggleBtn = CreateFrame("Button", nil, trackerFrame)
+    trackerFrame.ftaToggleBtn:SetSize(16, 16)
+    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -54, 0)
+    local ftaArrowTex = trackerFrame.ftaToggleBtn:CreateTexture(nil, "ARTWORK")
+    ftaArrowTex:SetAllPoints()
+    ftaArrowTex:SetTexture("Interface\\Minimap\\MinimapArrow")
+    trackerFrame.ftaToggleBtn._arrowTex = ftaArrowTex
+    local function UpdateFTAToggleColor()
+        if addon.db and addon.db.includeFTAQuests then
+            ftaArrowTex:SetVertexColor(1, 0.82, 0, 1)   -- gold when enabled
+        else
+            ftaArrowTex:SetVertexColor(0.5, 0.5, 0.5, 1) -- grey when disabled
+        end
+    end
+    trackerFrame.ftaToggleBtn.UpdateColor = UpdateFTAToggleColor
+    UpdateFTAToggleColor()
+    trackerFrame.ftaToggleBtn:SetScript("OnClick", function()
+        addon.db.includeFTAQuests = not addon.db.includeFTAQuests
+        UpdateFTAToggleColor()
+        addon:RequestUpdate()
+    end)
+    trackerFrame.ftaToggleBtn:SetScript("OnEnter", function(self)
+        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+        tooltip:SetText(addon.db.includeFTAQuests and "Disable Follow the Arrow" or "Enable Follow the Arrow")
+        tooltip:Show()
+    end)
+    trackerFrame.ftaToggleBtn:SetScript("OnLeave", function()
+        addon:HideSharedTooltip()
+    end)
+
     -- Settings Button (Gear icon)
     trackerFrame.settingsParam = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.settingsParam:SetSize(16, 16) 
+    trackerFrame.settingsParam:SetSize(16, 16)
     -- Center vertically relative to header (-34 ensures it sits to left of minmax button)
     trackerFrame.settingsParam:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -34, 0)
     trackerFrame.settingsParam:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
@@ -369,6 +400,7 @@ function addon:CreateTrackerFrame()
             
             -- Hide Elements
             trackerFrame.settingsParam:Hide()
+            if trackerFrame.ftaToggleBtn then trackerFrame.ftaToggleBtn:Hide() end
             trackerFrame.title:Hide()
             trackerFrame.headerBg:Hide()
             trackerFrame.bg:Hide()
@@ -408,6 +440,12 @@ function addon:CreateTrackerFrame()
 
             -- Show Elements
             trackerFrame.settingsParam:Show()
+            if trackerFrame.ftaToggleBtn then
+                trackerFrame.ftaToggleBtn:Show()
+                if trackerFrame.ftaToggleBtn.UpdateColor then
+                    trackerFrame.ftaToggleBtn.UpdateColor()
+                end
+            end
             trackerFrame.title:Show()
             trackerFrame.headerBg:Show()
             trackerFrame.bg:Show()

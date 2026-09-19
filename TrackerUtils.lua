@@ -243,6 +243,7 @@ function addon:GetOrCreateButton(parent)
     if btn.largeIcon then btn.largeIcon:Hide() end
     if btn.stageBox then btn.stageBox:Hide() end
     if btn.subText then btn.subText:Hide() end
+    if btn._ftaCounter then btn._ftaCounter:Hide() end
     
     -- IMPORTANT: Clear points on reuse to prevent anchor conflicts
     btn:ClearAllPoints()

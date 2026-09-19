@@ -136,8 +136,17 @@ end
 
 -------------------------------------------------------------------------------
 -- ApplyFTATracking — super-track the current FTA step's quest or coordinate
+-- Guard: only acts when the step actually changed, so setting a waypoint
+-- (which fires SUPER_TRACKING_CHANGED → FTA:FullRefresh → FTA.UI:Refresh)
+-- doesn't re-enter and create an infinite refresh loop.
 -------------------------------------------------------------------------------
-local function ApplyFTATracking()
+local _lastTrackedModule = nil
+local _lastTrackedStep   = nil
+local _lastTrackedMapID  = nil
+local _lastTrackedX      = nil
+local _lastTrackedY      = nil
+
+local function ApplyFTATracking(force)
     local function log(fmt, ...) if addon.LogAt then addon:LogAt("info", "[FTA-TRACK] " .. fmt, ...) end end
 
     local api = FollowTheArrowAPI
@@ -152,6 +161,26 @@ local function ApplyFTATracking()
     local stepsByModule = FTACharDB.progress.stepIndexByModule
     local stepIndex = stepsByModule and stepsByModule[moduleId]
     if not stepIndex then log("no stepIndex for module %s", tostring(moduleId)); return end
+
+    -- Partial early-out: skip only if step AND target haven't changed
+    -- (prevents waypoint-set → SUPER_TRACKING_CHANGED → refresh loop,
+    --  but still updates when the arrow target moves within the same step)
+    local stepSame = (moduleId == _lastTrackedModule and stepIndex == _lastTrackedStep)
+    if not force and stepSame then
+        -- Resolve the target now to compare coords before committing
+        local earlyStep = module.steps and module.steps[stepIndex]
+        local earlyTarget = earlyStep and api.Resolve and api.Resolve.GetCurrentTarget
+            and api.Resolve:GetCurrentTarget(module, earlyStep)
+        if earlyTarget
+            and earlyTarget.mapID == _lastTrackedMapID
+            and earlyTarget.x    == _lastTrackedX
+            and earlyTarget.y    == _lastTrackedY then
+            return
+        end
+    end
+    _lastTrackedModule = moduleId
+    _lastTrackedStep   = stepIndex
+
     local step = module.steps and module.steps[stepIndex]
     if not step then log("step %d not found", stepIndex); return end
 
@@ -205,6 +234,57 @@ local function ApplyFTATracking()
         log("target missing mapID/x/y"); return
     end
 
+    -- Record target so the guard can detect coordinate changes next call
+    _lastTrackedMapID = target.mapID
+    _lastTrackedX     = target.x
+    _lastTrackedY     = target.y
+
+    -- Build a descriptive name: prefer the active segment's text, fall back to step title
+    local pinName = step.title or step.name or ("Step " .. stepIndex)
+    if api.Resolve and api.Resolve.GetDisplaySegmentsForStep then
+        local displaySegs = api.Resolve:GetDisplaySegmentsForStep(step, moduleId, stepIndex)
+        for _, seg in ipairs(displaySegs) do
+            if seg.kind ~= "NOTE" and (seg.text or "") ~= "" then
+                pinName = seg.text
+                -- Substitute {progress} token same as task rendering
+                if seg.kind == "OBJECTIVE" and seg.showProgress ~= false
+                    and api.Resolve and api.Resolve.GetSegmentProgressText then
+                    local prog = api.Resolve:GetSegmentProgressText(seg)
+                    if prog then
+                        pinName = pinName:gsub("%{progress%}", (prog:gsub("%%", "%%%%")))
+                    else
+                        pinName = pinName:gsub("%{progress%}%s*", ""):gsub("%s+%.", ".")
+                    end
+                else
+                    pinName = pinName:gsub("%{progress%}%s*", ""):gsub("%s+%.", ".")
+                end
+                break
+            end
+        end
+    end
+
+    log("WaypointUIAPI=%s", tostring(WaypointUIAPI ~= nil))
+
+    -- Prefer WaypointUI's named navigation API so the pin gets a readable label
+    -- WaypointUI expects coordinates in 0–100 scale; FTA provides 0–1 normalized
+    if WaypointUIAPI and WaypointUIAPI.Navigation and WaypointUIAPI.Navigation.NewUserNavigation then
+        local ok, err = pcall(function()
+            WaypointUIAPI.Navigation.NewUserNavigation({
+                name  = pinName,
+                mapID = target.mapID,
+                x     = target.x * 100,
+                y     = target.y * 100,
+            })
+        end)
+        if ok then
+            log("WaypointUI nav set: mapID=%d x=%.4f y=%.4f name=%s", target.mapID, target.x, target.y, pinName)
+        else
+            log("WaypointUI NewUserNavigation failed: %s", tostring(err))
+        end
+        return
+    end
+
+    -- Fallback: raw Blizzard user waypoint (no custom name)
     log("UiMapPoint=%s C_Map.SetUserWaypoint=%s C_SuperTrack.SetSuperTrackedUserWaypoint=%s",
         tostring(UiMapPoint ~= nil),
         tostring(C_Map and C_Map.SetUserWaypoint ~= nil),
@@ -240,7 +320,7 @@ local function EnsureFTARefreshHook()
     local orig = api.UI.Refresh
     api.UI.Refresh = function(self, ...)
         orig(self, ...)
-        ApplyFTATracking()
+        ApplyFTATracking(false)  -- guarded: no-ops if step hasn't changed
         addon:RequestUpdate()
     end
     _ftaRefreshHooked = true
@@ -257,7 +337,7 @@ local function NavigateFTA(delta)
     else
         api.StepEngine:NextStep()
     end
-    ApplyFTATracking()
+    ApplyFTATracking(true)  -- force: step just changed via our button
     addon:RequestUpdate()
 end
 
@@ -265,7 +345,7 @@ local function ResetFTA()
     local api = FollowTheArrowAPI
     if not (api and api.StepEngine and api.StepEngine.SyncNow) then return end
     api.StepEngine:SyncNow(25)
-    ApplyFTATracking()
+    ApplyFTATracking(true)  -- force: step just changed via our button
     addon:RequestUpdate()
 end
 
@@ -310,11 +390,23 @@ function addon:RenderFollowTheArrowSection()
 
     header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
     header.text:SetTextColor(1, 0.82, 0, 1) -- Gold
-    header.text:SetText(format("Follow the Arrow  |cffaaaaaa%d / %d|r", data.stepIndex, data.totalSteps))
+    header.text:SetText("Follow the Arrow")
     header.text:SetJustifyH("LEFT")
     header.text:ClearAllPoints()
     header.text:SetPoint("LEFT", 5, 0)
     header.text:SetPoint("RIGHT", -5, 0)
+
+    -- Step counter: small, right-aligned, inside the header
+    if not header._ftaCounter then
+        header._ftaCounter = header:CreateFontString(nil, "OVERLAY")
+    end
+    header._ftaCounter:SetFont(db.fontFace, db.fontSize - 2, db.fontOutline)
+    header._ftaCounter:SetTextColor(0.75, 0.75, 0.75, 1)
+    header._ftaCounter:SetText(format("Steps %d/%d", data.stepIndex, data.totalSteps))
+    header._ftaCounter:SetJustifyH("RIGHT")
+    header._ftaCounter:ClearAllPoints()
+    header._ftaCounter:SetPoint("RIGHT", header, "RIGHT", -6, 0)
+    header._ftaCounter:Show()
 
     if header.expandBtn then header.expandBtn:Hide() end
     if header.poiButton  then header.poiButton:Hide()  end

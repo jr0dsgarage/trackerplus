@@ -134,122 +134,16 @@ addon.Print = Print
 addon.disableObjectiveTrackerHooks = false
 
 function addon:GetSharedTooltip()
-    if not self._sharedTooltip then
-        local tooltip = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-        tooltip:SetFrameStrata("TOOLTIP")
-        tooltip:SetClampedToScreen(true)
-        tooltip:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        tooltip:SetBackdropColor(0.08, 0.08, 0.1, 0.96)
-        tooltip:SetBackdropBorderColor(0.7, 0.7, 0.75, 1)
-        tooltip:SetSize(260, 32)
-        tooltip:Hide()
-
-        tooltip._lines = {}
-        tooltip._lineCount = 0
-        tooltip._maxTextWidth = 200
-        tooltip._padX = 8
-        tooltip._padY = 8
-        tooltip._lineSpacing = 2
-
-        function tooltip:ClearLines()
-            for _, line in ipairs(self._lines) do
-                line:Hide()
-                line:SetText("")
-            end
-            self._lineCount = 0
-        end
-
-        function tooltip:_AcquireLine(index)
-            local line = self._lines[index]
-            if line then return line end
-
-            line = self:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-            line:SetJustifyH("LEFT")
-            line:SetJustifyV("TOP")
-            line:SetWordWrap(true)
-            line:SetWidth(self._maxTextWidth)
-            self._lines[index] = line
-            return line
-        end
-
-        function tooltip:_Layout()
-            local width = self._maxTextWidth + (self._padX * 2)
-            local totalHeight = self._padY
-
-            for i = 1, self._lineCount do
-                local line = self._lines[i]
-                line:ClearAllPoints()
-                line:SetPoint("TOPLEFT", self, "TOPLEFT", self._padX, -totalHeight)
-                line:SetWidth(self._maxTextWidth)
-
-                local h = line:GetStringHeight() or 0
-                if h < 12 then h = 12 end
-                totalHeight = totalHeight + h
-                if i < self._lineCount then
-                    totalHeight = totalHeight + self._lineSpacing
-                end
-            end
-
-            totalHeight = totalHeight + self._padY
-            self:SetSize(width, totalHeight)
-        end
-
-        function tooltip:SetOwner(owner, anchor)
-            self._owner = owner
-            self._anchor = anchor or "ANCHOR_RIGHT"
-
-            self:ClearAllPoints()
-            -- Position above mouse cursor to avoid blocking text below
-            local x, y = GetCursorPosition()
-            local scale = UIParent:GetScale()
-            x = x / scale
-            y = y / scale
-            
-            self:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", x, y + 32)
-        end
-
-        function tooltip:SetText(text, r, g, b)
-            self:ClearLines()
-            self:AddLine(text, r or 1, g or 0.82, b or 0, true)
-        end
-
-        function tooltip:AddLine(text, r, g, b, wrap)
-            if text == nil then return end
-            self._lineCount = self._lineCount + 1
-            local line = self:_AcquireLine(self._lineCount)
-            line:SetText(tostring(text))
-            line:SetTextColor(r or 1, g or 1, b or 1)
-            line:SetWordWrap(wrap ~= false)
-            line:Show()
-            self:_Layout()
-        end
-
-        tooltip:HookScript("OnHide", function(self)
-            self:ClearLines()
-        end)
-
-        self._sharedTooltip = tooltip
-    end
-    return self._sharedTooltip
+    return GameTooltip
 end
 
 function addon:AcquireTooltip(owner, anchor)
-    local tooltip = self:GetSharedTooltip()
-    tooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
-    return tooltip
+    GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
+    return GameTooltip
 end
 
 function addon:HideSharedTooltip()
-    if self._sharedTooltip then
-        self._sharedTooltip:Hide()
-    end
+    GameTooltip:Hide()
 end
 
 -- Initialize addon
