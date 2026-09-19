@@ -5,6 +5,7 @@ local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
 local format, match = string.format, string.match
 local max, floor = math.max, math.floor
+local InCombatLockdown = InCombatLockdown
 
 -- Local aliases for addon utilities (populated after load)
 local ParseObjectiveDisplay = function(...) return addon.ParseObjectiveDisplay(...) end
@@ -131,41 +132,55 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     
     -- Quest Item Button
     local itemData = ResolveTrackableItemData(item)
-    if itemData then
+    -- Secure button geometry/attribute mutation is deferred entirely while in combat:
+    -- SetAttribute/SetPoint/SetSize on an actionable SecureActionButtonTemplate button
+    -- can taint mid-combat. If one is already shown from a prior render, leave it as-is;
+    -- the next out-of-combat render will catch up (see Core.lua's pendingUpdate pattern).
+    if itemData and not InCombatLockdown() then
         local secureBtn = self:GetOrCreateSecureButton(button)
         secureBtn:ClearAllPoints()
-        
+
         local btnSize = 18
         if item.type == "supertrack" then
              btnSize = 36 -- 2x Normal Size (18 * 2)
              -- Move up into the header space (Active Quest backdrop corner)
-             -- Button is at yOffset (approx 30px down). 
+             -- Button is at yOffset (approx 30px down).
              -- We want Icon at -5px from top. Button is at -30px. Difference is +25px.
              -- Button is at -5px from right. We want Icon at -5px from right. Difference is 0px.
-             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 25) 
+             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 25)
              secureBtn:SetFrameLevel(button:GetFrameLevel() + 10) -- Ensure on top of header/backdrop
         else
              secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
         end
 
-        secureBtn:SetSize(btnSize, btnSize) 
+        secureBtn:SetSize(btnSize, btnSize)
         button:SetClipsChildren(false) -- Allow button to extend outside (for supertrack)
-        secureBtn:SetAttribute("type", "item")
-        secureBtn:SetAttribute("item", itemData.link)
+        if itemData.link then
+            secureBtn:SetAttribute("type", "item")
+            secureBtn:SetAttribute("item", itemData.link)
+        else
+            -- No usable item link (texture-only data): clear the secure action so this
+            -- button isn't left actionable with an empty target.
+            secureBtn:SetAttribute("type", nil)
+            secureBtn:SetAttribute("item", nil)
+        end
         secureBtn.itemLink = itemData.link
 
-        secureBtn:SetScript("OnEnter", function(self)
-            if not self.itemLink then return end
-            local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-            local itemName = GetItemInfo(self.itemLink)
-            tooltip:SetText(itemName or self.itemLink)
-            tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
-            tooltip:Show()
-        end)
-        secureBtn:SetScript("OnLeave", function()
-            addon:HideSharedTooltip()
-        end)
-        
+        if not secureBtn._handlersBound then
+            secureBtn:SetScript("OnEnter", function(self)
+                if not self.itemLink then return end
+                local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+                local itemName = GetItemInfo(self.itemLink)
+                tooltip:SetText(itemName or self.itemLink)
+                tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
+                tooltip:Show()
+            end)
+            secureBtn:SetScript("OnLeave", function()
+                addon:HideSharedTooltip()
+            end)
+            secureBtn._handlersBound = true
+        end
+
         -- Robust Icon handling
         local texture = itemData.texture
         
@@ -215,10 +230,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         end
         
         -- leftPadding is handled separately now as item is on the right
+    elseif itemData then
+        -- Item exists but we're in combat lockdown: leave whatever is already shown
+        -- (if anything) untouched rather than hiding/reconfiguring a secure button.
     else
         if button.itemButton then
             button.itemButton.itemLink = nil
             button.itemButton:Hide()
+            button.itemButton = nil
         end
     end
 
@@ -372,11 +391,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local parentWidth = parent:GetWidth() or 300
     local buttonWidth = parentWidth - indent - 5
     local textWidth = buttonWidth - leftPadding + rightPadding
-    
-    if textWidth > 0 then
-        button.text:SetWidth(textWidth)
-    end
-    
+
+    -- Always set an explicit width (clamped to a small positive minimum) so a pooled
+    -- text widget never keeps a stale width from whatever item last used it, which
+    -- would otherwise miscalculate this item's wrap/height.
+    button.text:SetWidth(max(textWidth, 1))
+
     local textHeight = button.text:GetStringHeight()
     local height = max(db.fontSize + 4, textHeight + 4)
     

@@ -188,13 +188,16 @@ function addon:ResetButtonPool()
 end
 
 function addon:FinalizeButtonPool()
-    -- Hide only unused regular pooled buttons.
-    for i = activeButtons + 1, #trackableButtons do
-        trackableButtons[i]:Hide()
-    end
-
-    -- Hide unused secure pooled buttons only when safe.
+    -- Regular pooled buttons routinely parent a secure item button (see
+    -- GetOrCreateSecureButton). Hiding a regular button also changes the effective
+    -- shown state of any secure child it houses, so gate this the same way as the
+    -- secure-button loop below rather than hiding unconditionally.
     if not InCombatLockdown() then
+        for i = activeButtons + 1, #trackableButtons do
+            trackableButtons[i]:Hide()
+        end
+
+        -- Hide unused secure pooled buttons only when safe.
         for i = activeSecureButtons + 1, #secureButtons do
             secureButtons[i]:Hide()
         end
@@ -276,6 +279,12 @@ function addon:GetOrCreateButton(parent)
     if btn.itemButton then
         btn.itemButton.itemLink = nil
         btn.itemButton:Hide()
+        -- Clear the reference itself, not just its state: the secure-button pool is
+        -- indexed by a flat per-render counter, so a stale (but non-nil) reference here
+        -- can alias a different pooled secure button that a *different* row legitimately
+        -- claims later in the same or a later render pass, and this reset would then
+        -- hide that other row's active item button out from under it.
+        btn.itemButton = nil
     end
     if btn.groupButton then
         btn.groupButton.questID = nil
