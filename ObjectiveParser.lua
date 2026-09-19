@@ -14,13 +14,21 @@ local objectiveParseCacheCount = 0
 
 local function GetObjectiveParseKey(item, obj, objIndex)
     -- Use only safe, immutable values (id, objIndex, numbers) to avoid tainting.
-    -- Never include obj.text or obj.quantityString as they come from protected frames.
+    -- Never include the raw obj.text/obj.quantityString strings themselves as they
+    -- come from protected frames — but DO include their lengths. A quest advancing to a
+    -- new stage can reset an objective at the same index to the same numeric shape
+    -- (e.g. "0/1") with entirely different flavor text ("Talk to X" -> "Kill Y"); without
+    -- some signal of text identity in the key, the cache would keep serving the previous
+    -- stage's parsed text forever (see ParseObjectiveDisplay regression notes). String
+    -- length is a plain number, not the protected value itself, so it carries no taint.
     return table.concat({
         tostring(item.id or 0),
         tostring(objIndex),
         tostring(obj.type or ""),
         tostring(obj.numFulfilled or 0),
         tostring(obj.numRequired or 0),
+        tostring(obj.text and #obj.text or 0),
+        tostring(obj.quantityString and #obj.quantityString or 0),
     }, "\31")
 end
 

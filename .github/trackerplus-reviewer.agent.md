@@ -21,7 +21,7 @@ You are a senior engineer specializing in World of Warcraft addon development (L
 **TrackerPlus** (`TrackerPlus.toc`, Interface 120000) is a full replacement for the Blizzard objective tracker. Key architectural pillars:
 
 - **Dirty-bucket update system** (`Core.lua`): Events mark sections dirty (`dirtySections`), a debounced `OnUpdate` timer calls `UpdateTracker`, which calls `CollectTrackables` (respecting dirty flags) then `UpdateTrackerDisplay`.
-- **Blizzard frame hijacking** (`RendererUtils.lua`): Scenario, World Quest, Bonus Objective, and Auto-Quest sections reparent Blizzard frames. Must always guard with `InCombatLockdown()` and restore on hide.
+- **Blizzard frame hijacking**: only `RenderScenario.lua` (scenario/delve/dungeon tracker) and `RenderAutoQuests.lua` (auto-quest popups) reparent Blizzard frames; World Quest and Bonus Objective sections are pure manual renderers and never hijack. There is no shared `RendererUtils.lua` hijack helper API — each of the two files implements its own borrow/restore/anchor-guard logic. Must always guard `SetParent`/`ClearAllPoints`/`SetPoint` with `InCombatLockdown()` and restore on hide via `addon:RestoreAllHijackedFrames` (`Core.lua`) or the file's own inline restore.
 - **Button pool** (`TrackerUtils.lua`): `GetOrCreateButton` / `GetOrCreateSecureButton` / `FinalizeButtonPool`. Signature caching (`_signature` keys) skips redundant `SetFont`/`SetPoint`/`SetAtlas` when recycling.
 - **Section renderers**: Each returns a `yOffset`. Orchestrated by `TrackerRenderer.lua:UpdateTrackerDisplay`.
 - **Load order** (from `.toc`): Database → DebugFrame → Core → TrackerUtils → RendererUtils → ObjectiveParser → RenderItem → Render* → TrackerRenderer → TrackerFrame → Settings.
@@ -42,9 +42,9 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 - Slash command handlers that modify frames must be gated.
 
 ### 3. Frame Hijacking Lifecycle (Critical)
-- Every `EnsureHijackedParent` call must have a corresponding `RestoreHijackedParent` call on the hide/cleanup path.
-- `ResetAnchorState` must be called after every restore so re-entry re-anchors correctly.
-- Hijacked frames must call `EnsureFrameVisible` (sets `SetAlpha(1)` + `SetIgnoreParentAlpha(true)`) — without this the frame can inherit a hidden parent's alpha.
+- No shared `EnsureHijackedParent`/`RestoreHijackedParent`/`ResetAnchorState`/`EnsureFrameVisible` helpers exist — verify each hijacking file's own bespoke reparent call has a real, reachable restore counterpart instead (e.g. `RenderScenario.lua` calling `self:RestoreAllHijackedFrames()`, not a nonexistent per-file method — this exact mistake shipped once and permanently orphaned the borrowed frame).
+- After any restore, confirm cached anchor/guard-installed flags on the frame are cleared so re-entry re-anchors and re-installs guards correctly.
+- Hijacked frames must assert their own visibility every render (`SetAlpha(1)` + `SetIgnoreParentAlpha(true)`, on the frame and any relevant child like `ContentsFrame`) — without this the frame can inherit a hidden parent's alpha, or be left invisible by Blizzard's own fade animations while still reporting a valid height.
 
 ### 4. Button Pool Hygiene (Warning)
 - Each recycled button must `Hide()` all child frames (objectives, prefixes, bullets, progress bars, expandBtn, poiButton, secureBtn) before re-use.

@@ -5,6 +5,7 @@ local ipairs, pairs = ipairs, pairs
 local max = math.max
 local GetTime = GetTime
 local hooksecurefunc = hooksecurefunc
+local InCombatLockdown = InCombatLockdown
 
 local COMPLETED_QUEST_POPUP_X = -20
 
@@ -20,6 +21,15 @@ local FindAutoQuestPopupFrame
 local function NormalizeCompletedQuestPopupAnchor(owner, popup)
     local completedQuestFrame = owner and owner.completedQuestFrame
     if not (completedQuestFrame and popup and popup._trackerPlusAnchorLockEnabled) then
+        return
+    end
+
+    -- This runs both from the direct borrow path and reactively from the
+    -- hooksecurefunc guards below (i.e. whenever Blizzard's own code calls
+    -- SetPoint/ClearAllPoints on the popup, which can happen mid-combat).
+    -- SetParent/ClearAllPoints/SetPoint on a Blizzard-owned frame must stay
+    -- out-of-combat only, matching the pattern used in RenderScenario.lua.
+    if InCombatLockdown() then
         return
     end
 
@@ -305,7 +315,11 @@ local function RestoreStaleBorrowedPopups(owner, keep)
     owner._borrowedAutoQuestPopups = owner._borrowedAutoQuestPopups or {}
     for popup, _ in pairs(owner._borrowedAutoQuestPopups) do
         if not keep or not keep[popup] then
-            if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
+            local restored = false
+
+            if popup._trackerPlusOriginalParent
+                and not (popup.IsProtected and popup:IsProtected())
+                and not InCombatLockdown() then
                 popup._trackerPlusAnchorLockEnabled = nil
                 popup._trackerPlusLockedAnchorX = nil
                 popup._trackerPlusLockedAnchorY = nil
@@ -334,8 +348,18 @@ local function RestoreStaleBorrowedPopups(owner, keep)
                 popup._trackerPlusOriginalParent = nil
                 popup._trackerPlusOriginalPoints = nil
                 popup._trackerPlusLastAutoQuestSeenAt = nil
+                restored = true
             end
-            owner._borrowedAutoQuestPopups[popup] = nil
+
+            -- Only stop tracking this popup once it has actually been handed back (or
+            -- there was never anything to hand back). A popup that is currently
+            -- protected or that we're in combat right now can't be restored yet; keep
+            -- it tracked so a later call retries, instead of silently forgetting it
+            -- while it's still reparented under completedQuestFrame with alpha/anchor
+            -- overrides in effect and no way to ever clean it up again.
+            if restored or not popup._trackerPlusOriginalParent then
+                owner._borrowedAutoQuestPopups[popup] = nil
+            end
         end
     end
 
@@ -449,7 +473,7 @@ function addon:RenderAutoQuestSection(autoQuests)
                 popup._trackerPlusOriginalPoints = points
             end
 
-            if popup:GetParent() ~= completedQuestFrame then
+            if not InCombatLockdown() and popup:GetParent() ~= completedQuestFrame then
                 popup:SetParent(completedQuestFrame)
             end
 
