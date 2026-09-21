@@ -3,10 +3,12 @@ local addonName, addon = ...
 
 -- Localize hot-path globals to avoid repeated global lookups
 local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
-local tinsert, wipe = table.insert, wipe
-local format, match, gsub = string.format, string.match, string.gsub
-local max, min, floor, band = math.max, math.min, math.floor, bit.band
+local wipe = wipe
+local format, gsub = string.format, string.gsub
+local max, min, band = math.max, math.min, bit.band
+local huge = math.huge
 local GetTime = GetTime
+local UnitLevel = UnitLevel
 local InCombatLockdown = InCombatLockdown
 local IsInInstance = IsInInstance
 local GetRealZoneText = GetRealZoneText
@@ -14,6 +16,7 @@ local C_QuestLog = C_QuestLog
 local C_SuperTrack = C_SuperTrack
 local C_Scenario = C_Scenario
 local C_Timer = C_Timer
+local GetQuestDifficultyColor = GetQuestDifficultyColor
 
 -- Core addon initialization and event handling
 local frame = CreateFrame("Frame")
@@ -85,15 +88,6 @@ local function ShouldForceObjectiveIncomplete(objectiveText)
         or text:match("^%(%s*%d+%%%s*%)")
 
     return not hasLeadingNumericPrefix
-end
-
-local function MoveObjectiveTrackerOffscreen(owner)
-    if not ObjectiveTrackerFrame then return end
-    
-    -- Hide without moving to avoid tainting geometry in the widget system.
-    -- SetAlpha(0) hides the frame without causing secure frame taint.
-    ObjectiveTrackerFrame:SetAlpha(0)
-    ObjectiveTrackerFrame:EnableMouse(false)
 end
 
 
@@ -169,7 +163,9 @@ function addon:Initialize()
         -- Hook Show to control visibility based on our enabled state
         if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
-                if addon.db.enabled then
+                -- While Edit Mode is open the player needs to see and drag the
+                -- real tracker, so suppression is suspended (see OnEditModeEnter).
+                if addon.db.enabled and not addon._editModeActive then
                     self:EnableMouse(false)
                     if not InCombatLockdown() then
                         self:SetAlpha(0)
@@ -183,7 +179,7 @@ function addon:Initialize()
         -- immediately turn it back off to prevent click-through behavior.
         if not addon.hookedTrackerMouse and not addon.disableObjectiveTrackerHooks then
             hooksecurefunc(ObjectiveTrackerFrame, "EnableMouse", function(self, enabled)
-                if addon.db.enabled and enabled then
+                if addon.db.enabled and enabled and not addon._editModeActive then
                     self:EnableMouse(false)
                 end
             end)
@@ -193,13 +189,56 @@ function addon:Initialize()
         -- Initial visibility check
         self:UpdateDefaultTrackerVisibility()
     end
-    
+
+    -- Edit Mode enter/exit (clients without Edit Mode simply have no EventRegistry
+    -- callbacks for it, so this is a no-op there).
+    if not addon.hookedEditMode and EventRegistry and EventRegistry.RegisterCallback then
+        pcall(function()
+            EventRegistry:RegisterCallback("EditMode.Enter", function()
+                addon:OnEditModeEnter()
+            end, addon)
+            EventRegistry:RegisterCallback("EditMode.Exit", function()
+                addon:OnEditModeExit()
+            end, addon)
+        end)
+        addon.hookedEditMode = true
+    end
+
     Print("Loaded! Type /trackerplus or /tp for options.")
 end
 
 function addon:RestoreAllHijackedFrames()
-    -- Restore any borrowed widget frames back to their original parents.
-    -- Scan current scenario trackers for reparented WidgetContainer frames.
+    -- Restore borrowed frames to their original parents.
+    --
+    -- Only frames carrying our _trackerPlusOriginalParent marker are touched, and
+    -- RenderScenario only ever marks the top-level tracker. Every write to (and
+    -- even broad traversal of) a Blizzard frame spreads TrackerPlus taint into it,
+    -- which later surfaces as errors inside Blizzard's own tracker update, so this
+    -- deliberately checks a few known fields instead of walking GetChildren().
+    local function RestoreFrame(frameToRestore)
+        if not (frameToRestore and frameToRestore._trackerPlusOriginalParent) then
+            return
+        end
+
+        frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
+        frameToRestore:ClearAllPoints()
+        if frameToRestore._trackerPlusOriginalPoint1 then
+            frameToRestore:SetPoint(
+                frameToRestore._trackerPlusOriginalPoint1,
+                frameToRestore._trackerPlusOriginalRelTo,
+                frameToRestore._trackerPlusOriginalPoint2,
+                frameToRestore._trackerPlusOriginalX or 0,
+                frameToRestore._trackerPlusOriginalY or 0
+            )
+        end
+        frameToRestore._trackerPlusOriginalParent = nil
+        frameToRestore._trackerPlusOriginalPoint1 = nil
+        frameToRestore._trackerPlusOriginalRelTo = nil
+        frameToRestore._trackerPlusOriginalPoint2 = nil
+        frameToRestore._trackerPlusOriginalX = nil
+        frameToRestore._trackerPlusOriginalY = nil
+    end
+
     if not InCombatLockdown() then
         local candidates = {
             "DelvesObjectiveTracker",
@@ -209,44 +248,18 @@ function addon:RestoreAllHijackedFrames()
         for _, name in ipairs(candidates) do
             local tracker = _G and _G[name]
             if tracker then
-                local restoreList = {}
-
-                restoreList[#restoreList + 1] = tracker
-                if tracker.ContentsFrame then
-                    restoreList[#restoreList + 1] = tracker.ContentsFrame
-                    if tracker.ContentsFrame.WidgetContainer then
-                        restoreList[#restoreList + 1] = tracker.ContentsFrame.WidgetContainer
+                pcall(function()
+                    RestoreFrame(tracker)
+                    local contents = tracker.ContentsFrame
+                    if contents then
+                        RestoreFrame(contents)
+                        RestoreFrame(contents.WidgetContainer)
                     end
-                    for _, child in ipairs({tracker.ContentsFrame:GetChildren()}) do
-                        restoreList[#restoreList + 1] = child
-                    end
-                end
-
-                for _, frameToRestore in ipairs(restoreList) do
-                    if frameToRestore and frameToRestore._trackerPlusOriginalParent then
-                        frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
-                        frameToRestore:ClearAllPoints()
-                        if frameToRestore._trackerPlusOriginalPoint1 then
-                            frameToRestore:SetPoint(
-                                frameToRestore._trackerPlusOriginalPoint1,
-                                frameToRestore._trackerPlusOriginalRelTo,
-                                frameToRestore._trackerPlusOriginalPoint2,
-                                frameToRestore._trackerPlusOriginalX or 0,
-                                frameToRestore._trackerPlusOriginalY or 0
-                            )
-                        end
-                        frameToRestore._trackerPlusOriginalParent = nil
-                        frameToRestore._trackerPlusOriginalPoint1 = nil
-                        frameToRestore._trackerPlusOriginalRelTo = nil
-                        frameToRestore._trackerPlusOriginalPoint2 = nil
-                        frameToRestore._trackerPlusOriginalX = nil
-                        frameToRestore._trackerPlusOriginalY = nil
-                    end
-                end
+                end)
             end
         end
     end
-    
+
     -- Clear cached metadata
     if addon.scenarioFrame then
         addon.scenarioFrame.borrowedFrame = nil
@@ -254,9 +267,52 @@ function addon:RestoreAllHijackedFrames()
     addon.scenarioHostOriginalParent = nil
 end
 
+-- Edit Mode integration
+--
+-- The game's Edit Mode is how the player positions and sizes its own tracker, and
+-- TrackerPlus mirrors that geometry while "Match Game Tracker" is on. That only
+-- works if the real tracker is visible and draggable while Edit Mode is open, so
+-- suppression is suspended for the duration and re-applied on exit.
+function addon:OnEditModeEnter()
+    self._editModeActive = true
+
+    -- Let the player see/grab the real tracker again.
+    if ObjectiveTrackerFrame and not InCombatLockdown() then
+        pcall(function()
+            ObjectiveTrackerFrame:SetAlpha(1)
+            ObjectiveTrackerFrame:EnableMouse(true)
+            ObjectiveTrackerFrame:Show()
+        end)
+    end
+
+    -- Our own frame sits exactly on top of it while matching, which would cover it
+    -- and swallow the drag, so stand aside until Edit Mode closes.
+    if self.db.matchBlizzardTracker then
+        self._hideForEditMode = true
+        self:SetTrackerVisible(false)
+    end
+end
+
+function addon:OnEditModeExit()
+    self._editModeActive = nil
+    self._hideForEditMode = nil
+
+    -- Re-hide the default tracker, then adopt whatever geometry was just set.
+    self:UpdateDefaultTrackerVisibility()
+
+    if self.SyncWithBlizzardTracker then
+        self:SyncWithBlizzardTracker()
+    end
+
+    self:RequestUpdate("full")
+end
+
 -- Update default tracker visibility based on enabled state
 function addon:UpdateDefaultTrackerVisibility()
     if not ObjectiveTrackerFrame then return end
+
+    -- Edit Mode owns the tracker's visibility while it is open.
+    if self._editModeActive then return end
 
     if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
 
@@ -355,6 +411,11 @@ function addon:RegisterEvents()
     pcall(function() frame:RegisterEvent("CONTENT_TRACKING_UPDATE") end)
     pcall(function() frame:RegisterEvent("TRACKABLE_INFO_UPDATE") end)
 
+    -- Edit Mode: the game's tracker can be moved/resized there, and we mirror it
+    -- until the player positions TrackerPlus themselves. Safe registration; the
+    -- event does not exist on clients without Edit Mode.
+    pcall(function() frame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED") end)
+
     -- FollowTheArrow addon events (safe registration; events may not exist)
     pcall(function() frame:RegisterEvent("FTA_GUIDE_CHANGED") end)
     pcall(function() frame:RegisterEvent("FTA_STEP_CHANGED") end)
@@ -375,6 +436,20 @@ function addon:OnEvent(event, ...)
         if self.RestorePosition then self.RestorePosition() end
         self:UpdateDefaultTrackerVisibility()
         self:RequestUpdate("full")
+
+        -- The game's tracker may not have its final Edit Mode geometry yet at this
+        -- point, so take one more reading shortly after login/zone-in.
+        if self.SyncWithBlizzardTracker and C_Timer and C_Timer.After then
+            C_Timer.After(1, function()
+                addon:SyncWithBlizzardTracker()
+            end)
+        end
+    elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
+        -- The player moved/resized the game's tracker in Edit Mode; follow it
+        -- unless they've already positioned TrackerPlus themselves.
+        if self.SyncWithBlizzardTracker then
+            self:SyncWithBlizzardTracker()
+        end
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat
         if self.db.hideInCombat then
@@ -830,8 +905,12 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         end
     end
     
-    if not hasObjectives then
-        local numLeaderBoards = GetNumQuestLeaderBoards(logIndex)
+    -- Legacy leaderboard fallback, only reached when C_QuestLog.GetQuestObjectives
+    -- returned nothing. Both globals are absent on clients that have moved on, and
+    -- this runs during every collection pass, so guard rather than risk erroring
+    -- out of quest collection entirely.
+    if not hasObjectives and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
+        local numLeaderBoards = GetNumQuestLeaderBoards(logIndex) or 0
         for j=1, numLeaderBoards do
              local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
              if text then
@@ -874,30 +953,59 @@ function addon:IsCampaignQuestLogEntry(logIndex, info)
 end
 
 function addon:GetQuestShortDescription(questID, logIndex)
-    -- Resolve log index if not provided
-    local idx = logIndex
-    if not idx and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        idx = C_QuestLog.GetLogIndexForQuestID(questID)
-    end
-    if not idx or idx <= 0 then return nil end
+    if not GetQuestLogQuestText then return nil end
 
-    -- Select the quest log entry so GetQuestLogQuestText reads the right quest.
-    -- This is done at tooltip-show time (user interaction), not during background collection,
-    -- so the side-effect event is acceptable.
-    if SelectQuestLogEntry then
-        SelectQuestLogEntry(idx)
+    -- GetQuestLogQuestText reads whichever quest is currently *selected*, so the
+    -- quest has to be selected first. The legacy SelectQuestLogEntry(logIndex) no
+    -- longer does that on this client, which is why every quest's tooltip showed
+    -- the same description: whatever quest happened to be selected already.
+    -- C_QuestLog.SetSelectedQuest(questID) is the current way to do it.
+    --
+    -- This runs on hover (user interaction) rather than during background
+    -- collection, and the previous selection is restored afterwards so the
+    -- player's own quest log selection isn't moved out from under them.
+    local previousQuestID
+    if C_QuestLog and C_QuestLog.GetSelectedQuest then
+        local ok, selected = pcall(C_QuestLog.GetSelectedQuest)
+        if ok then previousQuestID = selected end
     end
 
-    if GetQuestLogQuestText then
-        local desc = GetQuestLogQuestText()
-        if desc and desc ~= "" then
-            -- Truncate to keep tooltip concise
-            if #desc > 220 then
-                desc = desc:sub(1, 220) .. "..."
-            end
-            return desc
+    local selected = false
+    if questID and C_QuestLog and C_QuestLog.SetSelectedQuest then
+        selected = pcall(C_QuestLog.SetSelectedQuest, questID)
+    end
+
+    if not selected and SelectQuestLogEntry then
+        -- Legacy fallback: select by log index instead.
+        local idx = logIndex
+        if not idx and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+            idx = C_QuestLog.GetLogIndexForQuestID(questID)
+        end
+        if idx and idx > 0 then
+            selected = pcall(SelectQuestLogEntry, idx)
         end
     end
+
+    if not selected then return nil end
+
+    local desc
+    local ok, questText = pcall(GetQuestLogQuestText)
+    if ok then desc = questText end
+
+    -- Put the player's selection back.
+    if previousQuestID and previousQuestID ~= 0 and previousQuestID ~= questID
+        and C_QuestLog and C_QuestLog.SetSelectedQuest then
+        pcall(C_QuestLog.SetSelectedQuest, previousQuestID)
+    end
+
+    if desc and desc ~= "" then
+        -- Truncate to keep tooltip concise
+        if #desc > 220 then
+            desc = desc:sub(1, 220) .. "..."
+        end
+        return desc
+    end
+
     return nil
 end
 
@@ -975,43 +1083,29 @@ function addon:CollectAchievements(trackables)
         trackedAchievements = {GetTrackedAchievements()}
     end
     
+    -- Achievement details come from the global functions, not C_AchievementInfo.
+    -- That namespace exists but only carries a handful of helpers
+    -- (IsValidAchievement, GetRewardItemID, SetPortraitTexture and friends) -- it has
+    -- no GetInfo/GetCategory/GetCategoryInfo/GetNumCriteria/GetCriteriaInfo, so the
+    -- "modern API" branches that used to be here could never run.
     for _, achievementID in ipairs(trackedAchievements) do
-        local id, name, description, points, completed, icon, isGuild
-        
-        -- Try C_AchievementInfo (Modern API)
-        if C_AchievementInfo and C_AchievementInfo.GetInfo then
-            local info = C_AchievementInfo.GetInfo(achievementID)
-            if info then
-                id = info.id
-                name = info.title
-                description = info.description
-                points = info.points
-                completed = info.completed
-                icon = info.icon
-                isGuild = info.isGuild
-            end
-        elseif GetAchievementInfo then
+        local id, name, description, points, completed, icon
+
+        if GetAchievementInfo then
             local _
-            id, name, points, completed, _, _, _, description, _, icon, _, isGuild = GetAchievementInfo(achievementID)
+            id, name, points, completed, _, _, _, description, _, icon = GetAchievementInfo(achievementID)
         end
-        
+
         if id then
             -- Determine Category (Minor Zone)
             local categoryName = "General"
             local categoryID
-            if C_AchievementInfo and C_AchievementInfo.GetCategory then
-                 categoryID = C_AchievementInfo.GetCategory(achievementID)
-            elseif GetAchievementCategory then
+            if GetAchievementCategory then
                  categoryID = GetAchievementCategory(achievementID)
             end
-            
-            if categoryID then
-                local catName
-                if C_AchievementInfo and C_AchievementInfo.GetCategoryInfo then
-                     catName = C_AchievementInfo.GetCategoryInfo(categoryID)
-                elseif GetCategoryInfo then
-                     catName = GetCategoryInfo(categoryID)
-                end
+
+            if categoryID and GetCategoryInfo then
+                local catName = GetCategoryInfo(categoryID)
                 if catName then categoryName = catName end
             end
 
@@ -1030,27 +1124,18 @@ function addon:CollectAchievements(trackables)
             
             -- Get criteria
             local numCriteria = 0
-            if C_AchievementInfo and C_AchievementInfo.GetNumCriteria then
-                numCriteria = C_AchievementInfo.GetNumCriteria(achievementID)
-            elseif GetAchievementNumCriteria then
-                numCriteria = GetAchievementNumCriteria(achievementID)
+            if GetAchievementNumCriteria then
+                numCriteria = GetAchievementNumCriteria(achievementID) or 0
             end
-            
+
             for i = 1, numCriteria do
                 local criteriaString, criteriaCompleted, quantity, reqQuantity
-                
-                if C_AchievementInfo and C_AchievementInfo.GetCriteriaInfo then
-                    local criteriaInfo = C_AchievementInfo.GetCriteriaInfo(achievementID, i)
-                    if criteriaInfo then
-                        criteriaString = criteriaInfo.description
-                        criteriaCompleted = criteriaInfo.completed
-                        quantity = criteriaInfo.quantity
-                        reqQuantity = criteriaInfo.requiredQuantity
-                    end
-                elseif GetAchievementCriteriaInfo then
+
+                if GetAchievementCriteriaInfo then
+                    local _
                     criteriaString, _, criteriaCompleted, quantity, reqQuantity = GetAchievementCriteriaInfo(achievementID, i)
                 end
-                
+
                 if criteriaString then
                     achievementInfo.objectives[#achievementInfo.objectives + 1] = {
                         text = criteriaString,
@@ -1159,9 +1244,12 @@ function addon:CollectProfessionTracking(trackables)
             end
 
             if not itemName then
-                local resolvedName = GetItemInfo(reagent.itemID)
-                if resolvedName and resolvedName ~= "" then
-                    itemName = resolvedName
+                local getItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+                if getItemInfo then
+                    local ok, resolvedName = pcall(getItemInfo, reagent.itemID)
+                    if ok and resolvedName and resolvedName ~= "" then
+                        itemName = resolvedName
+                    end
                 end
             end
 
@@ -1234,13 +1322,23 @@ function addon:CollectProfessionTracking(trackables)
                 end
             end
 
-            -- Legacy fallback.
-            local okLegacy, legacyQuantity = pcall(GetItemCount, itemID, true, false, true, true)
-            if okLegacy and legacyQuantity then
-                return legacyQuantity
+            -- Legacy fallback, for clients that still have the old global. On
+            -- current clients GetItemCount only exists under C_Item, so calling the
+            -- bare global would raise "attempt to call a nil value".
+            local getItemCount = (C_Item and C_Item.GetItemCount) or GetItemCount
+            if getItemCount then
+                local okLegacy, legacyQuantity = pcall(getItemCount, itemID, true, false, true, true)
+                if okLegacy and legacyQuantity then
+                    return legacyQuantity
+                end
+
+                local okBasic, basicQuantity = pcall(getItemCount, itemID)
+                if okBasic and basicQuantity then
+                    return basicQuantity
+                end
             end
 
-            return GetItemCount(itemID) or 0
+            return 0
         end
 
         if reagent.currencyID and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
@@ -1357,21 +1455,29 @@ function addon:CollectProfessionTracking(trackables)
     AddRecipes(true)
 end
 
--- Collect monthly activities (Trading Post / Perks Program)
+-- Collect monthly activities (Trading Post / Traveler's Log)
+--
+-- Tracked activities live in C_PerksActivities, not C_PerksProgram. C_PerksProgram
+-- is the vendor/shop side of the feature and has no GetTrackedPerksActivities or
+-- GetPerksActivityInfo, so the old code silently collected nothing -- and would have
+-- raised "attempt to call a nil value" on the first activity if the
+-- C_ContentTracking fallback ever did return ids.
 function addon:CollectMonthlyActivities(trackables)
-    if not C_PerksProgram then return end
-    
+    local activities = C_PerksActivities
+    local getActivityInfo = activities and activities.GetPerksActivityInfo
+    if not getActivityInfo then return end
+
     local trackedIDs
-    if C_PerksProgram.GetTrackedPerksActivities then
-        trackedIDs = C_PerksProgram.GetTrackedPerksActivities()
+    if activities.GetTrackedPerksActivities then
+        trackedIDs = activities.GetTrackedPerksActivities()
     elseif C_ContentTracking and C_ContentTracking.GetTrackedIDs and Enum and Enum.ContentTrackingType and Enum.ContentTrackingType.PerksActivity then
         trackedIDs = C_ContentTracking.GetTrackedIDs(Enum.ContentTrackingType.PerksActivity)
     end
-    
+
     if not trackedIDs then return end
-    
+
     for _, activityID in ipairs(trackedIDs) do
-        local info = C_PerksProgram.GetPerksActivityInfo(activityID)
+        local info = getActivityInfo(activityID)
         if info then
             local objectives = {}
             local isComplete = info.completed
@@ -1495,45 +1601,142 @@ function addon:GetQuestColor(info)
         return db.questTypeColors.worldQuest
     elseif C_QuestLog.IsQuestTask(questID) then
         return db.bonusColor
+    elseif db.colorQuestsByDifficulty and GetQuestDifficultyColor and info.level and info.level > 0 then
+        -- Use the client's own difficulty-color function (the same one the default
+        -- quest log calls to color quest titles/levels) so colors always match the
+        -- game's actual level-difference thresholds and palette, rather than an
+        -- addon-side approximation of them.
+        local ok, color = pcall(GetQuestDifficultyColor, info.level)
+        if ok and color and color.r then
+            return { r = color.r, g = color.g, b = color.b, a = 1 }
+        end
+        return db.questColor
     else
         return db.questColor
     end
 end
 
+-- Distance from the player to a trackable's objective, as a squared value (the
+-- game returns squared distance; we never need the real distance, only an
+-- ordering, so there's no point taking a square root). Unreachable or unknown
+-- objectives return huge so they sort last.
+function addon:GetTrackableSortDistance(item)
+    local questID = item and (item.id or item.questID)
+    if not questID or not C_QuestLog or not C_QuestLog.GetDistanceSqToQuest then
+        return huge
+    end
+
+    -- Documented as possibly returning nothing, so guard the call and the result.
+    local ok, distanceSq, onContinent = pcall(C_QuestLog.GetDistanceSqToQuest, questID)
+    if not ok or type(distanceSq) ~= "number" then
+        return huge
+    end
+
+    -- A NaN would make the comparator inconsistent, which makes table.sort raise a
+    -- hard error and take the whole render with it.
+    if distanceSq ~= distanceSq then
+        return huge
+    end
+
+    -- Objectives on another continent sort after anything we can walk to.
+    if onContinent == false then
+        return huge
+    end
+
+    return distanceSq
+end
+
+-- How hard a trackable is relative to the player, expressed as a level delta.
+-- Higher means harder. This is the same quantity the game's difficulty colors are
+-- thresholds on, so the sort order lines up with the colors shown on each row.
+-- Trackables without a real level (achievements, professions, scaling quests) are
+-- treated as being at the player's level.
+function addon:GetTrackableSortDifficulty(item, playerLevel)
+    local level = tonumber(item and item.level)
+    if not level or level <= 0 then
+        return 0
+    end
+    return level - (playerLevel or 0)
+end
+
 -- Sort trackables
 function addon:SortTrackables(trackables)
     local sortMethod = self.db.sortMethod
-    
+    if sortMethod ~= "proximity" and sortMethod ~= "alphabetical" and sortMethod ~= "difficulty_desc" then
+        -- Easiest-first difficulty is the default, and the fallback for any legacy
+        -- or unrecognised value.
+        sortMethod = "difficulty_asc"
+    end
+
+    local isProximity = (sortMethod == "proximity")
+    local isAlphabetical = (sortMethod == "alphabetical")
+    local isDifficulty = not isProximity and not isAlphabetical
+    local difficultyDescending = (sortMethod == "difficulty_desc")
+
     local function GetPriority(trackable)
         -- Priority 1: Scenarios/Dungeons (always on top)
         if trackable.type == "scenario" then
             return 1
         end
-        
+
         -- Priority 2: Super Tracked Quest (Pinned)
         if trackable.type == "supertrack" then
             return 2
         end
-        
+
         -- Priority 3: Everything else
         return 3
     end
-    
+
+    -- Precompute each entry's sort key. table.sort calls the comparator O(n log n)
+    -- times and these keys come from API calls, so computing them inside the
+    -- comparator would hit the distance API dozens of times per quest.
+    self._sortPriority = self._sortPriority or {}
+    self._sortValue = self._sortValue or {}
+    local priorities, values = self._sortPriority, self._sortValue
+    wipe(priorities)
+    wipe(values)
+
+    local playerLevel = (UnitLevel and UnitLevel("player")) or 0
+
+    for i = 1, #trackables do
+        local item = trackables[i]
+        priorities[item] = GetPriority(item)
+        if isProximity then
+            values[item] = self:GetTrackableSortDistance(item)
+        elseif isDifficulty then
+            values[item] = self:GetTrackableSortDifficulty(item, playerLevel)
+        end
+    end
+
     table.sort(trackables, function(a, b)
-        local prioA = GetPriority(a)
-        local prioB = GetPriority(b)
-        
+        local prioA = priorities[a] or 3
+        local prioB = priorities[b] or 3
+
         if prioA ~= prioB then
             return prioA < prioB
         end
-    
-        if sortMethod == "level" then
-            return (a.level or 0) > (b.level or 0)
-        elseif sortMethod == "name" then
-            return (a.title or "") < (b.title or "")
+
+        if isProximity then
+            -- Nearest first.
+            local distA, distB = values[a] or huge, values[b] or huge
+            if distA ~= distB then
+                return distA < distB
+            end
+        elseif isDifficulty then
+            local diffA, diffB = values[a] or 0, values[b] or 0
+            if diffA ~= diffB then
+                if difficultyDescending then
+                    -- Hardest first; trivial/grey quests sink to the bottom.
+                    return diffA > diffB
+                end
+                -- Easiest first, so the quickest quests to clear are at the top.
+                return diffA < diffB
+            end
         end
-        
-        return false
+
+        -- Alphabetical, and the stable tiebreak for the other two orders.
+        return (a.title or "") < (b.title or "")
     end)
 end
 
@@ -1560,7 +1763,9 @@ end
 -- Set tracker visibility
 function addon:SetTrackerVisible(visible)
     if self.trackerFrame then
-        if visible then
+        -- While Edit Mode is open and we're mirroring the game's tracker, stay
+        -- hidden regardless of what the regular update loop asks for.
+        if visible and not self._hideForEditMode then
             self.trackerFrame:Show()
         else
             self.trackerFrame:Hide()

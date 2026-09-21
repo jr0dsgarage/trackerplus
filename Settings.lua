@@ -1,6 +1,5 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
-local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Settings panel using manual frame construction for maximum control
 local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
@@ -35,11 +34,16 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             addon:UpdateTrackerLock()
         elseif dbKey == "borderEnabled" then
             addon:UpdateTrackerAppearance()
-        elseif dbKey == "headerIconPosition" then
-             if addon.UpdateMinMaxState then addon:UpdateMinMaxState() end
-             addon:RefreshDisplay()
-        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" or dbKey == "includeFTAQuests" then
-            addon:RefreshDisplay()
+        elseif dbKey == "matchBlizzardTracker" then
+            -- Re-checking it should snap back onto the game's tracker immediately.
+            if checked and addon.SyncWithBlizzardTracker then
+                addon:SyncWithBlizzardTracker()
+            end
+        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" or dbKey == "includeFTAQuests" or dbKey == "colorQuestsByDifficulty" then
+            -- Colors (and quest inclusion/grouping) are computed in GetQuestData/
+            -- CollectQuests at collection time, not at render time, so these need a
+            -- full recollect rather than just a repaint.
+            addon:RequestUpdate("full")
         elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
             addon:RequestUpdate()
         elseif dbKey == "layoutDebug" then
@@ -153,8 +157,12 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
                 UIDropDownMenu_SetSelectedValue(dropdown, self.value)
                 
                 -- Trigger updates
-                if dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then 
-                    addon:RefreshDisplay() 
+                if dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then
+                    addon:RefreshDisplay()
+                elseif dbKey == "sortMethod" then
+                    -- Sorting happens in CollectTrackables, so this needs a full
+                    -- recollect rather than just a repaint.
+                    addon:RequestUpdate("full")
                 elseif dbKey == "debugLevel" then
                     if addon.LogAt then
                         addon:LogAt("info", "Debug level set to %s", tostring(self.value))
@@ -345,9 +353,19 @@ function addon:UpdateSettingWidgets()
         end
     end
     
+    -- Checkboxes that the addon can flip on its own (e.g. "Match Game Tracker"
+    -- clears itself once the player drags or resizes the tracker).
+    local function UpdateCheckbox(dbKey)
+        local check = _G[addonName .. dbKey .. "Check"]
+        if check then
+            check:SetChecked(addon.db[dbKey] and true or false)
+        end
+    end
+
     UpdateSlider("frameWidth")
     UpdateSlider("frameHeight")
     UpdateSlider("frameScale")
+    UpdateCheckbox("matchBlizzardTracker")
 end
 
 -- Initialize the Settings UI
@@ -359,7 +377,10 @@ local function InitUI()
     
     local version = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 8, 2)
-    version:SetText("v1.0.0") -- Should ideally pull from TOC
+    -- Read from the .toc rather than hardcoding, so it can't drift out of date.
+    local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    local addonVersion = getMetadata and getMetadata(addonName, "Version")
+    version:SetText(addonVersion and ("v" .. addonVersion) or "")
 
     -- Global Settings (Parent page)
     local globalFrame, gY = StartSection(panel, "Global Settings", -45)
@@ -444,6 +465,7 @@ local function InitUI()
     y = -5
     
     s, sy = StartSection(p2, "Dimensions", y)
+    sy = CreateCheckbox(s, "Match Game Tracker", "matchBlizzardTracker", "Place and size the tracker exactly over the game's own objective tracker, following any changes you make to it in the game's Edit Mode. Turns itself off as soon as you drag or resize TrackerPlus yourself; re-check it to snap back.", sy)
     sy = CreateSlider(s, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", sy)
     sy = CreateSlider(s, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", sy)
     sy = CreateSlider(s, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", sy)
@@ -604,9 +626,16 @@ local function InitUI()
     
     s, sy = StartSection(p4, "Display Options", y)
     sy = CreateCheckbox(s, "Show Quest Level", "showQuestLevel", "Show the level of the quest", sy)
+    sy = CreateCheckbox(s, "Color Quests by Difficulty", "colorQuestsByDifficulty", "Color quest name/level using the same difficulty colors as the default quest log (gray/green/yellow/orange/red based on your level vs. the quest's level), via the game's own GetQuestDifficultyColor. Disable to use the flat 'Quest Text' color below instead.", sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
     sy = CreateCheckbox(s, "Include Campaign Quest in Active Quest", "includeCampaignQuestInActiveQuest", "When enabled, a pinned campaign quest also appears in the Active Quest section instead of only in Campaign Quests.", sy)
     sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)
+    sy = CreateDropdown(s, "Sort Order", "sortMethod", {
+        {text = "Difficulty (Easiest First)", value = "difficulty_asc"},
+        {text = "Difficulty (Hardest First)", value = "difficulty_desc"},
+        {text = "Proximity", value = "proximity"},
+        {text = "Alphabetical", value = "alphabetical"}
+    }, "Order entries within each group. Difficulty compares each quest's level to yours: Easiest First puts trivial quests at the top, Hardest First puts them at the bottom. Proximity puts the closest objective first. Alphabetical sorts by name.", sy)
     sy = CreateCheckbox(s, "Include FollowTheArrow Quests", "includeFTAQuests", "Show a Follow the Arrow guide section between Active Quest and Campaign Quests. Requires the FollowTheArrow addon.", sy)
     y = y - EndSection(s, sy)
     

@@ -1,9 +1,8 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local pairs, ipairs, next, type, tostring = pairs, ipairs, next, type, tostring
-local format, match, gsub = string.format, string.match, string.gsub
-local max, min, floor = math.max, math.min, math.floor
+local pairs, ipairs, tostring = pairs, ipairs, tostring
+local format = string.format
 
 -------------------------------------------------------------------------------
 -- Debug / layout helpers

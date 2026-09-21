@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
 local format = string.format
-local max, min = math.max, math.min
+local max, min, floor = math.max, math.min, math.floor
 
 -- Tracker frame UI with scrollable content (no visible scrollbar)
 local trackerFrame = nil
@@ -14,11 +14,60 @@ local SHADOW_SEAM_OFFSET = 1
 local SHADOW_BOTTOM_EXTRA_DROP = 3
 
 
+-- Keep the scroll gradients spanning the full tracker width while tracking the
+-- scrollable area vertically.
+--
+-- The gradients deliberately do not anchor to the scroll frame horizontally: the
+-- scroll frame's own inset from the tracker edges changes depending on which
+-- pinned sections are visible (zero directly under the header, otherwise inset by
+-- the section side padding), which made the gradients change width with it. So we
+-- anchor them to the tracker for width and carry over only the scroll frame's
+-- vertical edges here.
+local function UpdateScrollShadowAnchors(owner)
+    if not (trackerFrame and scrollFrame and owner.scrollShadowTop and owner.scrollShadowBottom) then
+        return
+    end
+
+    local trackerTop, trackerBottom = trackerFrame:GetTop(), trackerFrame:GetBottom()
+    local scrollTop, scrollBottom = scrollFrame:GetTop(), scrollFrame:GetBottom()
+    if not (trackerTop and trackerBottom and scrollTop and scrollBottom) then
+        return
+    end
+
+    -- Both frames share the tracker's scale, so these deltas are usable as offsets.
+    local topOffset = (scrollTop - trackerTop) + SHADOW_SEAM_OFFSET
+    local bottomOffset = (scrollBottom - trackerBottom) + SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP
+
+    local sig = format("%.1f|%.1f", topOffset, bottomOffset)
+    if owner._scrollShadowAnchorSig == sig then return end
+    owner._scrollShadowAnchorSig = sig
+
+    owner.scrollShadowTop:ClearAllPoints()
+    owner.scrollShadowTop:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, topOffset)
+    owner.scrollShadowTop:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", 0, topOffset)
+
+    owner.scrollShadowBottom:ClearAllPoints()
+    owner.scrollShadowBottom:SetPoint("BOTTOMLEFT", trackerFrame, "BOTTOMLEFT", 0, bottomOffset)
+    owner.scrollShadowBottom:SetPoint("BOTTOMRIGHT", trackerFrame, "BOTTOMRIGHT", 0, bottomOffset)
+end
+
 -- Update scroll shadow opacity based on scroll position.
 -- Uses SetAlpha instead of SetHeight so no tainted geometry values enter
 -- Blizzard's LayoutFrame comparisons (which would cause taint errors).
 function addon:UpdateScrollShadows()
     if not scrollFrame or not self.scrollShadowTop or not self.scrollShadowBottom then return end
+
+    -- Nothing to shade when the scroll area isn't on screen. A hidden scroll frame
+    -- still reports its last scroll range, so without this the gradients would be
+    -- driven visible again over the minimized 34x34 button box.
+    if (self.db and self.db.minimized) or not scrollFrame:IsShown() then
+        self.scrollShadowTop:SetAlpha(0)
+        self.scrollShadowBottom:SetAlpha(0)
+        return
+    end
+
+    UpdateScrollShadowAnchors(self)
+
     local current = scrollFrame:GetVerticalScroll()
     local maxScroll = scrollFrame:GetVerticalScrollRange()
     if maxScroll <= 0 then
@@ -30,6 +79,175 @@ function addon:UpdateScrollShadows()
     self.scrollShadowBottom:SetAlpha(min(1, (maxScroll - current) / SHADOW_FADE_DISTANCE))
 end
 
+------------------------------------------------------------------------------
+-- FollowTheArrow availability
+--
+-- The header's arrow toggle only makes sense when that addon is actually there,
+-- so it stays hidden otherwise rather than offering a control that does nothing.
+------------------------------------------------------------------------------
+
+local FTA_ADDON_NAME = "FollowTheArrow"
+
+function addon:IsFollowTheArrowAvailable()
+    -- Deliberately keyed on "loaded" rather than merely installed: a disabled
+    -- addon shouldn't get a toggle either.
+    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    if isLoaded then
+        local ok, loaded = pcall(isLoaded, FTA_ADDON_NAME)
+        if ok and loaded then
+            return true
+        end
+    end
+
+    -- Fallback in case it ships under a different folder name: the globals
+    -- FollowTheArrow exposes once it has loaded.
+    return (FollowTheArrowAPI ~= nil) or (FTACharDB ~= nil)
+end
+
+function addon:UpdateFTAToggleVisibility()
+    if not (trackerFrame and trackerFrame.ftaToggleBtn) then return end
+
+    if self.db.minimized or not self:IsFollowTheArrowAvailable() then
+        trackerFrame.ftaToggleBtn:Hide()
+        return
+    end
+
+    trackerFrame.ftaToggleBtn:Show()
+    if trackerFrame.ftaToggleBtn.UpdateColor then
+        trackerFrame.ftaToggleBtn.UpdateColor()
+    end
+end
+
+------------------------------------------------------------------------------
+-- Game tracker geometry adoption
+--
+-- Until the player positions/sizes TrackerPlus themselves, it places itself
+-- exactly over the game's own objective tracker so it drops in as a direct
+-- replacement. The game's Edit Mode moves and sizes that very frame, so reading
+-- the live frame is also how we follow Edit Mode changes -- there's no need to
+-- parse Edit Mode layout data ourselves.
+------------------------------------------------------------------------------
+
+-- Candidate names for the game's own tracker, newest naming first.
+local BLIZZARD_TRACKER_FRAMES = {
+    "ObjectiveTrackerFrame", -- modern tracker; also the Edit Mode "ObjectiveTracker" system frame
+    "WatchFrame",            -- Cata/MoP-era tracker
+    "QuestWatchFrame",       -- vanilla/TBC-era tracker
+}
+
+-- Below this a tracker is treated as collapsed/not laid out rather than a real size.
+local MIN_ADOPTABLE_SIZE = 50
+
+function addon:GetBlizzardTrackerFrame()
+    for i = 1, #BLIZZARD_TRACKER_FRAMES do
+        local name = BLIZZARD_TRACKER_FRAMES[i]
+        local frame = _G and _G[name]
+        if frame and frame.GetLeft and frame.GetWidth then
+            return frame, name
+        end
+    end
+    return nil
+end
+
+-- Returns { left, top, width, height, source } in absolute screen pixels, or nil
+-- when the game's tracker is missing or not laid out yet.
+function addon:GetBlizzardTrackerGeometry()
+    local frame, name = self:GetBlizzardTrackerFrame()
+    if not frame then return nil end
+
+    local ok, geo = pcall(function()
+        local scale = frame:GetEffectiveScale() or 1
+        local left, top = frame:GetLeft(), frame:GetTop()
+        local width, height = frame:GetWidth(), frame:GetHeight()
+        if not (left and top and width and height) then return nil end
+
+        -- A collapsed or empty tracker can report a near-zero height. When the
+        -- player has moved it out of its default position the game stores the
+        -- height they chose in Edit Mode on the frame, so prefer that.
+        if height < MIN_ADOPTABLE_SIZE then
+            local editModeHeight = tonumber(frame.editModeHeight)
+            if editModeHeight and editModeHeight >= MIN_ADOPTABLE_SIZE then
+                height = editModeHeight
+            end
+        end
+
+        return {
+            left = left * scale,
+            top = top * scale,
+            width = width * scale,
+            height = height * scale,
+            source = name,
+        }
+    end)
+
+    if not ok or not geo then return nil end
+    if geo.width < MIN_ADOPTABLE_SIZE or geo.height < MIN_ADOPTABLE_SIZE then return nil end
+    return geo
+end
+
+-- Place and size our tracker exactly over the game's tracker.
+-- Returns true when geometry was adopted.
+function addon:SyncWithBlizzardTracker()
+    if not trackerFrame then return false end
+
+    local db = self.db
+    if not db.matchBlizzardTracker then return false end
+    if db.minimized then return false end
+
+    local geo = self:GetBlizzardTrackerGeometry()
+    if not geo then return false end
+
+    -- SetSize and SetPoint offsets are expressed in the frame's own coordinate
+    -- space, so convert absolute pixels through the scale our frame ends up at.
+    local uiScale = (UIParent and UIParent:GetEffectiveScale()) or 1
+    local dstScale = uiScale * (db.frameScale or 1)
+    if dstScale <= 0 then return false end
+
+    db.frameWidth = floor((geo.width / dstScale) + 0.5)
+    db.frameHeight = floor((geo.height / dstScale) + 0.5)
+
+    -- Apply the adopted size directly rather than going through
+    -- UpdateTrackerAppearance: this also runs during CreateTrackerFrame, before the
+    -- background/border/content children exist, and that function would create the
+    -- border frame early and have it duplicated moments later. Dropping the cached
+    -- appearance state makes the next appearance pass re-apply everything cleanly.
+    trackerFrame:SetSize(db.frameWidth, db.frameHeight)
+    if contentFrame then
+        contentFrame:SetWidth(db.frameWidth - 2)
+    end
+    self._appearanceState = nil
+
+    trackerFrame:ClearAllPoints()
+    trackerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", geo.left / dstScale, geo.top / dstScale)
+
+    if addon.LogAt then
+        addon:LogAt("info", "Matched game tracker (%s): %dx%d", tostring(geo.source), db.frameWidth, db.frameHeight)
+    end
+
+    -- Size changed, so section anchors need recomputing on the next paint.
+    self._layoutDirty = true
+    if self.RequestUpdate then
+        self:RequestUpdate()
+    end
+
+    if self.UpdateSettingWidgets then
+        self:UpdateSettingWidgets()
+    end
+
+    return true
+end
+
+-- Called when the player drags or resizes the tracker: they've taken manual
+-- control, so stop mirroring the game's tracker from here on.
+function addon:ClaimManualGeometry()
+    if self.db.matchBlizzardTracker then
+        self.db.matchBlizzardTracker = false
+        if self.UpdateSettingWidgets then
+            self:UpdateSettingWidgets()
+        end
+    end
+end
+
 -- Create the main tracker frame
 function addon:CreateTrackerFrame()
     if trackerFrame then
@@ -39,9 +257,19 @@ function addon:CreateTrackerFrame()
     -- Main frame
     trackerFrame = CreateFrame("Frame", "TrackerPlusFrame", UIParent)
     trackerFrame:SetSize(self.db.frameWidth, self.db.frameHeight)
-    -- Keep the whole tracker behind normal UI panels; internal children sit above this base.
-    trackerFrame:SetFrameStrata("BACKGROUND")
-    trackerFrame:SetFrameLevel(1)
+    -- Sit in the same strata as the frame we replace: Blizzard's ObjectiveTrackerFrame
+    -- is declared frameStrata="LOW". We keep that tracker alive but invisible (alpha 0)
+    -- so the sections that borrow its frames keep updating, and an alive frame still
+    -- hit-tests. At BACKGROUND -- the lowest strata there is -- that invisible tracker
+    -- and all of its children sat above this entire window, swallowing clicks aimed at
+    -- the header buttons. Strata outranks frame level, so no amount of levelling fixed
+    -- it. LOW still keeps the tracker behind normal UI panels, which live at MEDIUM and
+    -- above.
+    trackerFrame:SetFrameStrata("LOW")
+    -- Within that strata, sit above Blizzard's suppressed tracker and its children,
+    -- which use low default levels. Everything else here derives its level from
+    -- GetFrameLevel(), so the relative layering inside the tracker is unchanged.
+    trackerFrame:SetFrameLevel(10)
     trackerFrame:SetClampedToScreen(true)
     
     -- Make draggable & resizable (Must be set before SetUserPlaced)
@@ -54,13 +282,21 @@ function addon:CreateTrackerFrame()
     -- Set position
     -- Function to restore position
     addon.RestorePosition = function()
+        if not trackerFrame then return end
+
+        -- Until the player positions the tracker themselves, sit exactly on top of
+        -- the game's own tracker so this is a drop-in replacement on first load.
+        if addon:SyncWithBlizzardTracker() then
+            return
+        end
+
         local pos = addon.db.framePosition
-        if trackerFrame and pos and pos.point and pos.x and pos.y then
+        if pos and pos.point and pos.x and pos.y then
              trackerFrame:ClearAllPoints()
              -- Use saved relativePoint if available, otherwise fallback to point (legacy support)
              local relativePoint = pos.relativePoint or pos.point
              trackerFrame:SetPoint(pos.point, UIParent, relativePoint, pos.x, pos.y)
-        elseif trackerFrame then
+        else
              trackerFrame:ClearAllPoints()
              trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)
         end
@@ -108,6 +344,7 @@ function addon:CreateTrackerFrame()
         -- Save position including relativePoint
         local point, _, relativePoint, x, y = self:GetPoint()
         addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
+        addon:ClaimManualGeometry()
     end)
     
     -- Resizing Handles (Triangles)
@@ -127,6 +364,7 @@ function addon:CreateTrackerFrame()
         trackerFrame:StopMovingOrSizing()
         addon.db.frameWidth = trackerFrame:GetWidth()
         addon.db.frameHeight = trackerFrame:GetHeight()
+        addon:ClaimManualGeometry()
         -- Update content width
         if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
         addon:RequestUpdate()
@@ -152,6 +390,7 @@ function addon:CreateTrackerFrame()
         trackerFrame:StopMovingOrSizing()
         addon.db.frameWidth = trackerFrame:GetWidth()
         addon.db.frameHeight = trackerFrame:GetHeight()
+        addon:ClaimManualGeometry()
         if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
         addon:RequestUpdate()
         if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
@@ -241,30 +480,42 @@ function addon:CreateTrackerFrame()
     contentFrame:SetSize(self.db.frameWidth - 2, 100) -- Reduce width for scrollbar/padding logic
     scrollFrame:SetScrollChild(contentFrame)
 
-    -- Scroll frame shadow gradients (depth effect: content appears "behind" pinned sections)
-    local shadowLevel = 100
+    -- Scroll frame shadow gradients (depth effect at the edges of the scroll area).
+    --
+    -- Frame level: the tracker's own level, so these render behind every other child
+    -- frame -- scroll content, pinned sections, header chrome and the corner resize
+    -- grips. Frame level outranks draw layer across frames, so nothing else needs to
+    -- be raised to stay clear of them.
+    --
+    -- Anchors: horizontally pinned to the tracker so they are always exactly the
+    -- tracker's width. Their vertical placement follows the scroll area and is
+    -- applied by UpdateScrollShadows; the offsets below are just a starting point.
+    local shadowLevel = trackerFrame:GetFrameLevel() or 1
 
     local scrollShadowTop = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowTop:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, SHADOW_SEAM_OFFSET)
-    scrollShadowTop:SetPoint("TOPRIGHT", scrollFrame, "TOPRIGHT", 0, SHADOW_SEAM_OFFSET)
+    scrollShadowTop:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, 0)
+    scrollShadowTop:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", 0, 0)
     scrollShadowTop:SetHeight(50)
     scrollShadowTop:SetFrameLevel(shadowLevel)
     scrollShadowTop:EnableMouse(false)
     scrollShadowTop:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity
-    local topGradient = scrollShadowTop:CreateTexture(nil, "OVERLAY")
+    -- ARTWORK (not BACKGROUND): at the tracker's frame level the draw layer breaks
+    -- the tie with the tracker's own background texture, so this keeps the gradient
+    -- above that while frame level still keeps it below every other child frame.
+    local topGradient = scrollShadowTop:CreateTexture(nil, "ARTWORK")
     topGradient:SetAllPoints()
     topGradient:SetColorTexture(0, 0, 0, 1)
     topGradient:SetGradient("VERTICAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, 1))
     self.scrollShadowTop = scrollShadowTop
 
     local scrollShadowBottom = CreateFrame("Frame", nil, trackerFrame)
-    scrollShadowBottom:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP)
-    scrollShadowBottom:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP)
+    scrollShadowBottom:SetPoint("BOTTOMLEFT", trackerFrame, "BOTTOMLEFT", 0, 0)
+    scrollShadowBottom:SetPoint("BOTTOMRIGHT", trackerFrame, "BOTTOMRIGHT", 0, 0)
     scrollShadowBottom:SetHeight(50)
     scrollShadowBottom:SetFrameLevel(shadowLevel)
     scrollShadowBottom:EnableMouse(false)
     scrollShadowBottom:SetAlpha(0) -- start invisible; UpdateScrollShadows drives opacity
-    local bottomGradient = scrollShadowBottom:CreateTexture(nil, "OVERLAY")
+    local bottomGradient = scrollShadowBottom:CreateTexture(nil, "ARTWORK")
     bottomGradient:SetAllPoints()
     bottomGradient:SetColorTexture(0, 0, 0, 1)
     bottomGradient:SetGradient("VERTICAL", CreateColor(1, 1, 1, 1), CreateColor(1, 1, 1, 0))
@@ -307,6 +558,8 @@ function addon:CreateTrackerFrame()
     end
     trackerFrame.ftaToggleBtn.UpdateColor = UpdateFTAToggleColor
     UpdateFTAToggleColor()
+    -- Hidden unless FollowTheArrow is actually loaded.
+    self:UpdateFTAToggleVisibility()
     trackerFrame.ftaToggleBtn:SetScript("OnClick", function()
         addon.db.includeFTAQuests = not addon.db.includeFTAQuests
         UpdateFTAToggleColor()
@@ -351,21 +604,26 @@ function addon:CreateTrackerFrame()
     trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
     trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Collapse")
     trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Collapse")
-    trackerFrame.minMaxBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight") 
+    trackerFrame.minMaxBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
+
+    -- Keep the header chrome above everything the tracker renders. Pooled rows and
+    -- their children climb well past the default child level -- the Active Quest
+    -- row's quest-item icon is raised 25px up into this header strip at row level
+    -- +10 and escapes its row via SetClipsChildren(false) -- which left it sitting
+    -- on top of the gear and swallowing its clicks.
+    local chromeLevel = (trackerFrame:GetFrameLevel() or 1) + 50
+    trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
+    trackerFrame.settingsParam:SetFrameLevel(chromeLevel)
+    trackerFrame.minMaxBtn:SetFrameLevel(chromeLevel)
 
     local function UpdateMinMaxState()
-        -- Ensure we work with screen coordinates to maintain position relative to TOP-RIGHT
-        
-        -- Determine side based on headerIconPosition or default to Right
-        local isLeft = (addon.db.headerIconPosition == "left")
-
         if addon.db.minimized then
             -- Minimized State: Only Maximize button visible
             -- Save current dimensions if not already small
             if trackerFrame:GetWidth() > 50 then
                  addon.db.savedWidth = trackerFrame:GetWidth()
                  addon.db.savedHeight = trackerFrame:GetHeight()
-                 
+
                  -- Save position
                  local point, relativeTo, relativePoint, x, y = trackerFrame:GetPoint()
                  -- Ensure we only save if relativeTo is UIParent or nil (Screen), otherwise default logic
@@ -373,18 +631,32 @@ function addon:CreateTrackerFrame()
                       addon.db.savedPoint = {point = point, relativePoint = relativePoint, x = x, y = y}
                  end
 
-                 -- RE-ANCHOR to keep the Corner in place visually
+                 -- Capture geometry before clearing points: an unanchored frame
+                 -- reports nil edges.
+                 --
+                 -- The collapsed frame is a 34x34 box with the button centred in it,
+                 -- so anchoring the box's CENTER to where the collapse button sits
+                 -- right now leaves the maximize button in exactly the same place.
+                 local btn = trackerFrame.minMaxBtn
+                 local centerX, centerY
+                 if btn then
+                      local btnLeft, btnBottom = btn:GetLeft(), btn:GetBottom()
+                      if btnLeft and btnBottom then
+                           centerX = btnLeft + (btn:GetWidth() or 0) / 2
+                           centerY = btnBottom + (btn:GetHeight() or 0) / 2
+                      end
+                 end
+
                  local top = trackerFrame:GetTop()
-                 local left = trackerFrame:GetLeft()
                  local right = trackerFrame:GetRight()
-                 
+
                  trackerFrame:ClearAllPoints()
 
-                 if isLeft and left and top then
-                      -- Use TOPLEFT anchor relative to screen coordinates
-                      trackerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+                 if centerX and centerY then
+                      trackerFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", centerX, centerY)
                  elseif right and top then
-                      -- Use TOPRIGHT anchor relative to screen coordinates
+                      -- Button not laid out yet; keep the tracker's top-right corner,
+                      -- which is the corner the header chrome is anchored to.
                       trackerFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
                  end
             end
@@ -408,6 +680,8 @@ function addon:CreateTrackerFrame()
             if trackerFrame.resizeBR then trackerFrame.resizeBR:Hide() end
             if trackerFrame.resizeBL then trackerFrame.resizeBL:Hide() end
             if scrollFrame then scrollFrame:Hide() end
+            if self.scrollShadowTop then self.scrollShadowTop:Hide() end
+            if self.scrollShadowBottom then self.scrollShadowBottom:Hide() end
             if self.scenarioFrame then self.scenarioFrame:Hide() end
             if self.activeQuestFrame then self.activeQuestFrame:Hide() end
             if self.campaignFrame then self.campaignFrame:Hide() end
@@ -440,17 +714,15 @@ function addon:CreateTrackerFrame()
 
             -- Show Elements
             trackerFrame.settingsParam:Show()
-            if trackerFrame.ftaToggleBtn then
-                trackerFrame.ftaToggleBtn:Show()
-                if trackerFrame.ftaToggleBtn.UpdateColor then
-                    trackerFrame.ftaToggleBtn.UpdateColor()
-                end
-            end
+            -- Stays hidden when FollowTheArrow isn't loaded.
+            addon:UpdateFTAToggleVisibility()
             trackerFrame.title:Show()
             trackerFrame.headerBg:Show()
             trackerFrame.bg:Show()
             if trackerFrame.border then trackerFrame.border:Show() end
             if scrollFrame then scrollFrame:Show() end
+            if self.scrollShadowTop then self.scrollShadowTop:Show() end
+            if self.scrollShadowBottom then self.scrollShadowBottom:Show() end
             if self.scenarioFrame then self.scenarioFrame:Show() end
             if self.activeQuestFrame and self.activeQuestFrame:GetHeight() > 1 then self.activeQuestFrame:Show() end
             if self.campaignFrame and self.campaignFrame:GetHeight() > 1 then self.campaignFrame:Show() end
@@ -459,13 +731,15 @@ function addon:CreateTrackerFrame()
             if self.bonusFrame and self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
             if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
-            -- Reset button position based on side
+            -- Always right-aligned, matching where the button is first anchored and
+            -- keeping it in the same chrome row as the settings and Follow the Arrow
+            -- buttons (anchored RIGHT at -34 and -54). This used to follow
+            -- db.headerIconPosition, but that setting controls which side the
+            -- expand/collapse arrows sit on for headers inside the quest list, not the
+            -- tracker window's own chrome. Since it defaults to "left", the button
+            -- jumped to the left edge on first load and broke up that row.
             trackerFrame.minMaxBtn:ClearAllPoints()
-            if isLeft then
-                trackerFrame.minMaxBtn:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 5, 0)
-            else
-                trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
-            end
+            trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
             
             addon:RequestUpdate()
             

@@ -1,9 +1,7 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, pairs = ipairs, pairs
-local format = string.format
-local max = math.max
+local ipairs = ipairs
 
 -- Local aliases for addon utilities
 
@@ -16,14 +14,12 @@ function addon:RenderWorldQuestSection(worldQuestItems)
     local wqYOffset = 0
     local wqFrame = self.worldQuestFrame
 
-    -- Ground-truth check: only show WQ section when quests are actively tracked
+    -- Only show the section when we actually have world quests to draw. A secondary
+    -- C_TaskQuest.GetTrackedQuestIDs check used to live here, but that function does
+    -- not exist (C_TaskQuest has no such member), so it never ran -- and had it run
+    -- it would only have shown an empty section, since the rows come from
+    -- worldQuestItems either way.
     local hasAnyTrackedWQ = (#worldQuestItems > 0)
-    if not hasAnyTrackedWQ and C_TaskQuest and C_TaskQuest.GetTrackedQuestIDs then
-        local ids = C_TaskQuest.GetTrackedQuestIDs()
-        if ids and #ids > 0 then
-            hasAnyTrackedWQ = true
-        end
-    end
 
     -- If nothing to track, bail out early
     if not hasAnyTrackedWQ then

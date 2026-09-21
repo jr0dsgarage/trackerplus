@@ -7,6 +7,17 @@ local format, match = string.format, string.match
 local max, floor = math.max, math.floor
 local InCombatLockdown = InCombatLockdown
 
+-- Item lookups live in the C_Item namespace on current clients; the old globals
+-- (GetItemInfo/GetItemInfoInstant/GetItemIcon) no longer exist and calling them
+-- raises "attempt to call a nil value". Resolve once, keeping the legacy globals
+-- as a fallback for older clients this .toc also targets.
+--
+-- Note C_Item.GetItemIcon is NOT the replacement for the old GetItemIcon: it takes
+-- an ItemLocation (bag/slot), not a link. GetItemIconByID is the link/ID version.
+local GetItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+local GetItemIconByID = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+
 -- Local aliases for addon utilities (populated after load)
 local ParseObjectiveDisplay = function(...) return addon.ParseObjectiveDisplay(...) end
 local ResolveTrackableItemData = function(...) return addon.ResolveTrackableItemData(...) end
@@ -170,7 +181,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             secureBtn:SetScript("OnEnter", function(self)
                 if not self.itemLink then return end
                 local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-                local itemName = GetItemInfo(self.itemLink)
+                local itemName
+                if GetItemInfo then
+                    local ok, name = pcall(GetItemInfo, self.itemLink)
+                    if ok then itemName = name end
+                end
                 tooltip:SetText(itemName or self.itemLink)
                 tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
                 tooltip:Show()
@@ -185,14 +200,18 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         local texture = itemData.texture
         
         -- Try to fetch via API if missing
-           if not texture and itemData.link then
-               texture = GetItemIcon(itemData.link)
-             
-             -- If GetItemIcon fails (returns nil), try Instant info which is cache-independent for icons
-             if not texture then
-                   local _, _, _, _, iconID = GetItemInfoInstant(itemData.link)
-                  if iconID then texture = iconID end
-             end
+        if not texture and itemData.link then
+            if GetItemIconByID then
+                local ok, icon = pcall(GetItemIconByID, itemData.link)
+                if ok then texture = icon end
+            end
+
+            -- If the icon lookup fails (returns nil), try Instant info which is
+            -- cache-independent for icons
+            if not texture and GetItemInfoInstant then
+                local ok, _, _, _, _, iconID = pcall(GetItemInfoInstant, itemData.link)
+                if ok and iconID then texture = iconID end
+            end
         end
 
         -- Final Fallback: Red Question Mark (134400) to ensure visibility
@@ -215,10 +234,17 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
             
             -- Fallback to standard item cooldown if needed
-            if not start and itemData.link then
-                local itemID = GetItemInfoInstant(itemData.link)
-                if itemID then
-                     start, duration, enable = C_Container.GetItemCooldown(itemID)
+            if not start and itemData.link and GetItemInfoInstant then
+                local okID, itemID = pcall(GetItemInfoInstant, itemData.link)
+                -- GetItemCooldown lives on C_Item now; C_Container kept a copy on
+                -- some clients, so take whichever this one actually has.
+                local getCooldown = (C_Item and C_Item.GetItemCooldown)
+                    or (C_Container and C_Container.GetItemCooldown)
+                if okID and itemID and getCooldown then
+                    local okCD, cdStart, cdDuration, cdEnable = pcall(getCooldown, itemID)
+                    if okCD then
+                        start, duration, enable = cdStart, cdDuration, cdEnable
+                    end
                 end
             end
             
@@ -264,27 +290,25 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         if button.poiButton.SetStyle then
             button.poiButton:SetStyle(style)
         end
-        
-        if button.poiButton.UpdateButtonStyle then
-            button.poiButton:UpdateButtonStyle()
-        end
-        
+
         -- Force selection if this is the Active Quest item, or if IDs match
         local isSelected = (item.id == superTrackedQuestID) or (item.type == "supertrack")
-        
+
+        -- Selection has to be set BEFORE the style is repainted. Blizzard's
+        -- POIButtonMixin:SetSelected only stores the flag; UpdateButtonStyle is what
+        -- actually paints it (it reads IsSelected to show/hide the glow). Painting
+        -- first meant every row was drawn with the *previous* render's selection, and
+        -- because these buttons come from a pool and rows shift between renders, a
+        -- recycled button kept the old highlight -- so after super-tracking changed,
+        -- the wrong row stayed lit while the Active Quest section showed the right one.
         if button.poiButton.SetSelected then
             button.poiButton:SetSelected(isSelected)
         end
 
-        -- Ensure visual consistency for active state, forcing the glow if the template allows
-        if button.poiButton.SelectionGlow then
-            if isSelected then
-                button.poiButton.SelectionGlow:Show()
-            else
-                button.poiButton.SelectionGlow:Hide()
-            end
+        if button.poiButton.UpdateButtonStyle then
+            button.poiButton:UpdateButtonStyle()
         end
-        
+
          if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
 
     else

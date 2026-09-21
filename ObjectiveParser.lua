@@ -1,10 +1,8 @@
 local addonName, addon = ...
-local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Localize hot-path globals
-local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
-local format, match = string.format, string.match
-local max, floor = math.max, math.floor
+local tostring = tostring
+local format = string.format
 
 -------------------------------------------------------------------------------
 -- Objective parse cache

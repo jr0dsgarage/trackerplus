@@ -2,8 +2,6 @@ local addonName, addon = ...
 
 -- Localize hot-path globals
 local ipairs = ipairs
-local format = string.format
-local max = math.max
 
 -- Local aliases for addon utilities
 

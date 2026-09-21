@@ -1,11 +1,7 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, pairs, tostring = ipairs, pairs, tostring
-local format = string.format
-local max = math.max
-
-local DebugLayout = function(...) return addon.DebugLayout(...) end
+local ipairs, tostring = ipairs, tostring
 
 -------------------------------------------------------------------------------
 -- RenderNormalTrackables — Headers + quest items inside the scroll content frame

@@ -2,7 +2,6 @@ local addonName, addon = ...
 
 -- Localize hot-path globals
 local ipairs = ipairs
-local format = string.format
 
 -------------------------------------------------------------------------------
 -- RenderActiveQuestSection — Super-tracked quest rendering

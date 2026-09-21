@@ -1,8 +1,8 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local pairs, ipairs, next = pairs, ipairs, next
-local floor, max = math.floor, math.max
+local pairs, ipairs = pairs, ipairs
+local floor = math.floor
 local InCombatLockdown = InCombatLockdown
 local wipe = wipe
 
@@ -274,6 +274,11 @@ function addon:GetOrCreateButton(parent)
     -- Reset quest-specific child controls so pooled buttons don't leak icons
     if btn.poiButton then
         btn.poiButton.questID = nil
+        -- Drop any stale super-track highlight, so a recycled row can't inherit the
+        -- previous occupant's selected state if this render doesn't repaint it.
+        if btn.poiButton.ClearSelected then
+            btn.poiButton:ClearSelected()
+        end
         btn.poiButton:Hide()
     end
     if btn.itemButton then
@@ -353,7 +358,11 @@ function addon:OnTrackableClick(trackable, mouseButton)
             elseif trackable.type == "profession" then
                 C_TradeSkillUI.SetRecipeTracked(trackable.id, false, trackable.isRecraft)
             elseif trackable.type == "monthly" then
-                C_PerksProgram.RemoveTrackedPerksActivity(trackable.id)
+                -- C_PerksActivities, not C_PerksProgram: the latter is the vendor
+                -- side of the feature and has no tracking functions.
+                if C_PerksActivities and C_PerksActivities.RemoveTrackedPerksActivity then
+                    C_PerksActivities.RemoveTrackedPerksActivity(trackable.id)
+                end
             elseif trackable.type == "endeavor" then
                 if C_NeighborhoodInitiative and C_NeighborhoodInitiative.RemoveTrackedInitiativeTask then
                      C_NeighborhoodInitiative.RemoveTrackedInitiativeTask(trackable.id)

@@ -3,7 +3,7 @@ local addonName, addon = ...
 -- Localize hot-path globals
 -- (LSM, bit_band, floor, match, and the DebugLayout alias were only used by the manual
 -- scenario-mirror render branch removed above; dropped along with it.)
-local ipairs, pairs, pcall, tostring = ipairs, pairs, pcall, tostring
+local ipairs, pcall, tostring = ipairs, pcall, tostring
 local format = string.format
 local max = math.max
 local hooksecurefunc = hooksecurefunc
@@ -190,13 +190,19 @@ end
 -- C_Scenario.GetStepInfo/criteria APIs, and a render branch rebuilt to consume it.
 -------------------------------------------------------------------------------
 function addon:RenderScenarioSection()
-    local db = self.db
-    local hasManualScenarioData = false
     local scenarioTracker = nil
     local scenarioTrackerName = nil
+
+    -- C_Scenario.IsInScenario isn't present on every client this .toc targets, and
+    -- gating solely on it meant the whole section silently never rendered there.
+    -- addon:IsAnyScenarioTrackerActive() already falls back to inspecting the live
+    -- tracker frames, which is the same evidence the borrow below relies on.
     local scenarioAPI = _G and _G.C_Scenario
     local inScenario = (scenarioAPI and scenarioAPI.IsInScenario and scenarioAPI.IsInScenario()) or false
-    
+    if not inScenario then
+        inScenario = self:IsAnyScenarioTrackerActive()
+    end
+
     -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons)
     local candidates = {
         "DelvesObjectiveTracker",
@@ -227,18 +233,9 @@ function addon:RenderScenarioSection()
         end
     end
     
-    if self.currentScenarios and #self.currentScenarios > 0 then
-        for _, scenarioItem in ipairs(self.currentScenarios) do
-            if not scenarioItem.isDummy then
-                hasManualScenarioData = true
-                break
-            end
-        end
-    end
-
     if addon.LogAt then
-        addon:LogAt("trace", "[SCN-BORROW] selected=%s manualData=%s scenarioCount=%d",
-            tostring(scenarioTrackerName), tostring(hasManualScenarioData), tonumber((self.currentScenarios and #self.currentScenarios) or 0))
+        addon:LogAt("trace", "[SCN-BORROW] selected=%s inScenario=%s scenarioCount=%d",
+            tostring(scenarioTrackerName), tostring(inScenario), tonumber((self.currentScenarios and #self.currentScenarios) or 0))
     end
 
     local scenarioYOffset = 0
@@ -296,19 +293,32 @@ function addon:RenderScenarioSection()
             -- Keep anchor stable without forcing a full re-anchor every frame.
             EnsureScenarioBorrowAnchor(self, borrowedFrame)
 
-            -- Assert visibility every render: Blizzard's own stage-complete/criteria
-            -- fade animations can leave the borrowed frame's own alpha at 0, which would
-            -- otherwise make this section report a valid height while rendering nothing.
-            pcall(function()
-                borrowedFrame:SetAlpha(1)
-                if borrowedFrame.SetIgnoreParentAlpha then
-                    borrowedFrame:SetIgnoreParentAlpha(true)
-                end
-                contents:SetAlpha(1)
-                if contents.SetIgnoreParentAlpha then
-                    contents:SetIgnoreParentAlpha(true)
-                end
-            end)
+            -- Assert visibility: Blizzard's own stage-complete/criteria fade
+            -- animations can leave the borrowed frame's alpha at 0, which would
+            -- otherwise make this section report a valid height while rendering
+            -- nothing.
+            --
+            -- Only written when actually wrong. Every write to a Blizzard frame
+            -- spreads TrackerPlus taint into it, which later surfaces as errors
+            -- inside Blizzard's own tracker update (e.g. protected aura lookups in
+            -- the scenario module), so don't re-assert this on every render tick.
+            local function EnsureVisible(frame)
+                if not frame then return end
+                pcall(function()
+                    if frame.GetAlpha and frame:GetAlpha() ~= 1 then
+                        frame:SetAlpha(1)
+                    end
+                end)
+                pcall(function()
+                    if frame.SetIgnoreParentAlpha
+                        and not (frame.IsIgnoringParentAlpha and frame:IsIgnoringParentAlpha()) then
+                        frame:SetIgnoreParentAlpha(true)
+                    end
+                end)
+            end
+
+            EnsureVisible(borrowedFrame)
+            EnsureVisible(contents)
 
             self._activeScenarioBorrowedTracker = borrowedFrame
             
@@ -345,7 +355,11 @@ function addon:RenderScenarioSection()
         addon:LogAt("trace", "[SCN-BORROW] no-active-tracker")
     end
 
-    if (not scenarioTracker or not inScenario) and ObjectiveTrackerFrame and addon.db and addon.db.enabled and not InCombatLockdown() then
+    -- Re-assert suppression of the default tracker, except while the game's Edit
+    -- Mode is open: the player needs it visible and draggable there, and this runs
+    -- every render tick so it would otherwise fight Edit Mode continuously.
+    if (not scenarioTracker or not inScenario) and ObjectiveTrackerFrame and addon.db and addon.db.enabled
+        and not addon._editModeActive and not InCombatLockdown() then
         ObjectiveTrackerFrame:SetAlpha(0)
         ObjectiveTrackerFrame:EnableMouse(false)
     end

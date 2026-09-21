@@ -2,7 +2,7 @@
 local addonName, addon = ...
 
 -- Database version for future migrations
-local DB_VERSION = 1
+local DB_VERSION = 5
 
 -- Default settings
 local DEFAULTS = {
@@ -14,6 +14,10 @@ local DEFAULTS = {
     frameWidth = 250,
     frameHeight = 400,
     frameScale = 1.0,
+    -- While true, the tracker mirrors the game's own objective tracker position and
+    -- size (including changes made in the game's Edit Mode). Automatically cleared
+    -- the first time the player drags or resizes the tracker themselves.
+    matchBlizzardTracker = true,
     
     -- Appearance
     backgroundColor = {r = 0, g = 0, b = 0, a = 0.7},
@@ -21,7 +25,7 @@ local DEFAULTS = {
     borderColor = {r = 1, g = 1, b = 1, a = 1},
     borderSize = 1,
     headerIconStyle = "standard", -- "none", "standard", "square", "text_brackets", "questlog"
-    headerIconPosition = "left", -- "left", "right"
+    headerIconPosition = "right", -- "left", "right"
     headerBackgroundStyle = "tracker", -- "none", "questlog", "tracker"
     
     -- Font Settings
@@ -51,15 +55,15 @@ local DEFAULTS = {
     
     -- Display Options
     showQuestLevel = true,
+    colorQuestsByDifficulty = true, -- Color quest text using the client's own GetQuestDifficultyColor(level)
     showZoneHeaders = true,
-    collapseCompleted = false,
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
     
     -- Grouping & Sorting
     groupByZone = true,
     groupByCategory = true,
-    sortMethod = "name",  -- "level", "name", "manual"
+    sortMethod = "difficulty_asc",  -- "difficulty_asc", "difficulty_desc", "proximity", "alphabetical"
     
     -- State
     collapsedHeaders = {},
@@ -77,8 +81,6 @@ local DEFAULTS = {
     showEndeavors = true,
     
     -- Advanced Features
-    autoTrackQuests = false,
-    maxTrackedQuests = 25,
     hideInInstance = false,
     hideInCombat = false,
     fadeWhenEmpty = true,
@@ -97,7 +99,6 @@ local DEFAULTS = {
     },
     
     -- Interaction
-    clickToTrack = true,
     showTooltips = true,
     
     -- Performance
@@ -159,10 +160,14 @@ function addon:InitDatabase()
     if not TrackerPlusDB then
         TrackerPlusDB = {}
     end
-    
+
+    -- Capture the stored version before stamping the current one, so migrations
+    -- below can tell which upgrades still need to run.
+    local previousVersion = tonumber(TrackerPlusDB.version) or 1
+
     -- Set database version
     TrackerPlusDB.version = DB_VERSION
-    
+
     -- Initialize settings with defaults
     if not TrackerPlusDB.settings then
         TrackerPlusDB.settings = DeepCopy(DEFAULTS)
@@ -174,13 +179,45 @@ function addon:InitDatabase()
             end
         end
 
-        -- Migration: distance sort removed
-        if TrackerPlusDB.settings.sortMethod == "distance" then
-            TrackerPlusDB.settings.sortMethod = "name"
+        -- Migration (v2): "Match Game Tracker" mirrors the game's own tracker
+        -- position/size and ships enabled, which is what a brand-new profile wants.
+        -- A profile that already has a saved position deliberately chose it, so keep
+        -- it rather than moving the tracker out from under the player on next login.
+        if previousVersion < 2 and TrackerPlusDB.settings.framePosition then
+            TrackerPlusDB.settings.matchBlizzardTracker = false
+        end
+
+        -- Migration (v4): sort options are now Difficulty (easiest or hardest
+        -- first), Proximity and Alphabetical, and are exposed in Settings. The older
+        -- values ("name", "level", "manual", "distance") were never selectable in the
+        -- UI, so any stored one is a previous default rather than a deliberate
+        -- choice; plain "difficulty" predates the direction option. Normalise
+        -- anything unrecognised to the new default.
+        if previousVersion < 4 then
+            local method = TrackerPlusDB.settings.sortMethod
+            if method ~= "difficulty_asc" and method ~= "difficulty_desc"
+                and method ~= "proximity" and method ~= "alphabetical" then
+                TrackerPlusDB.settings.sortMethod = "difficulty_asc"
+            end
+        end
+
+        -- Migration (v5): header expand/collapse icons now default to the right.
+        -- This moves profiles still holding the old "left" default; a profile that
+        -- deliberately picked left will be moved too, since the two are stored
+        -- identically and can't be told apart.
+        if previousVersion < 5 and TrackerPlusDB.settings.headerIconPosition == "left" then
+            TrackerPlusDB.settings.headerIconPosition = "right"
         end
 
         -- Migration: distance tracking removed
         TrackerPlusDB.settings.showDistance = nil
+
+        -- Migration (v5): drop settings nothing reads any more, so they stop being
+        -- written back out to SavedVariables.
+        TrackerPlusDB.settings.collapseCompleted = nil
+        TrackerPlusDB.settings.autoTrackQuests = nil
+        TrackerPlusDB.settings.maxTrackedQuests = nil
+        TrackerPlusDB.settings.clickToTrack = nil
 
         -- Migration: quest type toggle removed
         TrackerPlusDB.settings.showQuestType = nil
