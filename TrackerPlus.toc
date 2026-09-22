@@ -11,6 +11,7 @@ Database.lua
 DebugFrame.lua
 Core.lua
 TrackerUtils.lua
+MapPOIColor.lua
 RendererUtils.lua
 ObjectiveParser.lua
 RenderItem.lua

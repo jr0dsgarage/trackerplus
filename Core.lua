@@ -153,7 +153,10 @@ function addon:Initialize()
     
     -- Register slash commands
     self:RegisterSlashCommands()
-    
+
+    -- Difficulty-colored outlines on the game's own world map quest pins
+    self:InitMapPOIColors()
+
     -- Initial update
     self:RequestUpdate()
     self._layoutDirty = true
@@ -1590,13 +1593,18 @@ function addon:CollectEndeavors(trackables)
 end
 
 -- Get quest color based on type/status
+--
+-- Note there is deliberately no "quest is complete" branch here. A quest's title --
+-- and, through GetQuestTitleColorByQuestID, its map pin -- keeps showing the level
+-- difference right up to turn-in, because that is the thing the color is for.
+-- db.completeColor stays green for what it actually describes: an objective line that
+-- is done (see RenderItem.lua). Completion is already unmistakable from the POI icon,
+-- which the game swaps to the turn-in mark on its own.
 function addon:GetQuestColor(info)
     local db = self.db
     local questID = info.questID
     if info.isFailed then
         return db.failedColor
-    elseif C_QuestLog.IsComplete(questID) then
-        return db.completeColor
     elseif C_QuestLog.IsWorldQuest(questID) then
         return db.questTypeColors.worldQuest
     elseif C_QuestLog.IsQuestTask(questID) then
@@ -1614,6 +1622,69 @@ function addon:GetQuestColor(info)
     else
         return db.questColor
     end
+end
+
+-- Gold: what the tracker paints whichever quest is currently super-tracked, whatever
+-- that quest's own difficulty or status color would otherwise be.
+local SUPER_TRACKED_TITLE_COLOR = { r = 1, g = 0.82, b = 0, a = 1 }
+
+-- Whichever quest is super-tracked right now, or 0.
+function addon:GetSuperTrackedQuestID()
+    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
+        return C_SuperTrack.GetSuperTrackedQuestID() or 0
+    end
+    return self._cachedSuperTrackedQuestID or 0
+end
+
+-- The color a quest's title is *actually* painted with: GetQuestColor's answer, with
+-- the super-track gold laid over the top.
+--
+-- This last step belongs here rather than in the row renderer because the map pins
+-- need the same final color. While the override lived inline in RenderTrackableItem,
+-- super-tracking a completed quest painted the tracker title gold but left the pin
+-- the green GetQuestColor returns for completed quests -- which is the very same
+-- db.completeColor that finished objective lines use, so the pin looked like it was
+-- picking up an objective's color rather than the title's.
+--
+-- Pass superTrackedQuestID when the caller already has it (the row renderer caches it
+-- once per pass) to keep it out of per-row work.
+function addon:ApplySuperTrackedTitleColor(questID, color, superTrackedQuestID)
+    if not questID or questID == 0 then return color end
+
+    superTrackedQuestID = superTrackedQuestID or self:GetSuperTrackedQuestID()
+    if questID == superTrackedQuestID then
+        return SUPER_TRACKED_TITLE_COLOR
+    end
+
+    return color
+end
+
+-- The same color, for a quest known only by its ID.
+--
+-- GetQuestColor works from the C_QuestLog.GetInfo table the collection pass already
+-- holds. Callers outside that pass -- the world map pins -- only have a questID, so
+-- rebuild that input rather than duplicating the color rules and letting the two
+-- drift apart. A quest the map pins but the log no longer lists falls back to the
+-- client's own difficulty level for it.
+function addon:GetQuestColorByQuestID(questID)
+    if not questID then return nil end
+
+    local logIndex = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
+    if logIndex then
+        local info = C_QuestLog.GetInfo(logIndex)
+        if info and info.questID == questID then
+            return self:GetQuestColor(info)
+        end
+    end
+
+    local level = C_QuestLog.GetQuestDifficultyLevel and C_QuestLog.GetQuestDifficultyLevel(questID)
+    return self:GetQuestColor({ questID = questID, level = tonumber(level) or 0 })
+end
+
+-- Same, but carrying the super-track override, so callers outside the render pass end
+-- up with the color the tracker row is showing rather than the one underneath it.
+function addon:GetQuestTitleColorByQuestID(questID)
+    return self:ApplySuperTrackedTitleColor(questID, self:GetQuestColorByQuestID(questID))
 end
 
 -- Distance from the player to a trackable's objective, as a squared value (the

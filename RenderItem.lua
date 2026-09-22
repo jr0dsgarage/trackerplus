@@ -399,10 +399,10 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     button.text:SetFont(db.fontFace, db.fontSize, db.fontOutline)
-    local color = item.color or db.questColor
-    if item.id == superTrackedQuestID then
-       color = {r=1, g=0.82, b=0, a=1} -- Yellow for selected
-    end
+    -- Shared with the map pins (see Core.lua) so a quest can't be one color here and
+    -- another on the map -- the super-track gold used to be applied only here, which
+    -- left a super-tracked completed quest gold in the tracker but green on its pin.
+    local color = self:ApplySuperTrackedTitleColor(item.id, item.color or db.questColor, superTrackedQuestID)
     button.text:SetTextColor(color.r, color.g, color.b, color.a)
     button.text:SetText(titleText)
     button.text:SetJustifyH("LEFT")
@@ -410,9 +410,18 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     
     button.bg:SetColorTexture(0, 0, 0, 0)
     
-    -- Force width calculation for accurate multi-line height measurement
-    -- If the button hasn't been laid out yet, GetStringHeight() returns 1 line height
-    local parentWidth = parent:GetWidth() or 300
+    -- Force width calculation for accurate multi-line height measurement.
+    --
+    -- A frame whose anchors haven't resolved yet reports a width of 0, not nil, so
+    -- this needs a real zero check -- `or 300` alone never fires and every width
+    -- below comes out negative.
+    local parentWidth = parent:GetWidth() or 0
+    if parentWidth <= 1 then
+        parentWidth = (self.trackerFrame and self.trackerFrame:GetWidth()) or 0
+        if parentWidth <= 1 then
+            parentWidth = db.frameWidth or 300
+        end
+    end
     local buttonWidth = parentWidth - indent - 5
     local textWidth = buttonWidth - leftPadding + rightPadding
 
@@ -421,7 +430,13 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- would otherwise miscalculate this item's wrap/height.
     button.text:SetWidth(max(textWidth, 1))
 
-    local textHeight = button.text:GetStringHeight()
+    -- Floor the measurement at one line. A title always occupies at least one, but a
+    -- font string with no room to lay out reports 0 -- and that value also seeds
+    -- currentY below, which would stack the first objective straight on top of the
+    -- title. Painting only happens when the collected data version changes, so a row
+    -- laid out from a bad measurement stays wrong on screen until the quest's data
+    -- next changes; the floor keeps that from being possible.
+    local textHeight = max(button.text:GetStringHeight() or 0, db.fontSize + 2)
     local height = max(db.fontSize + 4, textHeight + 4)
     
     -- Objectives
@@ -504,7 +519,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             
             -- Width reduced by indent to account for hanging indent
             -- use buttonWidth (calculated from parent) instead of button:GetWidth() which is 0 on first render
-            objLine:SetWidth(buttonWidth - bodyIndent - 5)
+            objLine:SetWidth(max(buttonWidth - bodyIndent - 5, 1))
             objLine:SetWordWrap(true)
             objLine:ClearAllPoints()
             -- Anchor to right of prefix (or bullet if no prefix)
@@ -538,7 +553,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     button.objectiveProgresses[objIndex] = progressLine
                 end
 
-                progressLine:SetWidth(buttonWidth - bodyIndent - 5)
+                progressLine:SetWidth(max(buttonWidth - bodyIndent - 5, 1))
                 progressLine:SetWordWrap(true)
                 progressLine:ClearAllPoints()
                 progressLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)

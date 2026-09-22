@@ -212,9 +212,7 @@ function addon:SyncWithBlizzardTracker()
     -- border frame early and have it duplicated moments later. Dropping the cached
     -- appearance state makes the next appearance pass re-apply everything cleanly.
     trackerFrame:SetSize(db.frameWidth, db.frameHeight)
-    if contentFrame then
-        contentFrame:SetWidth(db.frameWidth - 2)
-    end
+    self:UpdateContentWidth()
     self._appearanceState = nil
 
     trackerFrame:ClearAllPoints()
@@ -366,7 +364,7 @@ function addon:CreateTrackerFrame()
         addon.db.frameHeight = trackerFrame:GetHeight()
         addon:ClaimManualGeometry()
         -- Update content width
-        if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
+        addon:UpdateContentWidth()
         addon:RequestUpdate()
         if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
     end)
@@ -391,7 +389,7 @@ function addon:CreateTrackerFrame()
         addon.db.frameWidth = trackerFrame:GetWidth()
         addon.db.frameHeight = trackerFrame:GetHeight()
         addon:ClaimManualGeometry()
-        if contentFrame then contentFrame:SetWidth(addon.db.frameWidth - 2) end
+        addon:UpdateContentWidth()
         addon:RequestUpdate()
         if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
     end)
@@ -417,8 +415,20 @@ function addon:CreateTrackerFrame()
     self.scenarioFrame = scenarioFrame
 
     -- Active Quest Frame (Super-tracked quest, sits between Scenario and auto-quest popups)
+    --
+    -- The placeholder horizontal anchors here (and on the two sections below) are not
+    -- cosmetic: UpdateLayoutAnchors runs *after* the section renderers, so a section
+    -- carrying no anchors at all has width 0 the first time it is rendered. Everything
+    -- RenderTrackableItem measures is derived from its parent's width, and a font
+    -- string with no room reports a string height of 0 -- which puts the first
+    -- objective line on top of the quest title. Because painting only happens when the
+    -- collected data version changes, that bad first pass then stays on screen until
+    -- the quest's data next changes. UpdateLayoutAnchors replaces these anchors in the
+    -- same render pass, so they only ever supply a sane width to measure against.
     local activeQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     activeQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
+    activeQuestFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
+    activeQuestFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
     activeQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     activeQuestFrame:Hide()
     self.activeQuestFrame = activeQuestFrame
@@ -426,6 +436,8 @@ function addon:CreateTrackerFrame()
     -- FTA Frame (Follow the Arrow guide, pinned between Active Quest and Campaign)
     local ftaFrame = CreateFrame("Frame", nil, trackerFrame)
     ftaFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
+    ftaFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
+    ftaFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
     ftaFrame:SetHeight(1)
     ftaFrame:Hide()
     self.ftaFrame = ftaFrame
@@ -433,6 +445,8 @@ function addon:CreateTrackerFrame()
     -- Campaign Frame (Pinned below Active Quest when campaign quests are present)
     local campaignFrame = CreateFrame("Frame", nil, trackerFrame)
     campaignFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
+    campaignFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
+    campaignFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
     campaignFrame:SetHeight(1)
     campaignFrame:Hide()
     self.campaignFrame = campaignFrame
@@ -477,7 +491,9 @@ function addon:CreateTrackerFrame()
     
     -- Content frame (child of scroll frame)
     contentFrame = CreateFrame("Frame", nil, scrollFrame)
-    contentFrame:SetSize(self.db.frameWidth - 2, 100) -- Reduce width for scrollbar/padding logic
+    -- Width is corrected to the scroll viewport by UpdateContentWidth on the first
+    -- render; this is only a starting size so the frame has one before then.
+    contentFrame:SetSize(max((self.db.frameWidth or 0) - 10, 1), 100)
     scrollFrame:SetScrollChild(contentFrame)
 
     -- Scroll frame shadow gradients (depth effect at the edges of the scroll area).
@@ -800,6 +816,32 @@ end
     -- Order: ScenarioFrame -> ActiveQuestFrame -> CampaignFrame -> AutoQuestFrame -> CompletedQuestFrame -> ScrollFrame
 -- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
 ------------------------------------------------------------------------------
+-- Match the scroll content to the scroll frame's viewport.
+--
+-- A ScrollFrame clips its child to the viewport, so anything wider has its right edge
+-- cut off -- and every row and header inside is anchored to the full width of this
+-- frame, so it is their right edges that get clipped, not empty space. The width used
+-- to be db.frameWidth - 2, but the viewport is inset from the tracker's edges by
+-- UpdateLayoutAnchors (by SIDE on each side once a pinned section is showing), so the
+-- content always overhung it by several pixels and every header background ran off
+-- the right-hand side.
+--
+-- Measured from the scroll frame rather than recomputed from the insets so the two
+-- cannot disagree; the inset arithmetic is only a fallback for the first pass, before
+-- the scroll frame's own anchors have resolved.
+function addon:UpdateContentWidth()
+    if not contentFrame then return end
+
+    local width = scrollFrame and scrollFrame:GetWidth() or 0
+    if width <= 1 then
+        width = (self.db.frameWidth or 0) - 10
+    end
+
+    if width > 1 then
+        contentFrame:SetWidth(width)
+    end
+end
+
 function addon:UpdateLayoutAnchors()
     if not self.trackerFrame then return end
 
@@ -1006,9 +1048,7 @@ function addon:UpdateTrackerAppearance()
     trackerFrame:SetSize(db.frameWidth, db.frameHeight)
     
     -- Update content width synchronously
-    if contentFrame then
-        contentFrame:SetWidth(db.frameWidth - 2)
-    end
+    self:UpdateContentWidth()
     
     -- Update scale
     trackerFrame:SetScale(db.frameScale)

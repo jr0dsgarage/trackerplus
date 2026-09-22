@@ -2,7 +2,7 @@
 local addonName, addon = ...
 
 -- Database version for future migrations
-local DB_VERSION = 5
+local DB_VERSION = 6
 
 -- Default settings
 local DEFAULTS = {
@@ -26,7 +26,7 @@ local DEFAULTS = {
     borderSize = 1,
     headerIconStyle = "standard", -- "none", "standard", "square", "text_brackets", "questlog"
     headerIconPosition = "right", -- "left", "right"
-    headerBackgroundStyle = "tracker", -- "none", "questlog", "tracker"
+    headerBackgroundStyle = "questlog", -- "none", "questlog", "tracker"
     
     -- Font Settings
     fontSize = 12,
@@ -56,6 +56,10 @@ local DEFAULTS = {
     -- Display Options
     showQuestLevel = true,
     colorQuestsByDifficulty = true, -- Color quest text using the client's own GetQuestDifficultyColor(level)
+    colorMapPOIsByDifficulty = true, -- Outline the game's own world map quest pins in that same difficulty color
+    mapPOIOutlineStyle = "glow", -- "glow" (the game's soft ring) or "circle" (hard ring)
+    mapPOIOutlineThickness = 2, -- How far the circle/glow reaches past the pin, in pixels (1-10)
+    mapPOIGlowOpacity = 1.0, -- Glow style only; 0-1, where 1 is as solid as it draws
     showZoneHeaders = true,
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
@@ -209,6 +213,14 @@ function addon:InitDatabase()
             TrackerPlusDB.settings.headerIconPosition = "right"
         end
 
+        -- Migration (v6): section headers now default to the quest log background.
+        -- Same caveat as the icon-position move above: a profile that deliberately
+        -- chose the old "tracker" background is indistinguishable from one still
+        -- carrying it as the default, so both are moved.
+        if previousVersion < 6 and TrackerPlusDB.settings.headerBackgroundStyle == "tracker" then
+            TrackerPlusDB.settings.headerBackgroundStyle = "questlog"
+        end
+
         -- Migration: distance tracking removed
         TrackerPlusDB.settings.showDistance = nil
 
@@ -231,6 +243,17 @@ function addon:InitDatabase()
             TrackerPlusDB.settings.barBorderSize = 10
         end
         
+        -- Migration: map POI glow opacity is a 0..1 fraction. It briefly ran 0..3,
+        -- with the whole numbers counting stacked draw passes; that pass count moved
+        -- behind the setting, so rescale anything still stored on the old range
+        -- rather than clamping it and silently turning a middling choice into the
+        -- maximum. Keyed on the value being out of range rather than on a version,
+        -- since the old range never shipped.
+        local glowOpacity = tonumber(TrackerPlusDB.settings.mapPOIGlowOpacity)
+        if glowOpacity and glowOpacity > 1 then
+            TrackerPlusDB.settings.mapPOIGlowOpacity = math.min(glowOpacity / 3, 1)
+        end
+
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then
             TrackerPlusDB.settings.fontFace = "Fonts\\FRIZQT__.TTF"

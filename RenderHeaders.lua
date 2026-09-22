@@ -241,7 +241,7 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 header._textLayoutSignature = headerTextLayoutSignature
             end
             
-            local bgStyle = db.headerBackgroundStyle or "tracker"
+            local bgStyle = db.headerBackgroundStyle or "questlog"
 
             local bgSignature = table.concat({bgStyle, tostring(isMajor and 1 or 0)}, ":")
             if header._bgSignature ~= bgSignature then

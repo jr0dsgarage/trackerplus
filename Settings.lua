@@ -39,6 +39,10 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             if checked and addon.SyncWithBlizzardTracker then
                 addon:SyncWithBlizzardTracker()
             end
+        elseif dbKey == "colorMapPOIsByDifficulty" then
+            -- Map pins are Blizzard's, outside our render pass entirely, so this only
+            -- needs the outlines repainted.
+            addon:RefreshMapPOIOutlines()
         elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" or dbKey == "includeFTAQuests" or dbKey == "colorQuestsByDifficulty" then
             -- Colors (and quest inclusion/grouping) are computed in GetQuestData/
             -- CollectQuests at collection time, not at render time, so these need a
@@ -121,6 +125,9 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
             if dbKey == "barBorderSize" then addon:RefreshDisplay() end
         elseif dbKey == "fontSize" or dbKey == "headerFontSize" or dbKey:find("^spacing") then
             addon:RefreshDisplay()
+        elseif dbKey == "mapPOIOutlineThickness" or dbKey == "mapPOIGlowOpacity" then
+            -- Map pins are Blizzard's, outside our render pass entirely.
+            addon:RefreshMapPOIOutlines()
         end
     end)
     
@@ -163,6 +170,9 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
                     -- Sorting happens in CollectTrackables, so this needs a full
                     -- recollect rather than just a repaint.
                     addon:RequestUpdate("full")
+                elseif dbKey == "mapPOIOutlineStyle" then
+                    -- Map pins are Blizzard's, outside our render pass entirely.
+                    addon:RefreshMapPOIOutlines()
                 elseif dbKey == "debugLevel" then
                     if addon.LogAt then
                         addon:LogAt("info", "Debug level set to %s", tostring(self.value))
@@ -627,6 +637,13 @@ local function InitUI()
     s, sy = StartSection(p4, "Display Options", y)
     sy = CreateCheckbox(s, "Show Quest Level", "showQuestLevel", "Show the level of the quest", sy)
     sy = CreateCheckbox(s, "Color Quests by Difficulty", "colorQuestsByDifficulty", "Color quest name/level using the same difficulty colors as the default quest log (gray/green/yellow/orange/red based on your level vs. the quest's level), via the game's own GetQuestDifficultyColor. Disable to use the flat 'Quest Text' color below instead.", sy)
+    sy = CreateCheckbox(s, "Color Map POIs by Difficulty", "colorMapPOIsByDifficulty", "Mark the game's quest pins on the world map with the same color that quest's name has in the tracker.", sy)
+    sy = CreateDropdown(s, "Map POI Style", "mapPOIOutlineStyle", {
+        {text = "Glow", value = "glow"},
+        {text = "Circle", value = "circle"}
+    }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", sy)
+    sy = CreateSlider(s, "Map POI Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", sy)
+    sy = CreateSlider(s, "Map POI Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
     sy = CreateCheckbox(s, "Include Campaign Quest in Active Quest", "includeCampaignQuestInActiveQuest", "When enabled, a pinned campaign quest also appears in the Active Quest section instead of only in Campaign Quests.", sy)
     sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)

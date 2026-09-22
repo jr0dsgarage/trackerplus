@@ -107,6 +107,11 @@ function addon:UpdateTrackerDisplay(trackables)
     self.currentScenarios = scenarios
     trackables = remainingTrackables
 
+    -- Carry the last pass's viewport width in before anything measures against the
+    -- content frame, so text wrapping and row heights are computed at the width the
+    -- rows will actually be drawn at.
+    self:UpdateContentWidth()
+
     -- Group trackables if needed
     if db.groupByZone or db.groupByCategory then
         trackables = self:OrganizeTrackables(trackables)
@@ -155,6 +160,11 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Update layout anchors (scenario, autoquest, scroll, bonus, wq)
     --------------------------------------------------------------------------
     self:UpdateLayoutAnchors()
+
+    -- The anchors above are what set the scroll viewport's width, so the content it
+    -- scrolls can only be matched to it afterwards. Headers and rows anchor to both
+    -- edges of the content frame, so they pick the corrected width up immediately.
+    self:UpdateContentWidth()
 
     if addon.LogAt and self.autoQuestFrame then
         addon:LogAt("trace", "[AQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.autoQuestFrame:GetHeight() or 0, tostring(self.autoQuestFrame:IsShown()))
