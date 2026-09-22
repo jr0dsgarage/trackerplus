@@ -153,6 +153,14 @@ local function ApplyOutlineStyle(layer, style)
 
     layer:SetAtlas(style == STYLE_GLOW and GLOW_ATLAS or GetCircleAtlas())
 
+    -- The glow art is not neutral: it is painted gold, and the game recolors it by
+    -- swapping to a different atlas per quest classification rather than tinting it.
+    -- SetVertexColor multiplies, so tinting the gold directly can only ever darken it
+    -- towards gold -- green came out muddy, and grey came out gold. Desaturating
+    -- first leaves plain luminance for the tint to multiply into, so the difficulty
+    -- color survives. The circle art is already a white mask and needs none of this.
+    layer:SetDesaturated(style == STYLE_GLOW)
+
     -- Normal blending for both, including the glow. The glow used to draw additively,
     -- which is the real reason an opacity of 1 still read as faint: additive blending
     -- can only ever *brighten* what is under it, so over the map's lighter art there
