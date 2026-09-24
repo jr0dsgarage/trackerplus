@@ -13,6 +13,12 @@ local SHADOW_FADE_DISTANCE = 100
 local SHADOW_SEAM_OFFSET = 1
 local SHADOW_BOTTOM_EXTRA_DROP = 3
 
+-- Gap between the top edge of the tracker and the main header background, so the
+-- header art doesn't sit flush against the frame's top border.
+local HEADER_TOP_INSET = 2
+-- Vertical space reserved for the title bar (inset + header art + 1px seam).
+local HEADER_H = HEADER_TOP_INSET + 25
+
 
 -- Keep the scroll gradients spanning the full tracker width while tracking the
 -- scrollable area vertically.
@@ -409,8 +415,8 @@ function addon:CreateTrackerFrame()
     -- Scenario Frame (Top-pinned, outside scroll frame, anchored dynamically by layout)
     local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
     scenarioFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    scenarioFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
-    scenarioFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
+    scenarioFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
+    scenarioFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
     scenarioFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     self.scenarioFrame = scenarioFrame
 
@@ -427,8 +433,8 @@ function addon:CreateTrackerFrame()
     -- same render pass, so they only ever supply a sane width to measure against.
     local activeQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     activeQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    activeQuestFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
-    activeQuestFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
+    activeQuestFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
+    activeQuestFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
     activeQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
     activeQuestFrame:Hide()
     self.activeQuestFrame = activeQuestFrame
@@ -436,8 +442,8 @@ function addon:CreateTrackerFrame()
     -- FTA Frame (Follow the Arrow guide, pinned between Active Quest and Campaign)
     local ftaFrame = CreateFrame("Frame", nil, trackerFrame)
     ftaFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    ftaFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
-    ftaFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
+    ftaFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
+    ftaFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
     ftaFrame:SetHeight(1)
     ftaFrame:Hide()
     self.ftaFrame = ftaFrame
@@ -445,8 +451,8 @@ function addon:CreateTrackerFrame()
     -- Campaign Frame (Pinned below Active Quest when campaign quests are present)
     local campaignFrame = CreateFrame("Frame", nil, trackerFrame)
     campaignFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    campaignFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -25)
-    campaignFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -25)
+    campaignFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
+    campaignFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
     campaignFrame:SetHeight(1)
     campaignFrame:Hide()
     self.campaignFrame = campaignFrame
@@ -539,8 +545,8 @@ function addon:CreateTrackerFrame()
 
     -- Main Header Background (Behind Title/Settings)
     trackerFrame.headerBg = trackerFrame:CreateTexture(nil, "BACKGROUND")
-    trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
-    trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
+    trackerFrame.headerBg:SetPoint("TOPLEFT", 0, -HEADER_TOP_INSET)
+    trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, -HEADER_TOP_INSET)
     trackerFrame.headerBg:SetHeight(24) -- Standard header height
 
     -- Title Header (Left aligned)
@@ -845,7 +851,6 @@ end
 function addon:UpdateLayoutAnchors()
     if not self.trackerFrame then return end
 
-    local HEADER_H = 25   -- pixels reserved for the title bar
     local PAD      = 4    -- vertical gap between sections
     local SIDE     = 5    -- horizontal inset from tracker edges
 
@@ -1065,13 +1070,13 @@ function addon:UpdateTrackerAppearance()
         trackerFrame.headerBg:ClearAllPoints()
         
         if bgStyle == "none" then
-            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
-            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, -HEADER_TOP_INSET)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, -HEADER_TOP_INSET)
             trackerFrame.headerBg:SetColorTexture(0, 0, 0, 0)
         elseif bgStyle == "questlog" then
             -- Initial Quest Log style adjustments (shrink width by 4px total)
-            trackerFrame.headerBg:SetPoint("TOPLEFT", 2, 0)
-            trackerFrame.headerBg:SetPoint("TOPRIGHT", -2, 0)
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 2, -HEADER_TOP_INSET)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", -2, -HEADER_TOP_INSET)
             
             if trackerFrame.headerBg.SetAtlas then
                 trackerFrame.headerBg:SetAtlas("QuestLog-tab")
@@ -1083,9 +1088,9 @@ function addon:UpdateTrackerAppearance()
             end
         else
             -- Tracker Default
-            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, 0)
-            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, 0)
-            
+            trackerFrame.headerBg:SetPoint("TOPLEFT", 0, -HEADER_TOP_INSET)
+            trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, -HEADER_TOP_INSET)
+
             if trackerFrame.headerBg.SetAtlas then
                  -- Using Primary for the Main Header as it is the "Main" header
                 trackerFrame.headerBg:SetAtlas("UI-QuestTracker-Primary-Objective-Header")
