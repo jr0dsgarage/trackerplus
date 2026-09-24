@@ -12,6 +12,7 @@ DebugFrame.lua
 Core.lua
 TrackerUtils.lua
 MapPOIColor.lua
+QuestAreaHighlight.lua
 RendererUtils.lua
 ObjectiveParser.lua
 RenderItem.lua

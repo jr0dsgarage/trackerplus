@@ -204,6 +204,14 @@ function addon:FinalizeButtonPool()
     end
 end
 
+-- Calls fn(button) for every pooled button in use by the current render, so overlays
+-- (see QuestAreaHighlight.lua) can update rows in place without a repaint.
+function addon:ForEachActiveButton(fn)
+    for i = 1, activeButtons do
+        fn(trackableButtons[i])
+    end
+end
+
 -- Get or create a button from the pool
 function addon:GetOrCreateButton(parent)
     activeButtons = activeButtons + 1
@@ -247,6 +255,9 @@ function addon:GetOrCreateButton(parent)
     if btn.stageBox then btn.stageBox:Hide() end
     if btn.subText then btn.subText:Hide() end
     if btn._ftaCounter then btn._ftaCounter:Hide() end
+    -- The quest-area stripe belongs to whichever quest last used this button; the
+    -- quest renderer re-applies it, every other renderer must not inherit it.
+    if btn.areaStripe or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end
     
     -- IMPORTANT: Clear points on reuse to prevent anchor conflicts
     btn:ClearAllPoints()

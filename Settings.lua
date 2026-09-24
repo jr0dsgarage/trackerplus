@@ -43,6 +43,10 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
             -- Map pins are Blizzard's, outside our render pass entirely, so this only
             -- needs the outlines repainted.
             addon:RefreshMapPOIOutlines()
+        elseif dbKey == "highlightQuestsInArea" then
+            -- Starts or stops the area watcher; the stripe is an overlay on the
+            -- existing rows, so no recollect or repaint is needed.
+            addon:UpdateQuestAreaWatcher()
         elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" or dbKey == "includeFTAQuests" or dbKey == "colorQuestsByDifficulty" then
             -- Colors (and quest inclusion/grouping) are computed in GetQuestData/
             -- CollectQuests at collection time, not at render time, so these need a
@@ -644,6 +648,10 @@ local function InitUI()
     }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", sy)
     sy = CreateSlider(s, "Map POI Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", sy)
     sy = CreateSlider(s, "Map POI Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", sy)
+    sy = CreateCheckbox(s, "Mark Quests You're Standing In", "highlightQuestsInArea", "Show a colored stripe beside a quest while you are inside the area the map shades for it.", sy)
+    sy = CreateColorPicker(s, "Quest Area Stripe Color", "questAreaHighlightColor", function()
+        addon:RefreshQuestAreaHighlights(true)
+    end, sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
     sy = CreateCheckbox(s, "Include Campaign Quest in Active Quest", "includeCampaignQuestInActiveQuest", "When enabled, a pinned campaign quest also appears in the Active Quest section instead of only in Campaign Quests.", sy)
     sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)

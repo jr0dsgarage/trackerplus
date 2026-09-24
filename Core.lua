@@ -158,6 +158,9 @@ function addon:Initialize()
     -- Difficulty-colored outlines on the game's own world map quest pins
     self:InitMapPOIColors()
 
+    -- Stripe beside quests whose shaded map area the player is standing in
+    self:UpdateQuestAreaWatcher()
+
     -- Initial update
     self:RequestUpdate()
     self._layoutDirty = true

@@ -60,6 +60,8 @@ local DEFAULTS = {
     mapPOIOutlineStyle = "glow", -- "glow" (the game's soft ring) or "circle" (hard ring)
     mapPOIOutlineThickness = 2, -- How far the circle/glow reaches past the pin, in pixels (1-10)
     mapPOIGlowOpacity = 1.0, -- Glow style only; 0-1, where 1 is as solid as it draws
+    highlightQuestsInArea = true, -- Stripe beside a quest while standing inside its shaded map area
+    questAreaHighlightColor = {r = 0.30, g = 0.58, b = 1, a = 1}, -- Sampled from the map's quest-area edge glow
     showZoneHeaders = true,
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
@@ -253,6 +255,11 @@ function addon:InitDatabase()
         if glowOpacity and glowOpacity > 1 then
             TrackerPlusDB.settings.mapPOIGlowOpacity = math.min(glowOpacity / 3, 1)
         end
+
+        -- Migration: settings from an unreleased letter-glow version of the quest
+        -- area highlight, superseded by highlightQuestsInArea/questAreaHighlightColor.
+        TrackerPlusDB.settings.glowQuestsInArea = nil
+        TrackerPlusDB.settings.questAreaGlowColor = nil
 
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then

@@ -707,6 +707,9 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     button:Show()
     button.trackableData = item
 
+    -- Stripe beside quests the player is standing in; it spans the row's full height.
+    self:ApplyQuestAreaHighlight(button, isQuest and item.id or nil)
+
     if button._scriptMode ~= "trackable" then
         button:SetScript("OnClick", function(self, mouseButton)
             addon:OnTrackableClick(self.trackableData, mouseButton)
