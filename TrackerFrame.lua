@@ -563,10 +563,10 @@ function addon:CreateTrackerFrame()
     )
     trackerFrame.title:SetText("Tracker Plus")
 
-    -- FTA Toggle Button (arrow icon, to the left of the settings button)
+    -- FTA Toggle Button (arrow icon, to the left of the lock button)
     trackerFrame.ftaToggleBtn = CreateFrame("Button", nil, trackerFrame)
     trackerFrame.ftaToggleBtn:SetSize(16, 16)
-    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -54, 0)
+    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -74, 0)
     local ftaArrowTex = trackerFrame.ftaToggleBtn:CreateTexture(nil, "ARTWORK")
     ftaArrowTex:SetAllPoints()
     ftaArrowTex:SetTexture("Interface\\Minimap\\MinimapArrow")
@@ -593,6 +593,34 @@ function addon:CreateTrackerFrame()
         tooltip:Show()
     end)
     trackerFrame.ftaToggleBtn:SetScript("OnLeave", function()
+        addon:HideSharedTooltip()
+    end)
+
+    -- Lock Toggle Button (padlock icon, to the left of the settings button).
+    -- Gold when locked, grey when unlocked. The tint is applied by
+    -- UpdateTrackerLock so it also follows /tp lock, /tp unlock and the Lock Panel
+    -- checkbox.
+    trackerFrame.lockBtn = CreateFrame("Button", nil, trackerFrame)
+    trackerFrame.lockBtn:SetSize(16, 16)
+    trackerFrame.lockBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -54, 0)
+    local lockTex = trackerFrame.lockBtn:CreateTexture(nil, "ARTWORK")
+    lockTex:SetAllPoints()
+    lockTex:SetTexture("Interface\\PetBattles\\PetBattle-LockIcon")
+    trackerFrame.lockBtn._lockTex = lockTex
+    trackerFrame.lockBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    trackerFrame.lockBtn:SetScript("OnClick", function(self)
+        addon:SetSetting("locked", not addon.db.locked)
+        addon:UpdateTrackerLock()
+        if self:IsMouseOver() then
+            self:GetScript("OnEnter")(self)
+        end
+    end)
+    trackerFrame.lockBtn:SetScript("OnEnter", function(self)
+        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+        tooltip:SetText(addon.db.locked and "Unlock Panel" or "Lock Panel")
+        tooltip:Show()
+    end)
+    trackerFrame.lockBtn:SetScript("OnLeave", function()
         addon:HideSharedTooltip()
     end)
 
@@ -635,6 +663,7 @@ function addon:CreateTrackerFrame()
     -- on top of the gear and swallowing its clicks.
     local chromeLevel = (trackerFrame:GetFrameLevel() or 1) + 50
     trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
+    trackerFrame.lockBtn:SetFrameLevel(chromeLevel)
     trackerFrame.settingsParam:SetFrameLevel(chromeLevel)
     trackerFrame.minMaxBtn:SetFrameLevel(chromeLevel)
 
@@ -694,6 +723,7 @@ function addon:CreateTrackerFrame()
             
             -- Hide Elements
             trackerFrame.settingsParam:Hide()
+            trackerFrame.lockBtn:Hide()
             if trackerFrame.ftaToggleBtn then trackerFrame.ftaToggleBtn:Hide() end
             trackerFrame.title:Hide()
             trackerFrame.headerBg:Hide()
@@ -736,6 +766,7 @@ function addon:CreateTrackerFrame()
 
             -- Show Elements
             trackerFrame.settingsParam:Show()
+            trackerFrame.lockBtn:Show()
             -- Stays hidden when FollowTheArrow isn't loaded.
             addon:UpdateFTAToggleVisibility()
             trackerFrame.title:Show()
@@ -754,8 +785,8 @@ function addon:CreateTrackerFrame()
             if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
             -- Always right-aligned, matching where the button is first anchored and
-            -- keeping it in the same chrome row as the settings and Follow the Arrow
-            -- buttons (anchored RIGHT at -34 and -54). This used to follow
+            -- keeping it in the same chrome row as the settings, lock and Follow the
+            -- Arrow buttons (anchored RIGHT at -34, -54 and -74). This used to follow
             -- db.headerIconPosition, but that setting controls which side the
             -- expand/collapse arrows sit on for headers inside the quest list, not the
             -- tracker window's own chrome. Since it defaults to "left", the button
@@ -813,6 +844,23 @@ function addon:UpdateTrackerLock()
         trackerFrame:EnableMouse(true)
         if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
         if trackerFrame.resizeBL then trackerFrame.resizeBL:Show() end
+    end
+
+    local lockTex = trackerFrame.lockBtn and trackerFrame.lockBtn._lockTex
+    if lockTex then
+        if self.db.locked then
+            lockTex:SetDesaturated(false)
+            lockTex:SetVertexColor(1, 1, 1, 1)
+        else
+            lockTex:SetDesaturated(true)
+            lockTex:SetVertexColor(0.6, 0.6, 0.6, 1)
+        end
+    end
+
+    -- Keep the Settings checkbox in step when toggled from the header or slash command.
+    local lockCheck = _G[addonName .. "lockedCheck"]
+    if lockCheck then
+        lockCheck:SetChecked(self.db.locked and true or false)
     end
 end
 
