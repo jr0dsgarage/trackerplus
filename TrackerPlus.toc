@@ -24,6 +24,7 @@ RenderCampaign.lua
 RenderBonusObjectives.lua
 RenderWorldQuests.lua
 RenderHeaders.lua
+RenderQuestTimers.lua
 TrackerRenderer.lua
 TrackerFrame.lua
 Settings.lua

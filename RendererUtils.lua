@@ -88,6 +88,7 @@ function addon:UpdateSectionDebugBoxes()
         { key = "scenario", frame = self.scenarioFrame, label = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "activequest", frame = self.activeQuestFrame, label = "activeQuestFrame", color = {1.0, 0.85, 0.2}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "fta", frame = self.ftaFrame, label = "ftaFrame", color = {0.4, 1.0, 0.75}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
+        { key = "questtimer", frame = self.questTimerFrame, label = "questTimerFrame", color = {1.0, 0.3, 0.3}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "campaign", frame = self.campaignFrame, label = "campaignFrame", color = {1.0, 0.65, 0.2}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "scroll", frame = self.scrollFrame, label = "scrollFrame", color = {0.4, 1.0, 0.45}, anchor = { point = "TOPLEFT", x = 3, y = -3 } },
         { key = "content", frame = self.contentFrame, label = "contentFrame", color = {0.3, 0.7, 1.0}, anchor = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -3, y = 3 } },

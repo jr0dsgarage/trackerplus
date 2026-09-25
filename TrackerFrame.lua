@@ -457,6 +457,16 @@ function addon:CreateTrackerFrame()
     campaignFrame:Hide()
     self.campaignFrame = campaignFrame
 
+    -- Quest Timer Frame ("Quest Timer: MM:SS" rows, last pinned section so it sits
+    -- directly above the quest list). Filled by RenderQuestTimers.lua.
+    local questTimerFrame = CreateFrame("Frame", nil, trackerFrame)
+    questTimerFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
+    questTimerFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
+    questTimerFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
+    questTimerFrame:SetHeight(1)
+    questTimerFrame:Hide()
+    self.questTimerFrame = questTimerFrame
+
     -- Auto Quest Frame (Below scenario/active-quest if visible, outside scroll frame)
     local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     autoQuestFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0)
@@ -741,6 +751,7 @@ function addon:CreateTrackerFrame()
             if self.completedQuestFrame then self.completedQuestFrame:Hide() end
             if self.bonusFrame then self.bonusFrame:Hide() end
             if self.worldQuestFrame then self.worldQuestFrame:Hide() end
+            if self.questTimerFrame then self.questTimerFrame:Hide() end
             
             -- Center button
             trackerFrame.minMaxBtn:ClearAllPoints()
@@ -795,6 +806,7 @@ function addon:CreateTrackerFrame()
             trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
             
             addon:RequestUpdate()
+            if addon.RefreshQuestTimers then addon:RefreshQuestTimers() end
             
             -- Restore lock state (handles resize buttons)
             addon:UpdateTrackerLock()
@@ -828,6 +840,8 @@ function addon:CreateTrackerFrame()
     trackerFrame:Show()
     
     self:UpdateTrackerLock()
+
+    if self.InitQuestTimerSection then self:InitQuestTimerSection() end
     
     return trackerFrame
 end
@@ -867,7 +881,7 @@ end
 ------------------------------------------------------------------------------
 -- Dynamic Layout Engine
 -- Call this after setting section heights and visibility in the render cycle.
-    -- Order: ScenarioFrame -> ActiveQuestFrame -> CampaignFrame -> AutoQuestFrame -> CompletedQuestFrame -> ScrollFrame
+    -- Order: ScenarioFrame -> ActiveQuestFrame -> FTAFrame -> CampaignFrame -> AutoQuestFrame -> CompletedQuestFrame -> QuestTimerFrame -> ScrollFrame
 -- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
 ------------------------------------------------------------------------------
 -- Match the scroll content to the scroll frame's viewport.
@@ -909,23 +923,26 @@ function addon:UpdateLayoutAnchors()
     local campVisible  = self.campaignFrame    and self.campaignFrame:IsShown()    and self.campaignFrame:GetHeight()    > 1
     local aqVisible    = self.autoQuestFrame   and self.autoQuestFrame:IsShown()   and self.autoQuestFrame:GetHeight()   > 1
     local cqVisible    = self.completedQuestFrame and self.completedQuestFrame:IsShown() and self.completedQuestFrame:GetHeight() > 1
+    local qtVisible    = self.questTimerFrame  and self.questTimerFrame:IsShown()  and self.questTimerFrame:GetHeight()  > 1
     local bonusVisible = self.bonusFrame     and self.bonusFrame:IsShown()     and self.bonusFrame:GetHeight()     > 1
     local wqVisible    = self.worldQuestFrame and self.worldQuestFrame:IsShown() and self.worldQuestFrame:GetHeight() > 1
 
     -- Build a change-detection signature so we only touch anchors when needed.
-    local sig = format("%s|%s|%s|%s|%s|%s|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%s|%s",
+    local sig = format("%s|%s|%s|%s|%s|%s|%s|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%s|%s",
         tostring(scenVisible),
         tostring(acqVisible),
         tostring(ftaVisible),
         tostring(campVisible),
         tostring(aqVisible),
         tostring(cqVisible),
+        tostring(qtVisible),
         scenVisible  and self.scenarioFrame:GetHeight()    or 0,
         acqVisible   and self.activeQuestFrame:GetHeight() or 0,
         ftaVisible   and self.ftaFrame:GetHeight()         or 0,
         campVisible  and self.campaignFrame:GetHeight()    or 0,
         aqVisible    and self.autoQuestFrame:GetHeight()   or 0,
         cqVisible    and self.completedQuestFrame:GetHeight() or 0,
+        qtVisible    and self.questTimerFrame:GetHeight()  or 0,
         tostring(bonusVisible),
         tostring(wqVisible))
 
@@ -942,6 +959,7 @@ function addon:UpdateLayoutAnchors()
     if campVisible  then topSections[#topSections + 1] = self.campaignFrame    end
     if aqVisible    then topSections[#topSections + 1] = self.autoQuestFrame   end
     if cqVisible    then topSections[#topSections + 1] = self.completedQuestFrame end
+    if qtVisible    then topSections[#topSections + 1] = self.questTimerFrame  end
     local prevFrame  = self.trackerFrame
     local prevPoint  = "TOPLEFT"
     local prevPointR = "TOPRIGHT"
