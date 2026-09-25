@@ -177,6 +177,9 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
                 elseif dbKey == "mapPOIOutlineStyle" then
                     -- Map pins are Blizzard's, outside our render pass entirely.
                     addon:RefreshMapPOIOutlines()
+                elseif dbKey == "questAreaHighlightStyle" then
+                    -- An overlay on the existing rows; restyle the lit ones in place.
+                    addon:RefreshQuestAreaHighlights(true)
                 elseif dbKey == "debugLevel" then
                     if addon.LogAt then
                         addon:LogAt("info", "Debug level set to %s", tostring(self.value))
@@ -648,8 +651,9 @@ local function InitUI()
     }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", sy)
     sy = CreateSlider(s, "Map POI Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", sy)
     sy = CreateSlider(s, "Map POI Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", sy)
-    sy = CreateCheckbox(s, "Mark Quests You're Standing In", "highlightQuestsInArea", "Show a colored stripe beside a quest while you are inside the area the map shades for it.", sy)
-    sy = CreateColorPicker(s, "Quest Area Stripe Color", "questAreaHighlightColor", function()
+    sy = CreateCheckbox(s, "Mark Quests You're Standing In", "highlightQuestsInArea", "Highlight a quest while you are inside the area the map shades for it.", sy)
+    sy = CreateDropdown(s, "Quest Area Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable.", sy)
+    sy = CreateColorPicker(s, "Quest Area Highlight Color", "questAreaHighlightColor", function()
         addon:RefreshQuestAreaHighlights(true)
     end, sy)
     sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)

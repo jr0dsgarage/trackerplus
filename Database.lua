@@ -60,7 +60,8 @@ local DEFAULTS = {
     mapPOIOutlineStyle = "glow", -- "glow" (the game's soft ring) or "circle" (hard ring)
     mapPOIOutlineThickness = 2, -- How far the circle/glow reaches past the pin, in pixels (1-10)
     mapPOIGlowOpacity = 1.0, -- Glow style only; 0-1, where 1 is as solid as it draws
-    highlightQuestsInArea = true, -- Stripe beside a quest while standing inside its shaded map area
+    highlightQuestsInArea = true, -- Highlight a quest while standing inside its shaded map area
+    questAreaHighlightStyle = "stripe", -- See STYLES in QuestAreaHighlight.lua
     questAreaHighlightColor = {r = 0.30, g = 0.58, b = 1, a = 1}, -- Sampled from the map's quest-area edge glow
     showZoneHeaders = true,
     includeCampaignQuestInActiveQuest = false,
@@ -260,6 +261,14 @@ function addon:InitDatabase()
         -- area highlight, superseded by highlightQuestsInArea/questAreaHighlightColor.
         TrackerPlusDB.settings.glowQuestsInArea = nil
         TrackerPlusDB.settings.questAreaGlowColor = nil
+
+        -- Migration: quest area styles dropped after trying them in game.
+        local areaStyle = TrackerPlusDB.settings.questAreaHighlightStyle
+        if areaStyle == "stripePulse" or areaStyle == "backgroundPulse" or areaStyle == "underline"
+            or areaStyle == "checker" or areaStyle == "checkerLeft" or areaStyle == "checkerRight"
+            or areaStyle == "checkerEdgeLeft" or areaStyle == "checkerEdgeRight" or areaStyle == "glow" then
+            TrackerPlusDB.settings.questAreaHighlightStyle = DEFAULTS.questAreaHighlightStyle
+        end
 
         -- Fix legacy font paths (Migration)
         if TrackerPlusDB.settings.fontFace == "Friz Quadrata TT" then

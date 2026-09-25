@@ -255,9 +255,9 @@ function addon:GetOrCreateButton(parent)
     if btn.stageBox then btn.stageBox:Hide() end
     if btn.subText then btn.subText:Hide() end
     if btn._ftaCounter then btn._ftaCounter:Hide() end
-    -- The quest-area stripe belongs to whichever quest last used this button; the
+    -- The quest-area highlight belongs to whichever quest last used this button; the
     -- quest renderer re-applies it, every other renderer must not inherit it.
-    if btn.areaStripe or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end
+    if btn._areaLit or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end
     
     -- IMPORTANT: Clear points on reuse to prevent anchor conflicts
     btn:ClearAllPoints()
