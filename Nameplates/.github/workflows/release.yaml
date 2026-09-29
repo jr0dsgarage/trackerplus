@@ -1,0 +1,81 @@
+name: Build & Release WoW Addon
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write   # required to create releases and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # we need tags/history to detect latest tag
+
+      - name: Ensure tag matches latest main
+        id: tagcheck
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          TAG_COMMIT="$(git rev-parse HEAD)"
+          MAIN_COMMIT="$(git rev-parse origin/main)"
+          if [ "$TAG_COMMIT" = "$MAIN_COMMIT" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Tag commit matches latest main ($MAIN_COMMIT); continuing"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag commit $TAG_COMMIT does not match latest main $MAIN_COMMIT; skipping release"
+          fi
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        if: steps.tagcheck.outputs.release == 'true'
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG" ]; then
+            echo "::error::Unable to determine tag name from ref ${GITHUB_REF}"
+            exit 1
+          fi
+          echo "Found tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          SANITIZED="${TAG#v}"
+          SANITIZED="${SANITIZED#.}"
+          echo "Sanitized version: $SANITIZED"
+          echo "sanitized=$SANITIZED" >> "$GITHUB_OUTPUT"
+
+      - name: Update TOC version
+        if: steps.tagcheck.outputs.release == 'true'
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.sanitized }}"
+          echo "Updating TOC file to version $VERSION"
+          sed -i "s/^## Version:.*/## Version: $VERSION/" next.toc
+          echo "TOC file updated:"
+          grep "^## Version:" next.toc
+
+      - name: Build zip (git archive)
+        id: buildzip
+        if: steps.tagcheck.outputs.release == 'true'
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.sanitized }}"
+          ZIP_NAME="next.v.${VERSION}.zip"
+          echo "Building $ZIP_NAME (version $VERSION)"
+          # Create zip excluding git files and GitHub workflows
+          zip -r "$ZIP_NAME" . -x '*.git*' -x '*.github*' -x 'README.md' -x 'CHANGELOG.md'
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.tagcheck.outputs.release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          files: ${{ steps.buildzip.outputs.zip_name }}
+          prerelease: false
