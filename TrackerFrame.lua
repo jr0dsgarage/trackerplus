@@ -252,6 +252,16 @@ function addon:ClaimManualGeometry()
     end
 end
 
+-- Saves a drag-resize as whole pixels. Sizing leaves the frame at a fractional size, so the
+-- frame is snapped to the rounded values too, keeping what's shown and what's saved the same.
+local function SaveDraggedSize()
+    local width = floor(trackerFrame:GetWidth() + 0.5)
+    local height = floor(trackerFrame:GetHeight() + 0.5)
+    addon.db.frameWidth = width
+    addon.db.frameHeight = height
+    trackerFrame:SetSize(width, height)
+end
+
 -- Create the main tracker frame
 function addon:CreateTrackerFrame()
     if trackerFrame then
@@ -366,8 +376,7 @@ function addon:CreateTrackerFrame()
     end)
     trackerFrame.resizeBR:SetScript("OnMouseUp", function()
         trackerFrame:StopMovingOrSizing()
-        addon.db.frameWidth = trackerFrame:GetWidth()
-        addon.db.frameHeight = trackerFrame:GetHeight()
+        SaveDraggedSize()
         addon:ClaimManualGeometry()
         -- Update content width
         addon:UpdateContentWidth()
@@ -392,8 +401,7 @@ function addon:CreateTrackerFrame()
     end)
     trackerFrame.resizeBL:SetScript("OnMouseUp", function()
         trackerFrame:StopMovingOrSizing()
-        addon.db.frameWidth = trackerFrame:GetWidth()
-        addon.db.frameHeight = trackerFrame:GetHeight()
+        SaveDraggedSize()
         addon:ClaimManualGeometry()
         addon:UpdateContentWidth()
         addon:RequestUpdate()

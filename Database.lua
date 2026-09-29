@@ -257,6 +257,15 @@ function addon:InitDatabase()
             TrackerPlusDB.settings.mapPOIGlowOpacity = math.min(glowOpacity / 3, 1)
         end
 
+        -- Migration: drag-resizing used to save the frame's raw fractional size.
+        -- Keyed on the values themselves, like the glow opacity fix above.
+        for _, key in ipairs({ "frameWidth", "frameHeight" }) do
+            local size = tonumber(TrackerPlusDB.settings[key])
+            if size and size ~= math.floor(size) then
+                TrackerPlusDB.settings[key] = math.floor(size + 0.5)
+            end
+        end
+
         -- Migration: settings from an unreleased letter-glow version of the quest
         -- area highlight, superseded by highlightQuestsInArea/questAreaHighlightColor.
         TrackerPlusDB.settings.glowQuestsInArea = nil
