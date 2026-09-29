@@ -183,7 +183,7 @@ end
 -- NOTE: a "manual mirror rendering" fallback used to live here for when Blizzard-frame
 -- detection below fails to find a shown tracker. It was removed because it was
 -- permanently dead code: its only trigger, hasManualScenarioData, requires a scenario
--- trackable without isDummy=true, and Core.lua's CollectScenarioObjectives unconditionally
+-- trackable without isDummy=true, and ActivityCollectors.lua's CollectScenarioObjectives unconditionally
 -- sets isDummy=true on the single item it ever produces. If Blizzard-frame detection is
 -- ever observed to genuinely miss an active scenario in practice, a real fallback would
 -- need CollectScenarioObjectives to emit real (non-dummy) data from

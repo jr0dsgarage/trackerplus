@@ -152,9 +152,13 @@ Access the full settings panel via:
 ## Architecture
 
 - **Database.lua** - Settings persistence and defaults management
-- **Core.lua** - Event handling, data collection, quest/achievement tracking
-- **TrackerFrame.lua** - UI rendering, scrolling, button pooling
+- **Core.lua** - Event handling and the update loop
 - **Settings.lua** - Modern WoW settings panel with full customization
+- **Data/** - Collecting quests, achievements and other trackables; objective parsing, quest colors, sorting
+- **Render/** - Drawing each tracker section (active quest, campaign, scenarios, world quests, ...)
+- **UI/** - The tracker window, its title bar, button pooling and "Match Game Tracker"
+- **Map/** - World map quest pin colors and quest-area highlighting
+- **Nameplates/** - Quest target highlights on enemy nameplates
 
 ## Compatibility
 

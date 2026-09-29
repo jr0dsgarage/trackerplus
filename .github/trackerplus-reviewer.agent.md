@@ -65,7 +65,7 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 
 ### 7. Regression Guardrails (Critical — never regress)
 - **Active Quest item icon parity**: `RenderItem.lua` must resolve item icons in order: cached texture → `GetItemIcon(link)` → `GetItemInfoInstant` iconID → question-mark fallback. `TrackerRenderer.lua` orchestrator must propagate `questItemDataByID` to `supertrack` items that lack `.item.link/.texture`.
-- **World Quests header lifecycle**: `CollectQuests` in `Core.lua` treats quests under the `WORLD_QUESTS` header as world-quest entries even when `C_QuestLog.IsWorldQuest` is transiently false. Completed/ended world quests must be excluded immediately so the grouped header cannot linger.
+- **World Quests header lifecycle**: `CollectQuests` in `QuestCollectors.lua` treats quests under the `WORLD_QUESTS` header as world-quest entries even when `C_QuestLog.IsWorldQuest` is transiently false. Completed/ended world quests must be excluded immediately so the grouped header cannot linger.
 
 ### 8. Performance & Memory (Info)
 - Hot-path globals (`pairs`, `ipairs`, `max`, `min`, `format`, `GetTime`, `InCombatLockdown`) must be localized at the top of each file.

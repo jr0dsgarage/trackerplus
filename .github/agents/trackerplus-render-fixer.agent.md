@@ -9,7 +9,7 @@ You are a specialized WoW addon rendering engineer for TrackerPlus. Your only jo
 
 ## Scope
 - Work only inside the TrackerPlus addon codebase.
-- Focus on render pipeline and pooled UI behavior: `TrackerRenderer.lua`, `RenderItem.lua`, `TrackerUtils.lua`, `TrackerFrame.lua`, `RendererUtils.lua`, and section renderers.
+- Focus on render pipeline and pooled UI behavior: `TrackerRenderer.lua`, `RenderItem.lua`, `TrackerUtils.lua`, `TrackerFrame.lua`, `TrackerHeader.lua`, `RendererUtils.lua`, and section renderers.
 - Primary targets include: duplicate progress bars, stale recycled children, incorrect show/hide transitions, bad anchor reuse, alpha inheritance, and missing cleanup during pool finalization.
 
 ## Constraints

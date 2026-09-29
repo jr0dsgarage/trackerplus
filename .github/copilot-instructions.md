@@ -7,28 +7,42 @@ TrackerPlus is an advanced quest and objective tracker replacement for World of 
 
 ### File Structure & Load Order (per TOC)
 
+Entry points (`Core.lua`, `Database.lua`, `Settings.lua`, `DebugFrame.lua`) are at the top level; the rest is grouped by job: `Data/` (collecting and interpreting game data), `Render/` (drawing tracker sections), `UI/` (the tracker window itself), `Map/` (world-map integration) and `Nameplates/`.
+
 ```
-Database.lua              – Saved variables, defaults, deep-copy utilities
-DebugFrame.lua            – In-game debug log window (/tpdebug toggles logging; window opens from Settings)
-Core.lua                  – Initialization, event handling, data collectors, update loop
-TrackerUtils.lua          – Button pooling, trackable sorting/grouping, header toggle
-MapPOIColor.lua           – Difficulty-coloured circles on Blizzard's world map quest pins (hooks only; draws no UI of its own)
-RendererUtils.lua         – Shared renderer utilities (debug overlays only — see note below)
-ObjectiveParser.lua       – Objective text/progress parsing, quest-item resolution
-RenderItem.lua            – Single quest/achievement row rendering
-RenderAutoQuests.lua      – Auto-quest popup stealing from Blizzard frames (Blizzard hijack)
-RenderScenario.lua        – Scenario/delve/dungeon section (Blizzard hijack only; no manual fallback)
-RenderActiveQuest.lua     – Super-tracked "Active Quest" section
-RenderFollowTheArrow.lua  – Follow-the-Arrow guide section (between Active Quest and Campaign)
-RenderCampaign.lua        – Campaign quest section (pinned, below Active Quest/FTA)
-RenderBonusObjectives.lua – Bonus objectives section (manual render only; does not hijack a Blizzard frame)
-RenderWorldQuests.lua     – World quests section (manual render only; does not hijack a Blizzard frame)
-RenderHeaders.lua         – Normal trackable list (major/minor headers + quest items)
-TrackerRenderer.lua       – Orchestrator: categorises trackables, delegates to sections
-TrackerFrame.lua          – Main UI window, scrolling, drag/resize, layout anchors
-Nameplates/Classification.lua – Quest log + nameplate tooltip analysis, caching
-Nameplates/Highlights.lua – Highlight rendering on nameplate health bars
-Settings.lua              – Configuration UI (custom scrollable options panel)
+Database.lua                            – Saved variables, defaults, deep-copy utilities
+Nameplates/NameplatesDatabase.lua       – Nameplates settings (TrackerPlusDB.nameplates), defaults, migrations
+DebugFrame.lua                          – In-game debug log window (/tpdebug toggles logging; window opens from Settings)
+Core.lua                                – Initialization, event handling, update loop, CollectTrackables (dirty-section cache), slash commands
+Data/QuestCollectors.lua                – Quest collectors: GetQuestData, CollectQuests, CollectAutoQuests, CollectSuperTrackedQuest
+Data/ActivityCollectors.lua             – Achievement, scenario, profession, monthly-activity and endeavor collectors
+Data/QuestColors.lua                    – Quest title colors: difficulty coloring and the super-track override (shared with map pins)
+Data/TrackableSort.lua                  – Sort order of trackables within groups
+UI/TrackerUtils.lua                     – Button pooling, trackable grouping, header toggle, click handling, color picker
+Map/MapPOIColor.lua                     – Difficulty-coloured circles on Blizzard's world map quest pins (hooks only; draws no UI of its own)
+Map/QuestAreaHighlight.lua              – Marks the tracker row of a quest whose shaded map area the player is standing in
+Render/RendererUtils.lua                – Shared renderer utilities (debug overlays only — see note below)
+Data/ObjectiveParser.lua                – Objective text/progress parsing, quest-item resolution
+Render/RenderItem.lua                   – Single quest/achievement row rendering
+Render/RenderAutoQuests.lua             – Auto-quest popup stealing from Blizzard frames (Blizzard hijack)
+Render/RenderScenario.lua               – Scenario/delve/dungeon section (Blizzard hijack only; no manual fallback)
+Render/RenderActiveQuest.lua            – Super-tracked "Active Quest" section
+Render/RenderFollowTheArrow.lua         – Follow-the-Arrow guide section (between Active Quest and Campaign)
+Render/RenderCampaign.lua               – Campaign quest section (pinned, below Active Quest/FTA)
+Render/RenderBonusObjectives.lua        – Bonus objectives section (manual render only; does not hijack a Blizzard frame)
+Render/RenderWorldQuests.lua            – World quests section (manual render only; does not hijack a Blizzard frame)
+Render/RenderHeaders.lua                – Normal trackable list (major/minor headers + quest items)
+Render/RenderQuestTimers.lua            – "Quest Timer: MM:SS" rows, pinned directly above the quest list
+Render/TrackerRenderer.lua              – Orchestrator: categorises trackables, delegates to sections
+UI/TrackerFrame.lua                     – Main UI window, scrolling, drag/resize, layout anchors
+UI/TrackerHeader.lua                    – Title bar: title, FollowTheArrow/lock/settings buttons, minimize/maximize
+UI/GameTrackerSync.lua                  – "Match Game Tracker": follows the game's own tracker position/size (incl. Edit Mode)
+Nameplates/NameplatesClassification.lua – Quest log + nameplate tooltip analysis, caching
+Nameplates/NameplatesHighlights.lua     – Highlight rendering on nameplate health bars
+Nameplates/NameplatesDebug.lua          – Nameplates debug window (/tp nameplates debug)
+Nameplates/NameplatesCore.lua           – Nameplates events, update debounce, /tp nameplates commands
+Nameplates/NameplatesSettings.lua       – Nameplates settings subpage (registered by Settings.lua)
+Settings.lua                            – Configuration UI (custom scrollable options panel)
 ```
 
 ### Core Components
@@ -38,7 +52,7 @@ Settings.lua              – Configuration UI (custom scrollable options panel)
 - **Database.lua**: Manages saved variables (TrackerPlusDB) with deep copy utilities and safe defaults.
 - **Settings.lua**: Implements the configuration UI using a custom scrollable options panel.
 - **DebugFrame.lua**: Provides an in-game logging window for development (toggle with `/tpdebug`).
-- **MapPOIColor.lua**: Draws a circle around Blizzard's own world map quest pins (`QuestPinTemplate`) in the colour that quest's title has in the tracker, gated on `db.colorMapPOIsByDifficulty`, with `db.mapPOIOutlineStyle` (`"glow"` default/`"circle"`), `db.mapPOIOutlineThickness` (1–10px) and `db.mapPOIGlowOpacity` (glow only, a 0–1 fraction spent as up to `GLOW_MAX_PASSES` stacked draws — the glow art fades by design and never reaches full alpha in one pass, so the pass count is how 1.0 gets to "solid"; keep that detail behind the setting). The circle is a solid disc (`common-mask-circle`, falling back to `CircleMaskScalable`) drawn *behind* the pin and oversized by the thickness on each side — the pin's own banner occludes the middle, and the exposed margin is the ring. Nothing can punch a hole in a texture, so do not "simplify" this into a single ring texture unless one with adjustable thickness exists. The glow style must keep its `SetDesaturated(true)`: `UI-QuestPoi-OuterGlow` is painted gold (the game recolours it by swapping atlases per quest classification, never by tinting), and since `SetVertexColor` multiplies, tinting it undesaturated turns green quests muddy and grey ones gold. The disc is first inset by `COIN_INSET`, the transparent margin baked into the POI banner atlases, which no API reports and which is therefore an empirically calibrated constant — without it the ring comes out that margin *wider* than asked for at every setting. It owns no frames of its own: it hooks `WorldMapFrame:RegisterPin` (the last call in `AcquirePin`, so it sees every pin the map hands out) and, per pin, `UpdateButtonStyle` (called by `QuestDataProviderMixin:AddQuest` *after* the pin's quest is set, and again on every restyle). Outline textures and hook bookkeeping live in weak-keyed module tables, **not** as fields written onto the pooled Blizzard pins. Colour comes from `addon:GetQuestTitleColorByQuestID` (`Core.lua`), which rebuilds the `C_QuestLog.GetInfo` table `GetQuestColor` expects and then applies the super-track gold via `ApplySuperTrackedTitleColor`. **Quest title colour is decided in exactly one place.** `RenderItem.lua` calls the same `ApplySuperTrackedTitleColor`; do not reintroduce an inline override in the row renderer — when the gold lived only there, a super-tracked quest was gold in the tracker but a different colour on its map pin. Difficulty colours come from `C_PlayerInfo.GetContentDifficultyQuestForPlayer` (via `GetRelativeDifficultyColor` in `Core.lua`), mapped to `QuestDifficultyColors` by `Enum.RelativeContentDifficulty` **member name**, never by hardcoded number. Do not "simplify" this back to `GetQuestDifficultyColor(level)`: on this client that function has no reachable green band at all — its green check goes through `GetQuestGreenRange`, which returns nil here, so it returns gold for roughly −4 to +2 levels and drops straight to grey. It is also level-based and so cannot rate a scaling quest. The level-based path survives only as `GetDifficultyColorForLevel`, a fallback for clients that lack the newer API; it looks `GetQuestDifficultyColor` up **as a global on every call** — do not "optimise" it into a file-local alongside the others at the top of `Core.lua`, which is what silently disabled difficulty colouring entirely (the global isn't guaranteed to exist when the file loads, and the captured nil made the guarding branch fall through to the flat quest colour for the whole session). `GetQuestColor` also has **no** "quest is complete" branch by design: titles and pins show the level difference right up to turn-in, and `db.completeColor` green belongs to finished *objective lines* only. Completion is conveyed by the POI turn-in icon, not by recolouring the title.
+- **MapPOIColor.lua**: Draws a circle around Blizzard's own world map quest pins (`QuestPinTemplate`) in the colour that quest's title has in the tracker, gated on `db.colorMapPOIsByDifficulty`, with `db.mapPOIOutlineStyle` (`"glow"` default/`"circle"`), `db.mapPOIOutlineThickness` (1–10px) and `db.mapPOIGlowOpacity` (glow only, a 0–1 fraction spent as up to `GLOW_MAX_PASSES` stacked draws — the glow art fades by design and never reaches full alpha in one pass, so the pass count is how 1.0 gets to "solid"; keep that detail behind the setting). The circle is a solid disc (`common-mask-circle`, falling back to `CircleMaskScalable`) drawn *behind* the pin and oversized by the thickness on each side — the pin's own banner occludes the middle, and the exposed margin is the ring. Nothing can punch a hole in a texture, so do not "simplify" this into a single ring texture unless one with adjustable thickness exists. The glow style must keep its `SetDesaturated(true)`: `UI-QuestPoi-OuterGlow` is painted gold (the game recolours it by swapping atlases per quest classification, never by tinting), and since `SetVertexColor` multiplies, tinting it undesaturated turns green quests muddy and grey ones gold. The disc is first inset by `COIN_INSET`, the transparent margin baked into the POI banner atlases, which no API reports and which is therefore an empirically calibrated constant — without it the ring comes out that margin *wider* than asked for at every setting. It owns no frames of its own: it hooks `WorldMapFrame:RegisterPin` (the last call in `AcquirePin`, so it sees every pin the map hands out) and, per pin, `UpdateButtonStyle` (called by `QuestDataProviderMixin:AddQuest` *after* the pin's quest is set, and again on every restyle). Outline textures and hook bookkeeping live in weak-keyed module tables, **not** as fields written onto the pooled Blizzard pins. Colour comes from `addon:GetQuestTitleColorByQuestID` (`QuestColors.lua`), which rebuilds the `C_QuestLog.GetInfo` table `GetQuestColor` expects and then applies the super-track gold via `ApplySuperTrackedTitleColor`. **Quest title colour is decided in exactly one place.** `RenderItem.lua` calls the same `ApplySuperTrackedTitleColor`; do not reintroduce an inline override in the row renderer — when the gold lived only there, a super-tracked quest was gold in the tracker but a different colour on its map pin. Difficulty colours come from `C_PlayerInfo.GetContentDifficultyQuestForPlayer` (via `GetRelativeDifficultyColor` in `QuestColors.lua`), mapped to `QuestDifficultyColors` by `Enum.RelativeContentDifficulty` **member name**, never by hardcoded number. Do not "simplify" this back to `GetQuestDifficultyColor(level)`: on this client that function has no reachable green band at all — its green check goes through `GetQuestGreenRange`, which returns nil here, so it returns gold for roughly −4 to +2 levels and drops straight to grey. It is also level-based and so cannot rate a scaling quest. The level-based path survives only as `GetDifficultyColorForLevel`, a fallback for clients that lack the newer API; it looks `GetQuestDifficultyColor` up **as a global on every call** — do not "optimise" it into a file-local at the top of `QuestColors.lua`, which is what silently disabled difficulty colouring entirely (the global isn't guaranteed to exist when the file loads, and the captured nil made the guarding branch fall through to the flat quest colour for the whole session). `GetQuestColor` also has **no** "quest is complete" branch by design: titles and pins show the level difference right up to turn-in, and `db.completeColor` green belongs to finished *objective lines* only. Completion is conveyed by the POI turn-in icon, not by recolouring the title.
 
 ### Renderer Architecture
 The rendering pipeline is split into an orchestrator and specialised section files:
@@ -64,7 +78,7 @@ The rendering pipeline is split into an orchestrator and specialised section fil
 
 ### Data Flow
 1. **Event Trigger**: WoW fires events (e.g., QUEST_LOG_UPDATE, ZONE_CHANGED).
-2. **Aggregation**: Core.lua's `CollectTrackables` calls specific collectors:
+2. **Aggregation**: Core.lua's `CollectTrackables` calls specific collectors (in `QuestCollectors.lua` and `ActivityCollectors.lua`):
    - `CollectQuests()` (Standard & World Quests)
    - `CollectAchievements()`
    - `CollectScenarioObjectives()` (Dungeons/Delves/Scenarios)
@@ -177,17 +191,18 @@ Two sections of TrackerPlus "borrow" Blizzard's native tracker frames — the sc
 
 ### Key Files
 - [TrackerPlus.toc](../TrackerPlus.toc): Manifest and load order.
-- [Core.lua](../Core.lua): Event handling, data collection, update loop.
-- [TrackerRenderer.lua](../TrackerRenderer.lua): Render orchestrator.
-- [TrackerFrame.lua](../TrackerFrame.lua): UI window, scrolling, layout.
-- [TrackerUtils.lua](../TrackerUtils.lua): Button pooling, sorting, grouping.
+- [Core.lua](../Core.lua): Event handling, update loop, CollectTrackables.
+- [QuestCollectors.lua](../Data/QuestCollectors.lua) / [ActivityCollectors.lua](../Data/ActivityCollectors.lua): Data collection.
+- [TrackerRenderer.lua](../Render/TrackerRenderer.lua): Render orchestrator.
+- [TrackerFrame.lua](../UI/TrackerFrame.lua): UI window, scrolling, layout.
+- [TrackerUtils.lua](../UI/TrackerUtils.lua): Button pooling, grouping, click handling.
 
 ## Nameplates Module
-Highlights enemy nameplates that are quest targets. Everything lives on `addon.Nameplates` (`TrackerPlus.Nameplates`). Its settings, debug window, events/commands and settings subpage are the `-- Nameplates:` `do ... end` blocks at the end of `Database.lua`, `DebugFrame.lua`, `Core.lua` and `Settings.lua`; classification and rendering are in `Nameplates/`. It has its own event frame and settings table `Nameplates.db` (`TrackerPlusDB.nameplates`, imported once from the old standalone addon's `NextTargetDB`). Reuse TrackerPlus helpers (`addon.Print`, `addon.DeepCopy`, `addon:OpenColorPicker`, `addon:AcquireTooltip`, `addon.OpenSettings(pageID)`) rather than adding local copies.
+Highlights enemy nameplates that are quest targets. Everything lives on `addon.Nameplates` (`TrackerPlus.Nameplates`). All of its code is in `Nameplates/`, in files prefixed `Nameplates`. It has its own event frame and settings table `Nameplates.db` (`TrackerPlusDB.nameplates`, imported once from the old standalone addon's `NextTargetDB`). Reuse TrackerPlus helpers (`addon.Print`, `addon.DeepCopy`, `addon:OpenColorPicker`, `addon:AcquireTooltip`, `addon.OpenSettings(pageID)`) rather than adding local copies.
 
-**Update pipeline:** WoW event → `Nameplates:RequestUpdate()` (0.05s debounce) → `UpdateHighlight()` → `CollectHighlights()` classifies each visible nameplate (`Classification.lua`) → `syncBars` applies styles (`Highlights.lua`). Quest-data events also call `ResetCaches()`. Highlights are off inside instances.
+**Update pipeline:** WoW event → `Nameplates:RequestUpdate()` (0.05s debounce) → `UpdateHighlight()` → `CollectHighlights()` classifies each visible nameplate (`NameplatesClassification.lua`) → `syncBars` applies styles (`NameplatesHighlights.lua`). Quest-data events also call `ResetCaches()`. Highlights are off inside instances.
 
-**Classification:** there is no API for "this mob is a quest objective", so `Classification.lua` reads the unit's tooltip (`C_TooltipInfo.GetUnit`) for `x/y` and `%` progress lines, matches quests via `C_QuestLog.UnitIsRelatedToQuest` then tooltip quest names, and treats a shown `SoftTargetFrame.Icon` as a quest item. String operations go through `safe*` pcall wrappers because tooltip text can be a secret value on 12.x. Classification results are cached per plate; `CollectHighlights` must reassign every per-pass field it writes onto them.
+**Classification:** there is no API for "this mob is a quest objective", so `NameplatesClassification.lua` reads the unit's tooltip (`C_TooltipInfo.GetUnit`) for `x/y` and `%` progress lines, matches quests via `C_QuestLog.UnitIsRelatedToQuest` then tooltip quest names, and treats a shown `SoftTargetFrame.Icon` as a quest item. String operations go through `safe*` pcall wrappers because tooltip text can be a secret value on 12.x. Classification results are cached per plate; `CollectHighlights` must reassign every per-pass field it writes onto them.
 
 **Health bar resolution (12.x):** `plate.UnitFrame.HealthBarsContainer.healthBar` (alias `plate.UnitFrame.healthBar`). Two field reads, so it isn't cached; unit frames are pooled and move between plates, so never cache a bar on the plate.
 
@@ -206,7 +221,7 @@ Highlights enemy nameplates that are quest targets. Everything lives on `addon.N
 
 ### World Quests header lifecycle
 - The floating/dangling `World Quests` text must never remain after a world quest ends.
-- In `Core.lua` `CollectQuests`, treat quests under the quest-log `WORLD_QUESTS` header as world-quest entries even if `C_QuestLog.IsWorldQuest` is transiently false.
+- In `QuestCollectors.lua` `CollectQuests`, treat quests under the quest-log `WORLD_QUESTS` header as world-quest entries even if `C_QuestLog.IsWorldQuest` is transiently false.
 - Completed/ended world quests should be excluded from collection immediately so the grouped header cannot linger.
 - `RenderWorldQuests.lua` restores hijacked Blizzard frames when no world quests are tracked.
 
