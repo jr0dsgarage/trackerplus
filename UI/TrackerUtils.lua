@@ -377,15 +377,31 @@ function addon:GetOrCreateSecureButton(parent)
     return button
 end
 
+-- Insert a quest link into the active chat box, opening chat first if none is active.
+-- ChatFrameUtil replaces the ChatEdit_* globals on newer clients.
+function addon:LinkQuestToChat(questID)
+    if not questID then return end
+    local link = GetQuestLink(questID)
+    if not link then return end
+
+    local insertLink = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+    if insertLink and insertLink(link) then return end
+
+    local openChat = (ChatFrameUtil and ChatFrameUtil.OpenChat) or ChatFrame_OpenChat
+    if openChat then openChat(link) end
+end
+
 -- Handle trackable click
 function addon:OnTrackableClick(trackable, mouseButton)
     if not trackable then return end
     
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
-             -- Shift+Left: Stop Tracking
-            if trackable.type == "quest" or trackable.type == "campaign" then
-                C_QuestLog.RemoveQuestWatch(trackable.id)
+             -- Shift+Left: Link to Chat (quests/campaigns), Stop Tracking otherwise
+            local t = trackable.type
+            if t == "quest" or t == "campaign" or t == "worldquest" or t == "bonus" or t == "supertrack" then
+                self:LinkQuestToChat(trackable.id or trackable.questID)
+                return
             elseif trackable.type == "achievement" then
                 if C_ContentTracking and C_ContentTracking.StopTracking then
                     C_ContentTracking.StopTracking(Enum.ContentTrackingType.Achievement, trackable.id, Enum.ContentTrackingStopType.Manual)
@@ -511,10 +527,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 
                 -- Link to Chat
                 rootDescription:CreateButton("Link to Chat", function()
-                    local link = GetQuestLink(questID)
-                    if link then
-                        ChatEdit_InsertLink(link)
-                    end
+                    addon:LinkQuestToChat(questID)
                 end)
                 
                 -- Abandon (Cautious)
