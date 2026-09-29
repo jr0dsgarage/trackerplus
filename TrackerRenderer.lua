@@ -218,7 +218,19 @@ function addon:UpdateTrackerDisplay(trackables)
     --------------------------------------------------------------------------
     -- Finalize
     --------------------------------------------------------------------------
-    contentFrame:SetHeight(max(yOffset, self.db.frameHeight))
+    -- Exactly the rendered height: the scroll viewport is shorter than frameHeight (the
+    -- header and pinned sections take their share), so any padding here scrolls as blank space.
+    contentFrame:SetHeight(max(yOffset, 1))
+
+    -- Content can shrink while scrolled down; keep the view inside the new range.
+    local scrollFrame = self.scrollFrame
+    if scrollFrame then
+        scrollFrame:UpdateScrollChildRect()
+        local maxScroll = scrollFrame:GetVerticalScrollRange()
+        if scrollFrame:GetVerticalScroll() > maxScroll then
+            scrollFrame:SetVerticalScroll(maxScroll)
+        end
+    end
 
     -- Update scroll shadow gradients based on new content size
     self:UpdateScrollShadows()
