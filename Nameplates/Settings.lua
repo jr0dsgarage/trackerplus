@@ -6,6 +6,8 @@ local Nameplates = TrackerPlus.Nameplates
 
 local panel = CreateFrame("Frame")
 panel.name = "Nameplates"
+-- Frames start shown; the UI is built in OnShow, so start hidden or the first visit never fires it.
+panel:Hide()
 
 local bgFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
 bgFrame:SetPoint("TOPLEFT", 4, -4)
