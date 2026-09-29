@@ -1,11 +1,11 @@
--- Options panel for next
+-- Options panel for Nameplates (a TrackerPlus settings subpage)
 ---@diagnostic disable: undefined-global
 local _, TrackerPlus = ...
 TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
 local Nameplates = TrackerPlus.Nameplates
 
 local panel = CreateFrame("Frame")
-panel.name = "next"
+panel.name = "Nameplates"
 
 local bgFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
 bgFrame:SetPoint("TOPLEFT", 4, -4)
@@ -658,15 +658,15 @@ local function buildSettingsUI()
 
     local title = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("next")
+    title:SetText("Nameplates")
 
     local subtitle = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
-    subtitle:SetText("Highlight potential next targets")
+    subtitle:SetText("Highlight nameplates of quest targets")
 
     local enable = CreateFrame("CheckButton", nil, content, "InterfaceOptionsCheckButtonTemplate")
     enable:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -14)
-    enable.Text:SetText("Enable next")
+    enable.Text:SetText("Enable Nameplate Highlights")
     enable:SetScript("OnClick", function(self)
         Nameplates.db.enabled = self:GetChecked() and true or false
         if Nameplates.db.enabled then
@@ -704,19 +704,19 @@ local function buildSettingsUI()
     end
 
     ui.fixDefaultBorder = addOption("Fix Default border offset",
-        "Redraws Blizzard's own target/focus border (and the level badge's) so it sits evenly around the health bar, keeping Blizzard's color. Applies on nameplates next isn't already highlighting. Doesn't affect next's highlight styles; use their Offset sliders.",
+        "Redraws Blizzard's own target/focus border (and the level badge's) so it sits evenly around the health bar, keeping Blizzard's color. Applies on nameplates that aren't already highlighted. Doesn't affect the highlight styles below; use their Offset sliders.",
         function(checked)
             Nameplates.db.fixDefaultBorderOffset = checked
         end)
 
     ui.hideDefaultBorder = addOption("Disable Default Health Bar border",
-        "Hides Blizzard's target/focus border on the health bar of nameplates next isn't already highlighting.",
+        "Hides Blizzard's target/focus border on the health bar of nameplates that aren't already highlighted.",
         function(checked)
             Nameplates.db.hideDefaultBorder = checked
         end)
 
     ui.hideLevelBadgeBorder = addOption("Disable Default Level Badge border",
-        "Hides Blizzard's target/focus border around the level badge. When unchecked, the level badge keeps Blizzard's border (redrawn by \"Fix Default border offset\" if that's on); next's highlight styles are never drawn on it.",
+        "Hides Blizzard's target/focus border around the level badge. When unchecked, the level badge keeps Blizzard's border (redrawn by \"Fix Default border offset\" if that's on); the highlight styles below are never drawn on it.",
         function(checked)
             Nameplates.db.hideLevelBadgeBorder = checked
         end)
@@ -825,27 +825,15 @@ panel.default = function()
     accentuate()
 end
 
-if InterfaceOptions_AddCategory then
-    InterfaceOptions_AddCategory(panel)
-elseif Settings and Settings.RegisterCanvasLayoutCategory then
-    local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
-    Settings.RegisterAddOnCategory(category)
-    Nameplates.settingsCategory = category
-end
-
+-- TrackerPlus's Settings.lua registers this panel as its "Nameplates" subpage.
+panel.parent = "TrackerPlus"
 Nameplates.settingsPanel = panel
 
 function Nameplates:OpenSettings()
-    if Settings and Settings.OpenToCategory then
-        if not self.settingsCategory and self.settingsPanel then
-            local category = Settings.RegisterCanvasLayoutCategory(self.settingsPanel, self.settingsPanel.name or "next")
-            Settings.RegisterAddOnCategory(category)
-            self.settingsCategory = category
-        end
-        if self.settingsCategory and self.settingsCategory.GetID then
-            Settings.OpenToCategory(self.settingsCategory:GetID())
-            return
-        end
+    local subcategory = TrackerPlus.settingsSubcategories and TrackerPlus.settingsSubcategories.Nameplates
+    if Settings and Settings.OpenToCategory and subcategory and subcategory.GetID then
+        Settings.OpenToCategory(subcategory:GetID())
+        return
     end
 
     if InterfaceOptionsFrame_OpenToCategory then

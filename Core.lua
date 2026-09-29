@@ -2010,12 +2010,15 @@ function addon:RegisterSlashCommands()
             addon:ResetDatabase()
             addon:RequestUpdate()
             Print("Settings reset to defaults")
+        elseif (msg == "nameplates" or msg:find("^nameplates ")) and addon.Nameplates then
+            addon.Nameplates:HandleCommand(msg:sub(#"nameplates" + 2))
         else
             Print("Commands:")
             Print("  /tp - Open settings")
             Print("  /tp toggle - Toggle tracker on/off")
             Print("  /tp lock/unlock - Lock/unlock frame position")
             Print("  /tp reset - Reset all settings")
+            Print("  /tp nameplates - Nameplate highlight options (/tp nameplates help)")
         end
     end
 end

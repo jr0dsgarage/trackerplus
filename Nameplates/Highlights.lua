@@ -12,20 +12,20 @@ local BLIZZARD_BORDER_ATLAS = "UI-HUD-Nameplates-Selected"
 local BORDER_TEMPLATE = "NamePlateFullBorderTemplate"
 -- Used when a bar has no native selectedBorder to anchor to (settings preview, Classic nameplate style).
 local FALLBACK_BLIZZARD_INSET = 4
--- next's "Blizzard" style is pulled in by this much from Blizzard's border: it's the baseline a style's
+-- Our "Blizzard" style is pulled in by this much from Blizzard's border: it's the baseline a style's
 -- Offset of 0 means. renderBlizzard is the only place geometry relative to a native border is adjusted.
 -- Blizzard's own textures are never moved (nameplate regions are restricted, so we can't read their
 -- anchors, and their layout varies between client builds).
 local DEFAULT_BORDER_SHRINK = 1
 local NO_EDGE_ADJUST = { left = 0, top = 0, right = 0, bottom = 0 }
--- next's "Blizzard" style, per-edge on top of DEFAULT_BORDER_SHRINK (positive = inward): the bottom
+-- Our "Blizzard" style, per-edge on top of DEFAULT_BORDER_SHRINK (positive = inward): the bottom
 -- edge is extended 1px so the bar's bottom edge isn't peeking out below it.
 local BLIZZARD_STYLE_EDGE_ADJUST = { left = 0, top = 0, right = 0, bottom = -1 }
 -- "Fix Default border offset": per-edge inward nudges (tuned in-game) that make Blizzard's default
 -- border atlas (UI-HUD-CoolDownManager-Selected-yellow) sit evenly around the health bar.
 local DEFAULT_BORDER_EDGE_ADJUST = { left = 2, top = 3, right = 1, bottom = 1 }
 -- The same, tuned in-game for the level badge's own border. The badge only ever shows Blizzard's
--- default border (fixed or not), never next's highlight styles.
+-- default border (fixed or not), never our highlight styles.
 local LEVEL_BADGE_EDGE_ADJUST = { left = 1, top = 4, right = 1, bottom = 2 }
 local GLOW_SIZE = 16
 
@@ -482,7 +482,7 @@ local function restoreNativeBorder(bar)
     bar.selectedBorder:SetShown(isSelectedBar(bar))
 end
 
--- The level badge only ever shows Blizzard's default border, independent of next's highlight styles
+-- The level badge only ever shows Blizzard's default border, independent of our highlight styles
 -- on the health bar: "Disable Default Level Badge border" hides it, otherwise "Fix Default border
 -- offset" redraws it (while the unit is the target/focus). Blizzard only toggles that border's shown
 -- state, so we hide it via alpha instead of fighting its updates.

@@ -1,4 +1,4 @@
--- Next Target Highlighter Addon
+-- Nameplates: highlights quest targets on enemy nameplates
 ---@diagnostic disable: undefined-global, param-type-mismatch
 local addonName, TrackerPlus = ...
 TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
@@ -67,8 +67,6 @@ eventHandlers.ADDON_LOADED = function(self, loadedAddon)
         self:ShowDebugFrame()
     end
 
-    print("|cFF00FF00[next]|r loaded. Type |cFFFFFF00/next help|r for options.")
-
     self:RequestUpdate()
 end
 
@@ -117,51 +115,35 @@ Nameplates.frame:RegisterEvent("QUEST_WATCH_LIST_CHANGED")
 Nameplates.frame:RegisterEvent("TASK_PROGRESS_UPDATE")
 Nameplates.frame:RegisterEvent("QUESTLINE_UPDATE")
 
-SLASH_NEXT1 = "/next"
+local PREFIX = "|cff00ff00TrackerPlus:|r "
 
-SlashCmdList.NEXT = function(msg)
-    -- Wrap in pcall to prevent errors from breaking slash command system
-    local success, err = pcall(function()
-        msg = sanitizeCommand(msg or "")
-        msg = msg:lower()
+local function printHelp()
+    print(PREFIX .. "Nameplates commands:")
+    print("  |cFFFFFF00/tp nameplates|r - open Nameplates settings")
+    print("  |cFFFFFF00/tp nameplates toggle|r - enable or disable nameplate highlights")
+    print("  |cFFFFFF00/tp nameplates debug|r - toggle the nameplate debug window")
+    print("  |cFFFFFF00/tp nameplates texture/inspect/structure/softtarget|r - diagnostics")
+end
 
-        if msg == "" then
-            Nameplates:OpenSettings()
-            print("|cFF00FF00[next]|r commands:")
-            print("  |cFFFFFF00/next config|r - open settings")
-            print("  |cFFFFFF00/next toggle|r - enable or disable the Nameplates")
-            return
+-- Handles "/tp nameplates <msg>", routed here from TrackerPlus's slash command.
+function Nameplates:HandleCommand(msg)
+    msg = sanitizeCommand(msg or ""):lower()
+
+    if msg == "" or msg == "config" or msg == "options" or msg == "settings" then
+        self:OpenSettings()
+    elseif msg == "toggle" then
+        self.db.enabled = not self.db.enabled
+        print(PREFIX .. "Nameplate highlights " .. (self.db.enabled and "enabled" or "disabled") .. ".")
+        self:RequestUpdate()
+    elseif msg == "debug" then
+        self.db.debugMode = not self.db.debugMode
+        if self.db.debugMode then
+            self:ShowDebugFrame()
+        else
+            self:HideDebugFrame()
         end
-
-        if msg == "config" or msg == "options" or msg == "settings" then
-            Nameplates:OpenSettings()
-            return
-        end
-
-        if msg == "toggle" then
-            Nameplates.db.enabled = not Nameplates.db.enabled
-            print(string.format("|cFF00FF00[next]|r Nameplates %s", Nameplates.db.enabled and "enabled" or "disabled"))
-            Nameplates:RequestUpdate()
-            return
-        end
-
-        if msg == "debug" then
-            Nameplates.db.debugMode = not Nameplates.db.debugMode
-            if Nameplates.db.debugMode then
-                Nameplates:ShowDebugFrame()
-            else
-                Nameplates:HideDebugFrame()
-            end
-            Nameplates:RequestUpdate()
-            return
-        end
-
-        print("|cFF00FF00[next]|r commands:")
-        print("  |cFFFFFF00/next config|r - open settings")
-        print("  |cFFFFFF00/next toggle|r - enable or disable the Nameplates")
-    end)
-    
-    if not success then
-        print("|cFFFF0000[next]|r Error processing command: " .. tostring(err))
+        self:RequestUpdate()
+    elseif not self:RunDevCommand(msg) then
+        printHelp()
     end
 end

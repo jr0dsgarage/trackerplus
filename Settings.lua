@@ -409,7 +409,7 @@ local function InitUI()
     overview:SetPoint("TOPLEFT", globalFrame, "BOTTOMLEFT", 8, -8)
     overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
     overview:SetJustifyH("LEFT")
-    overview:SetText("Expand TrackerPlus in the Settings list to open General, Appearance, Layout, Tracking, and Debug pages.")
+    overview:SetText("Expand TrackerPlus in the Settings list to open General, Appearance, Layout, Tracking, Nameplates, and Debug pages.")
 
     local orderedPages = {}
 
@@ -681,7 +681,13 @@ local function InitUI()
     
     p4:SetHeight(math.abs(y) + 20)
 
-    -- Page 5: Debug
+    -- Page 5: Nameplates. Built by Nameplates/Settings.lua; slotted in here so it registers with the rest.
+    local nameplatesPanel = addon.Nameplates and addon.Nameplates.settingsPanel
+    if nameplatesPanel then
+        table.insert(orderedPages, { id = "Nameplates", name = "Nameplates", frame = nameplatesPanel })
+    end
+
+    -- Page 6: Debug
     local debugPageInfo = CreateSettingsPage("Debug", "Debug", "Diagnostic logging and debug overlay controls.")
     local p5 = debugPageInfo.content
     y = -5

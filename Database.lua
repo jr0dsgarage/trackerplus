@@ -288,6 +288,13 @@ end
 function addon:ResetDatabase()
     TrackerPlusDB.settings = DeepCopy(DEFAULTS)
     addon.db = TrackerPlusDB.settings
+
+    -- Nameplates keeps its own settings table beside ours; re-seed it from its defaults.
+    if addon.Nameplates and addon.Nameplates.InitializeDB then
+        TrackerPlusDB.nameplates = nil
+        addon.Nameplates:InitializeDB()
+        addon.Nameplates:RequestUpdate()
+    end
 end
 
 -- Get a setting value

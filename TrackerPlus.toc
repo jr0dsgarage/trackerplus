@@ -1,10 +1,10 @@
 ## Interface: 120007, 120100, 16001
 ## Title: Tracker|cff00ff00Plus|r
-## Notes: Advanced quest and objective tracker replacement with categorization and customization
+## Notes: Advanced quest and objective tracker replacement with categorization, customization, and quest target nameplate highlights
 ## Author: jr0dsgarage
 ## Version: 1.0.0
 ## Category-enUS: j__r0d's garage
-## SavedVariables: TrackerPlusDB
+## SavedVariables: TrackerPlusDB, NextTargetDB
 ## IconTexture: Interface\Icons\INV_Misc_Map_01
 
 Database.lua
@@ -27,4 +27,10 @@ RenderHeaders.lua
 RenderQuestTimers.lua
 TrackerRenderer.lua
 TrackerFrame.lua
+Nameplates/Database.lua
+Nameplates/Classification.lua
+Nameplates/Highlights.lua
+Nameplates/Debug.lua
+Nameplates/Core.lua
+Nameplates/Settings.lua
 Settings.lua

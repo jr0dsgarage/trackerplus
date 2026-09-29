@@ -87,6 +87,15 @@ TrackerPlus is a comprehensive replacement for WoW's built-in quest tracker, off
   - World quests - Cyan
   - Profession quests - Green
 
+### 🎯 Nameplate Highlights
+Highlights the nameplates of enemies you need for your active quests, using the in-game tooltip to decide what counts and the quest log to pick the color:
+- **Quest Objectives** - standard kill/collect quests
+- **Quest Items** - mobs that drop quest items, even when they aren't a kill objective
+- **World Quests** and **Bonus Objectives** - targets for active world quests and area bonus objectives
+- **Current Target** - when your target is a quest objective, draws the Current Target style instead of the quest highlight; other targets keep the game's own target highlight
+- **Styles** - Blizzard (the game's own selection texture), Outline, Glow, or Rounded, each with its own color, thickness, and offset
+- Configure under **TrackerPlus → Nameplates** in the Settings panel (with a live preview plate), or `/tp nameplates`
+
 ## Commands
 
 - `/trackerplus` or `/tp` - Open settings panel
@@ -94,6 +103,9 @@ TrackerPlus is a comprehensive replacement for WoW's built-in quest tracker, off
 - `/tp lock` - Lock frame position
 - `/tp unlock` - Unlock frame to move
 - `/tp reset` - Reset all settings to defaults
+- `/tp nameplates` - Open Nameplates settings
+- `/tp nameplates toggle` - Enable/disable nameplate highlights
+- `/tp nameplates debug` - Toggle the nameplate debug window
 
 ## Installation
 
@@ -128,6 +140,7 @@ Access the full settings panel via:
 5. **Trackable Types** - Toggle quest types, achievements, etc.
 6. **Advanced Options** - Hide in instance/combat, tooltips
 7. **Color Settings** - Comprehensive color picker interface
+8. **Nameplates** - Nameplate highlight styles and preview
 
 ## Technical Details
 

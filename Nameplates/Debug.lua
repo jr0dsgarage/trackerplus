@@ -5,10 +5,21 @@ local Nameplates = TrackerPlus.Nameplates
 
 local floor = math.floor
 
+-- Diagnostics run via "/tp nameplates <name>".
+local devCommands = {}
+
+function Nameplates:RunDevCommand(name)
+    local command = devCommands[name]
+    if not command then
+        return false
+    end
+    command()
+    return true
+end
+
 -- Diagnostic command to inspect nameplate textures
-SLASH_NEXTTEXTURE1 = "/nexttexture"
-SlashCmdList["NEXTTEXTURE"] = function()
-    local plate = C_NamePlate.GetNamePlateForUnit("target")
+devCommands.texture = function()
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit("target")
     if not plate then
         print("No target nameplate found")
         return
@@ -50,8 +61,7 @@ SlashCmdList["NEXTTEXTURE"] = function()
 end
 
 -- Diagnostic command to inspect mouseover frame textures
-SLASH_NEXTINSPECT1 = "/nextinspect"
-SlashCmdList["NEXTINSPECT"] = function()
+devCommands.inspect = function()
     local frame = GetMouseFoci and GetMouseFoci()[1] or nil
     if not frame then
         print("No frame under mouse")
@@ -113,9 +123,8 @@ SlashCmdList["NEXTINSPECT"] = function()
 end
 
 -- Diagnostic command to inspect nameplate structure
-SLASH_NEXTSTRUCTURE1 = "/nextstructure"
-SlashCmdList["NEXTSTRUCTURE"] = function()
-    local plate = C_NamePlate.GetNamePlateForUnit("target")
+devCommands.structure = function()
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit("target")
     if not plate then
         print("No target nameplate found")
         return
@@ -189,9 +198,8 @@ SlashCmdList["NEXTSTRUCTURE"] = function()
 end
 
 -- Diagnostic command to find quest item icon (SoftTargetFrame)
-SLASH_NEXTSOFTTARGET1 = "/nextsofttarget"
-SlashCmdList["NEXTSOFTTARGET"] = function()
-    local plate = C_NamePlate.GetNamePlateForUnit("target")
+devCommands.softtarget = function()
+    local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit("target")
     if not plate then
         print("No target nameplate found")
         return
@@ -350,7 +358,7 @@ local function ensureDebugFrame()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", 14, -12)
-    title:SetText("next debug")
+    title:SetText("Nameplates Debug")
 
     local config = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     config:SetSize(80, 22)
@@ -373,7 +381,7 @@ local function ensureDebugFrame()
     close:SetScript("OnClick", function()
         Nameplates.db.debugMode = false
         Nameplates:HideDebugFrame()
-        print("|cFF00FF00[next]|r debug mode disabled")
+        print("|cff00ff00TrackerPlus:|r Nameplates debug mode disabled.")
     end)
 
     local scroll = CreateFrame("ScrollFrame", "TrackerPlusNameplatesDebugScroll", frame, "UIPanelScrollFrameTemplate")
