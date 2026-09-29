@@ -1,32 +1,34 @@
 -- Next Target Highlighter Addon
 ---@diagnostic disable: undefined-global, param-type-mismatch
-local addonName, addon = ...
+local addonName, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
-addon.frame = addon.frame or CreateFrame("Frame")
-addon.pendingUpdate = addon.pendingUpdate or false
+Nameplates.frame = Nameplates.frame or CreateFrame("Frame")
+Nameplates.pendingUpdate = Nameplates.pendingUpdate or false
 
-local sanitizeCommand = addon.SanitizeCommand
+local sanitizeCommand = Nameplates.SanitizeCommand
 
-function addon:UpdateHighlight()
+function Nameplates:UpdateHighlight()
     local inInstance = IsInInstance()
     -- Read by the selection border hook: when inactive, Blizzard's native border is left alone.
-    self.active = NextTargetDB.enabled and not inInstance
+    self.active = Nameplates.db.enabled and not inInstance
 
     if not self.active then
         self:ClearHighlights()
-        if not inInstance and NextTargetDB.debugMode then
+        if not inInstance and Nameplates.db.debugMode then
             self:UpdateDebugFrame({})
         end
         return
     end
 
     local results = self:CollectHighlights()
-    if NextTargetDB.debugMode then
+    if Nameplates.db.debugMode then
         self:UpdateDebugFrame(results)
     end
 end
 
-function addon:RequestUpdate()
+function Nameplates:RequestUpdate()
     if self.pendingUpdate then
         return
     end
@@ -38,8 +40,8 @@ function addon:RequestUpdate()
 
     self.pendingUpdate = true
     C_Timer.After(0.05, function()
-        addon.pendingUpdate = false
-        addon:UpdateHighlight()
+        Nameplates.pendingUpdate = false
+        Nameplates:UpdateHighlight()
     end)
 end
 
@@ -61,7 +63,7 @@ eventHandlers.ADDON_LOADED = function(self, loadedAddon)
 
     self.frame:UnregisterEvent("ADDON_LOADED")
 
-    if NextTargetDB.debugMode then
+    if Nameplates.db.debugMode then
         self:ShowDebugFrame()
     end
 
@@ -95,25 +97,25 @@ eventHandlers.QUEST_WATCH_LIST_CHANGED = handleQuestDataChanged
 eventHandlers.TASK_PROGRESS_UPDATE = handleQuestDataChanged
 eventHandlers.QUESTLINE_UPDATE = handleQuestDataChanged
 
-addon.frame:SetScript("OnEvent", function(_, event, ...)
+Nameplates.frame:SetScript("OnEvent", function(_, event, ...)
     local handler = eventHandlers[event]
     if handler then
-        handler(addon, ...)
+        handler(Nameplates, ...)
     end
 end)
 
-addon.frame:RegisterEvent("ADDON_LOADED")
-addon.frame:RegisterEvent("PLAYER_TARGET_CHANGED")
-addon.frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
-addon.frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
-addon.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-addon.frame:RegisterEvent("QUEST_LOG_UPDATE")
-addon.frame:RegisterEvent("QUEST_ACCEPTED")
-addon.frame:RegisterEvent("QUEST_REMOVED")
-addon.frame:RegisterEvent("QUEST_TURNED_IN")
-addon.frame:RegisterEvent("QUEST_WATCH_LIST_CHANGED")
-addon.frame:RegisterEvent("TASK_PROGRESS_UPDATE")
-addon.frame:RegisterEvent("QUESTLINE_UPDATE")
+Nameplates.frame:RegisterEvent("ADDON_LOADED")
+Nameplates.frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+Nameplates.frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+Nameplates.frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+Nameplates.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+Nameplates.frame:RegisterEvent("QUEST_LOG_UPDATE")
+Nameplates.frame:RegisterEvent("QUEST_ACCEPTED")
+Nameplates.frame:RegisterEvent("QUEST_REMOVED")
+Nameplates.frame:RegisterEvent("QUEST_TURNED_IN")
+Nameplates.frame:RegisterEvent("QUEST_WATCH_LIST_CHANGED")
+Nameplates.frame:RegisterEvent("TASK_PROGRESS_UPDATE")
+Nameplates.frame:RegisterEvent("QUESTLINE_UPDATE")
 
 SLASH_NEXT1 = "/next"
 
@@ -124,39 +126,39 @@ SlashCmdList.NEXT = function(msg)
         msg = msg:lower()
 
         if msg == "" then
-            addon:OpenSettings()
+            Nameplates:OpenSettings()
             print("|cFF00FF00[next]|r commands:")
             print("  |cFFFFFF00/next config|r - open settings")
-            print("  |cFFFFFF00/next toggle|r - enable or disable the addon")
+            print("  |cFFFFFF00/next toggle|r - enable or disable the Nameplates")
             return
         end
 
         if msg == "config" or msg == "options" or msg == "settings" then
-            addon:OpenSettings()
+            Nameplates:OpenSettings()
             return
         end
 
         if msg == "toggle" then
-            NextTargetDB.enabled = not NextTargetDB.enabled
-            print(string.format("|cFF00FF00[next]|r addon %s", NextTargetDB.enabled and "enabled" or "disabled"))
-            addon:RequestUpdate()
+            Nameplates.db.enabled = not Nameplates.db.enabled
+            print(string.format("|cFF00FF00[next]|r Nameplates %s", Nameplates.db.enabled and "enabled" or "disabled"))
+            Nameplates:RequestUpdate()
             return
         end
 
         if msg == "debug" then
-            NextTargetDB.debugMode = not NextTargetDB.debugMode
-            if NextTargetDB.debugMode then
-                addon:ShowDebugFrame()
+            Nameplates.db.debugMode = not Nameplates.db.debugMode
+            if Nameplates.db.debugMode then
+                Nameplates:ShowDebugFrame()
             else
-                addon:HideDebugFrame()
+                Nameplates:HideDebugFrame()
             end
-            addon:RequestUpdate()
+            Nameplates:RequestUpdate()
             return
         end
 
         print("|cFF00FF00[next]|r commands:")
         print("  |cFFFFFF00/next config|r - open settings")
-        print("  |cFFFFFF00/next toggle|r - enable or disable the addon")
+        print("  |cFFFFFF00/next toggle|r - enable or disable the Nameplates")
     end)
     
     if not success then

@@ -1,6 +1,8 @@
 -- Options panel for next
 ---@diagnostic disable: undefined-global
-local addonName, addon = ...
+local _, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
 local panel = CreateFrame("Frame")
 panel.name = "next"
@@ -17,7 +19,7 @@ bgFrame:SetBackdrop({
 bgFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
 bgFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
 
-local scrollFrame = CreateFrame("ScrollFrame", addonName .. "SettingsScrollFrame", bgFrame, "UIPanelScrollFrameTemplate")
+local scrollFrame = CreateFrame("ScrollFrame", "TrackerPlusNameplatesScrollFrame", bgFrame, "UIPanelScrollFrameTemplate")
 scrollFrame:SetPoint("TOPLEFT", 0, -4)
 scrollFrame:SetPoint("BOTTOMRIGHT", -26, 4)
 
@@ -84,7 +86,7 @@ local function applyPreviewHighlight(style)
         }
     end
 
-    addon:RenderBarHighlight(healthBar, style)
+    Nameplates:RenderBarHighlight(healthBar, style)
 
     -- On the real nameplate preview, mirror what a live plate shows: our style replaces Blizzard's
     -- border, and only the current target is left undimmed (Blizzard darkens other plates).
@@ -110,17 +112,17 @@ local function buildStyleData(optionKey)
     local styleKey = option.key .. "Style"
     local enabledKey = option.key .. "Enabled"
 
-    local color = NextTargetDB[colorKey]
+    local color = Nameplates.db[colorKey]
     if not color then
-        color = addon:GetDefault(colorKey)
-        NextTargetDB[colorKey] = color
+        color = Nameplates:GetDefault(colorKey)
+        Nameplates.db[colorKey] = color
     end
     color = color or { r = 1, g = 1, b = 1, a = 1 }
 
-    local thicknessValue = NextTargetDB[thicknessKey] or addon:GetDefault(thicknessKey) or 1
-    local offsetValue = NextTargetDB[offsetKey] or addon:GetDefault(offsetKey) or 0
-    local styleValue = NextTargetDB[styleKey] or addon:GetDefault(styleKey) or "outline"
-    NextTargetDB[styleKey] = styleValue
+    local thicknessValue = Nameplates.db[thicknessKey] or Nameplates:GetDefault(thicknessKey) or 1
+    local offsetValue = Nameplates.db[offsetKey] or Nameplates:GetDefault(offsetKey) or 0
+    local styleValue = Nameplates.db[styleKey] or Nameplates:GetDefault(styleKey) or "outline"
+    Nameplates.db[styleKey] = styleValue
 
     return {
         option = option,
@@ -128,7 +130,7 @@ local function buildStyleData(optionKey)
         thickness = thicknessValue,
         offset = offsetValue,
         mode = styleValue,
-        enabled = NextTargetDB[enabledKey] ~= false,
+        enabled = Nameplates.db[enabledKey] ~= false,
     }
 end
 
@@ -137,7 +139,7 @@ local function updatePreviewButtonStates(selectedKey)
         local button = row.previewButton
         local indicator = row.previewIndicator
         if button then
-            local enabled = NextTargetDB[key .. "Enabled"] ~= false
+            local enabled = Nameplates.db[key .. "Enabled"] ~= false
             local isSelected = (key == selectedKey)
 
             if isSelected then
@@ -184,11 +186,11 @@ selectPreviewOption = function(optionKey)
 end
 
 local function accentuate()
-    if addon.ClearHighlights then
-        addon:ClearHighlights()
+    if Nameplates.ClearHighlights then
+        Nameplates:ClearHighlights()
     end
-    if addon.UpdateHighlight then
-        addon:UpdateHighlight()
+    if Nameplates.UpdateHighlight then
+        Nameplates:UpdateHighlight()
     end
 end
 
@@ -344,7 +346,7 @@ local function bindHighlightRow(option, row)
     local styleKey = option.key .. "Style"
 
     row.checkbox:SetScript("OnClick", function(self)
-        NextTargetDB[enabledKey] = self:GetChecked()
+        Nameplates.db[enabledKey] = self:GetChecked()
         accentuate()
         if ui.preview.activeKey == option.key then
             updatePreview(option.key)
@@ -354,10 +356,10 @@ local function bindHighlightRow(option, row)
     end)
 
     row.colorButton:SetScript("OnClick", function()
-        local color = NextTargetDB[colorKey]
+        local color = Nameplates.db[colorKey]
         if not color then
-            color = addon:GetDefault(colorKey)
-            NextTargetDB[colorKey] = color
+            color = Nameplates:GetDefault(colorKey)
+            Nameplates.db[colorKey] = color
         end
         useColorPicker(color, function()
             updateSwatch(row.colorButton, color)
@@ -373,7 +375,7 @@ local function bindHighlightRow(option, row)
             return
         end
         local rounded = math.floor(value + 0.5)
-        NextTargetDB[thicknessKey] = rounded
+        Nameplates.db[thicknessKey] = rounded
         self.Text:SetText(string.format("Thickness: %d", rounded))
         accentuate()
         if ui.preview.activeKey == option.key then
@@ -386,7 +388,7 @@ local function bindHighlightRow(option, row)
             return
         end
         local rounded = math.floor(value + 0.5)
-        NextTargetDB[offsetKey] = rounded
+        Nameplates.db[offsetKey] = rounded
         self.Text:SetText(string.format("Offset: %d", rounded))
         accentuate()
         if ui.preview.activeKey == option.key then
@@ -398,13 +400,13 @@ local function bindHighlightRow(option, row)
         if level ~= 1 then
             return
         end
-        local current = NextTargetDB[styleKey] or addon:GetDefault(styleKey) or "outline"
+        local current = Nameplates.db[styleKey] or Nameplates:GetDefault(styleKey) or "outline"
         for _, choice in ipairs(highlightStyleChoices) do
             local info = UIDropDownMenu_CreateInfo()
             info.text = choice.label
             info.value = choice.value
             info.func = function()
-                NextTargetDB[styleKey] = choice.value
+                Nameplates.db[styleKey] = choice.value
                 UIDropDownMenu_SetSelectedValue(row.dropdown, choice.value)
                 UIDropDownMenu_SetText(row.dropdown, choice.label)
                 
@@ -457,29 +459,29 @@ local function refreshHighlightRow(option, row)
     local enabledKey = option.key .. "Enabled"
     local styleKey = option.key .. "Style"
 
-    row.checkbox:SetChecked(NextTargetDB[enabledKey] ~= false)
+    row.checkbox:SetChecked(Nameplates.db[enabledKey] ~= false)
 
-    local color = NextTargetDB[colorKey]
+    local color = Nameplates.db[colorKey]
     if not color then
-        color = addon:GetDefault(colorKey)
-        NextTargetDB[colorKey] = color
+        color = Nameplates:GetDefault(colorKey)
+        Nameplates.db[colorKey] = color
     end
     updateSwatch(row.colorButton, color)
 
-    local thicknessValue = NextTargetDB[thicknessKey] or addon:GetDefault(thicknessKey) or 1
+    local thicknessValue = Nameplates.db[thicknessKey] or Nameplates:GetDefault(thicknessKey) or 1
     row.thickness.isUpdating = true
     row.thickness:SetValue(thicknessValue)
     row.thickness.Text:SetText(string.format("Thickness: %d", thicknessValue))
     row.thickness.isUpdating = false
 
-    local offsetValue = NextTargetDB[offsetKey] or addon:GetDefault(offsetKey) or 0
+    local offsetValue = Nameplates.db[offsetKey] or Nameplates:GetDefault(offsetKey) or 0
     row.offset.isUpdating = true
     row.offset:SetValue(offsetValue)
     row.offset.Text:SetText(string.format("Offset: %d", offsetValue))
     row.offset.isUpdating = false
 
-    local styleValue = NextTargetDB[styleKey] or addon:GetDefault(styleKey) or "outline"
-    NextTargetDB[styleKey] = styleValue
+    local styleValue = Nameplates.db[styleKey] or Nameplates:GetDefault(styleKey) or "outline"
+    Nameplates.db[styleKey] = styleValue
     UIDropDownMenu_SetSelectedValue(row.dropdown, styleValue)
     UIDropDownMenu_SetText(row.dropdown, styleLabelFor(styleValue))
     
@@ -666,11 +668,11 @@ local function buildSettingsUI()
     enable:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -14)
     enable.Text:SetText("Enable next")
     enable:SetScript("OnClick", function(self)
-        NextTargetDB.enabled = self:GetChecked() and true or false
-        if NextTargetDB.enabled then
+        Nameplates.db.enabled = self:GetChecked() and true or false
+        if Nameplates.db.enabled then
             accentuate()
-        elseif addon.ClearHighlights then
-            addon:ClearHighlights()
+        elseif Nameplates.ClearHighlights then
+            Nameplates:ClearHighlights()
         end
     end)
     ui.enable = enable
@@ -704,19 +706,19 @@ local function buildSettingsUI()
     ui.fixDefaultBorder = addOption("Fix Default border offset",
         "Redraws Blizzard's own target/focus border (and the level badge's) so it sits evenly around the health bar, keeping Blizzard's color. Applies on nameplates next isn't already highlighting. Doesn't affect next's highlight styles; use their Offset sliders.",
         function(checked)
-            NextTargetDB.fixDefaultBorderOffset = checked
+            Nameplates.db.fixDefaultBorderOffset = checked
         end)
 
     ui.hideDefaultBorder = addOption("Disable Default Health Bar border",
         "Hides Blizzard's target/focus border on the health bar of nameplates next isn't already highlighting.",
         function(checked)
-            NextTargetDB.hideDefaultBorder = checked
+            Nameplates.db.hideDefaultBorder = checked
         end)
 
     ui.hideLevelBadgeBorder = addOption("Disable Default Level Badge border",
         "Hides Blizzard's target/focus border around the level badge. When unchecked, the level badge keeps Blizzard's border (redrawn by \"Fix Default border offset\" if that's on); next's highlight styles are never drawn on it.",
         function(checked)
-            NextTargetDB.hideLevelBadgeBorder = checked
+            Nameplates.db.hideLevelBadgeBorder = checked
         end)
 
     buildPreviewSection()
@@ -767,10 +769,10 @@ end)
 function panel.refresh()
     buildSettingsUI()
 
-    ui.enable:SetChecked(NextTargetDB.enabled ~= false)
-    ui.hideLevelBadgeBorder:SetChecked(NextTargetDB.hideLevelBadgeBorder ~= false)
-    ui.fixDefaultBorder:SetChecked(NextTargetDB.fixDefaultBorderOffset == true)
-    ui.hideDefaultBorder:SetChecked(NextTargetDB.hideDefaultBorder == true)
+    ui.enable:SetChecked(Nameplates.db.enabled ~= false)
+    ui.hideLevelBadgeBorder:SetChecked(Nameplates.db.hideLevelBadgeBorder ~= false)
+    ui.fixDefaultBorder:SetChecked(Nameplates.db.fixDefaultBorderOffset == true)
+    ui.hideDefaultBorder:SetChecked(Nameplates.db.hideDefaultBorder == true)
 
     for _, option in ipairs(highlightOptions) do
         refreshHighlightRow(option, ui.highlightRows[option.key])
@@ -787,10 +789,10 @@ end
 
 panel.okay = function()
     panel.refresh()
-    if NextTargetDB.debugMode then
-        addon:ShowDebugFrame()
+    if Nameplates.db.debugMode then
+        Nameplates:ShowDebugFrame()
     else
-        addon:HideDebugFrame()
+        Nameplates:HideDebugFrame()
     end
     accentuate()
 end
@@ -800,25 +802,25 @@ panel.cancel = function()
 end
 
 panel.default = function()
-    NextTargetDB.enabled = addon:GetDefault("enabled")
-    NextTargetDB.debugMode = addon:GetDefault("debugMode")
-    NextTargetDB.hideLevelBadgeBorder = addon:GetDefault("hideLevelBadgeBorder")
-    NextTargetDB.fixDefaultBorderOffset = addon:GetDefault("fixDefaultBorderOffset")
-    NextTargetDB.hideDefaultBorder = addon:GetDefault("hideDefaultBorder")
+    Nameplates.db.enabled = Nameplates:GetDefault("enabled")
+    Nameplates.db.debugMode = Nameplates:GetDefault("debugMode")
+    Nameplates.db.hideLevelBadgeBorder = Nameplates:GetDefault("hideLevelBadgeBorder")
+    Nameplates.db.fixDefaultBorderOffset = Nameplates:GetDefault("fixDefaultBorderOffset")
+    Nameplates.db.hideDefaultBorder = Nameplates:GetDefault("hideDefaultBorder")
 
     for _, option in ipairs(highlightOptions) do
-        NextTargetDB[option.key .. "Enabled"] = addon:GetDefault(option.key .. "Enabled")
-        NextTargetDB[option.key .. "Color"] = addon:GetDefault(option.key .. "Color")
-        NextTargetDB[option.key .. "Thickness"] = addon:GetDefault(option.key .. "Thickness")
-        NextTargetDB[option.key .. "Offset"] = addon:GetDefault(option.key .. "Offset")
-        NextTargetDB[option.key .. "Style"] = addon:GetDefault(option.key .. "Style")
+        Nameplates.db[option.key .. "Enabled"] = Nameplates:GetDefault(option.key .. "Enabled")
+        Nameplates.db[option.key .. "Color"] = Nameplates:GetDefault(option.key .. "Color")
+        Nameplates.db[option.key .. "Thickness"] = Nameplates:GetDefault(option.key .. "Thickness")
+        Nameplates.db[option.key .. "Offset"] = Nameplates:GetDefault(option.key .. "Offset")
+        Nameplates.db[option.key .. "Style"] = Nameplates:GetDefault(option.key .. "Style")
     end
 
     panel.refresh()
-    if NextTargetDB.debugMode then
-        addon:ShowDebugFrame()
+    if Nameplates.db.debugMode then
+        Nameplates:ShowDebugFrame()
     else
-        addon:HideDebugFrame()
+        Nameplates:HideDebugFrame()
     end
     accentuate()
 end
@@ -828,12 +830,12 @@ if InterfaceOptions_AddCategory then
 elseif Settings and Settings.RegisterCanvasLayoutCategory then
     local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     Settings.RegisterAddOnCategory(category)
-    addon.settingsCategory = category
+    Nameplates.settingsCategory = category
 end
 
-addon.settingsPanel = panel
+Nameplates.settingsPanel = panel
 
-function addon:OpenSettings()
+function Nameplates:OpenSettings()
     if Settings and Settings.OpenToCategory then
         if not self.settingsCategory and self.settingsPanel then
             local category = Settings.RegisterCanvasLayoutCategory(self.settingsPanel, self.settingsPanel.name or "next")

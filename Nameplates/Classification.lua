@@ -1,7 +1,9 @@
 ---@diagnostic disable: undefined-global
-local addonName, addon = ...
+local _, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
-local wipeTable = addon.WipeTable
+local wipeTable = Nameplates.WipeTable
 local strgsub = string.gsub
 local strlower = string.lower
 
@@ -702,14 +704,14 @@ local function getRelevantUnits()
     return units
 end
 
-function addon:GetRelevantUnits()
+function Nameplates:GetRelevantUnits()
     return getRelevantUnits()
 end
 
-function addon:ClassifyUnit(unitData)
+function Nameplates:ClassifyUnit(unitData)
     return classifyUnit(unitData)
 end
 
-function addon:ResetCaches()
+function Nameplates:ResetCaches()
     resetCaches()
 end

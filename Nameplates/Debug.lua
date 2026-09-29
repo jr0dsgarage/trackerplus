@@ -1,5 +1,7 @@
 ---@diagnostic disable: undefined-global
-local addonName, addon = ...
+local _, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
 local floor = math.floor
 
@@ -287,30 +289,30 @@ local function resolveHighlightReason(info)
 end
 
 local function resolveHighlightColor(info)
-    if info.usesTargetStyle and NextTargetDB.currentTargetColor then
-        return NextTargetDB.currentTargetColor
+    if info.usesTargetStyle and Nameplates.db.currentTargetColor then
+        return Nameplates.db.currentTargetColor
     end
 
     local reason = resolveHighlightReason(info)
-    if reason == "Has Quest Item" and NextTargetDB.questItemColor then
-        return NextTargetDB.questItemColor
+    if reason == "Has Quest Item" and Nameplates.db.questItemColor then
+        return Nameplates.db.questItemColor
     end
-    if reason == "World Quest" and NextTargetDB.worldQuestColor then
-        return NextTargetDB.worldQuestColor
+    if reason == "World Quest" and Nameplates.db.worldQuestColor then
+        return Nameplates.db.worldQuestColor
     end
-    if reason == "Bonus Objective" and NextTargetDB.bonusObjectiveColor then
-        return NextTargetDB.bonusObjectiveColor
+    if reason == "Bonus Objective" and Nameplates.db.bonusObjectiveColor then
+        return Nameplates.db.bonusObjectiveColor
     end
-    if reason == "Quest Objective" and NextTargetDB.questObjectiveColor then
-        return NextTargetDB.questObjectiveColor
+    if reason == "Quest Objective" and Nameplates.db.questObjectiveColor then
+        return Nameplates.db.questObjectiveColor
     end
 
     if info.highlightStyle and info.highlightStyle.color then
         return info.highlightStyle.color
     end
 
-    if NextTargetDB.currentTargetColor then
-        return NextTargetDB.currentTargetColor
+    if Nameplates.db.currentTargetColor then
+        return Nameplates.db.currentTargetColor
     end
 
     return { r = 0, g = 1, b = 0, a = 1 }
@@ -322,11 +324,11 @@ local function buildOnText(info)
 end
 
 local function ensureDebugFrame()
-    if addon.debugFrame then
-        return addon.debugFrame
+    if Nameplates.debugFrame then
+        return Nameplates.debugFrame
     end
 
-    local frame = CreateFrame("Frame", addonName .. "DebugFrame", UIParent, "BackdropTemplate")
+    local frame = CreateFrame("Frame", "TrackerPlusNameplatesDebugFrame", UIParent, "BackdropTemplate")
     frame:SetSize(720, 300)
     frame:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -343,7 +345,7 @@ local function ensureDebugFrame()
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-        NextTargetDB.debugFramePosition = { point, relativeTo and relativeTo:GetName(), relativePoint, xOfs, yOfs }
+        Nameplates.db.debugFramePosition = { point, relativeTo and relativeTo:GetName(), relativePoint, xOfs, yOfs }
     end)
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -355,8 +357,8 @@ local function ensureDebugFrame()
     config:SetPoint("TOPRIGHT", -126, -12)
     config:SetText("Config")
     config:SetScript("OnClick", function()
-        if addon.OpenSettings then
-            addon:OpenSettings()
+        if Nameplates.OpenSettings then
+            Nameplates:OpenSettings()
         end
     end)
 
@@ -369,12 +371,12 @@ local function ensureDebugFrame()
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -6, -6)
     close:SetScript("OnClick", function()
-        NextTargetDB.debugMode = false
-        addon:HideDebugFrame()
+        Nameplates.db.debugMode = false
+        Nameplates:HideDebugFrame()
         print("|cFF00FF00[next]|r debug mode disabled")
     end)
 
-    local scroll = CreateFrame("ScrollFrame", addonName .. "DebugScroll", frame, "UIPanelScrollFrameTemplate")
+    local scroll = CreateFrame("ScrollFrame", "TrackerPlusNameplatesDebugScroll", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -2, -8)
     scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -28, 32)
 
@@ -413,7 +415,7 @@ local function ensureDebugFrame()
     end)
     resizeHandle:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
-        addon:UpdateDebugFrameLayout()
+        Nameplates:UpdateDebugFrameLayout()
     end)
     resizeHandle:SetScript("OnEnter", function()
         handleTexture:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
@@ -434,19 +436,19 @@ local function ensureDebugFrame()
     end
 
     frame:SetScript("OnSizeChanged", function()
-        addon:UpdateDebugFrameLayout()
+        Nameplates:UpdateDebugFrameLayout()
     end)
 
     frame.resizeHandle = resizeHandle
-    addon.debugFrame = frame
+    Nameplates.debugFrame = frame
     return frame
 end
 
-function addon:ShowDebugFrame()
+function Nameplates:ShowDebugFrame()
     local frame = ensureDebugFrame()
     frame:Show()
 
-    local position = NextTargetDB.debugFramePosition
+    local position = Nameplates.db.debugFramePosition
     if position and position[1] then
         frame:ClearAllPoints()
         local relative = position[2] and _G[position[2]] or UIParent
@@ -457,7 +459,7 @@ function addon:ShowDebugFrame()
     end
 end
 
-function addon:HideDebugFrame()
+function Nameplates:HideDebugFrame()
     if self.debugFrame then
         self.debugFrame:Hide()
     end
@@ -479,8 +481,8 @@ local function questLabelFor(info)
     return "n/a"
 end
 
-function addon:UpdateDebugFrame(results)
-    if not NextTargetDB.debugMode then
+function Nameplates:UpdateDebugFrame(results)
+    if not Nameplates.db.debugMode then
         self:HideDebugFrame()
         return
     end
@@ -610,10 +612,10 @@ function addon:UpdateDebugFrame(results)
         editBox:SetCursorPosition(0)
     end
 
-    addon:UpdateDebugFrameLayout()
+    Nameplates:UpdateDebugFrameLayout()
 end
 
-function addon:UpdateDebugFrameLayout()
+function Nameplates:UpdateDebugFrameLayout()
     if not self.debugFrame then
         return
     end

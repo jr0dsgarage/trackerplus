@@ -1,5 +1,7 @@
 ---@diagnostic disable: undefined-global
-local addonName, addon = ...
+local _, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
 -- Current database version - increment when migrations are added
 local DB_VERSION = 2
@@ -99,7 +101,7 @@ local function wipeTable(tbl)
         end
     end
 end
-addon.WipeTable = wipeTable
+Nameplates.WipeTable = wipeTable
 
 local function sanitizeCommand(text)
     if not text then
@@ -107,43 +109,43 @@ local function sanitizeCommand(text)
     end
     return text:match("^%s*(.-)%s*$") or ""
 end
-addon.SanitizeCommand = sanitizeCommand
+Nameplates.SanitizeCommand = sanitizeCommand
 
-function addon:GetDefault(key)
+function Nameplates:GetDefault(key)
     return cloneTable(DEFAULTS[key])
 end
 
-function addon:InitializeDB()
-    NextTargetDB = NextTargetDB or {}
+function Nameplates:InitializeDB()
+    Nameplates.db = Nameplates.db or {}
 
     -- Only run migrations if database version is outdated or missing
-    local currentVersion = NextTargetDB.dbVersion or 0
+    local currentVersion = Nameplates.db.dbVersion or 0
     if currentVersion < DB_VERSION then
         -- Migration: Rename old keys to new keys
         for oldKey, newKey in pairs(MIGRATION_MAP) do
-            if NextTargetDB[oldKey] ~= nil and NextTargetDB[newKey] == nil then
-                NextTargetDB[newKey] = NextTargetDB[oldKey]
+            if Nameplates.db[oldKey] ~= nil and Nameplates.db[newKey] == nil then
+                Nameplates.db[newKey] = Nameplates.db[oldKey]
             end
-            NextTargetDB[oldKey] = nil
+            Nameplates.db[oldKey] = nil
         end
 
         -- Migration: Rename "border" style to "outline"
         for _, styleKey in ipairs(STYLE_KEYS) do
-            if NextTargetDB[styleKey] == "border" then
-                NextTargetDB[styleKey] = "outline"
+            if Nameplates.db[styleKey] == "border" then
+                Nameplates.db[styleKey] = "outline"
             end
         end
 
         -- Migration: Remove deprecated settings
-        NextTargetDB.rareEliteEnabled = nil
-        NextTargetDB.rareEliteColor = nil
-        NextTargetDB.rareEliteThickness = nil
-        NextTargetDB.rareEliteOffset = nil
-        NextTargetDB.onlyInCombat = nil
-        NextTargetDB.currentTargetAlways = nil
+        Nameplates.db.rareEliteEnabled = nil
+        Nameplates.db.rareEliteColor = nil
+        Nameplates.db.rareEliteThickness = nil
+        Nameplates.db.rareEliteOffset = nil
+        Nameplates.db.onlyInCombat = nil
+        Nameplates.db.currentTargetAlways = nil
 
         -- Migration: Fix old orange quest color to new yellow
-        local questColor = NextTargetDB.questObjectiveColor
+        local questColor = Nameplates.db.questObjectiveColor
         if questColor and questColor.r == 1 and questColor.g == 0.5 and questColor.b == 0 then
             questColor.r = DEFAULTS.questObjectiveColor.r
             questColor.g = DEFAULTS.questObjectiveColor.g
@@ -152,9 +154,9 @@ function addon:InitializeDB()
         end
 
         -- Mark database as migrated
-        NextTargetDB.dbVersion = DB_VERSION
+        Nameplates.db.dbVersion = DB_VERSION
     end
 
     -- Always merge in any new defaults (doesn't overwrite existing values)
-    mergeDefaults(NextTargetDB, DEFAULTS)
+    mergeDefaults(Nameplates.db, DEFAULTS)
 end

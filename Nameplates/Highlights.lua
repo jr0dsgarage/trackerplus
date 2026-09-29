@@ -1,7 +1,9 @@
 ---@diagnostic disable: undefined-global
-local addonName, addon = ...
+local _, TrackerPlus = ...
+TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
+local Nameplates = TrackerPlus.Nameplates
 
-local wipeTable = addon.WipeTable
+local wipeTable = Nameplates.WipeTable
 
 -- Blizzard's nameplate health bar ships a `selectedBorder` texture (this atlas) that it shows for the
 -- target and focus via NamePlateHealthBarMixin:UpdateSelectionBorder. We hook that method per bar so
@@ -28,22 +30,22 @@ local LEVEL_BADGE_EDGE_ADJUST = { left = 1, top = 4, right = 1, bottom = 2 }
 local GLOW_SIZE = 16
 
 -- Every health bar we've hooked (bars live in Blizzard's unit frame pool, so this stays small).
-addon.hookedBars = addon.hookedBars or {}
+Nameplates.hookedBars = Nameplates.hookedBars or {}
 -- Nameplate unit token -> health bar currently carrying a quest style, so removal can clear it immediately.
-addon.barsByUnit = addon.barsByUnit or {}
+Nameplates.barsByUnit = Nameplates.barsByUnit or {}
 -- Native border texture -> the color Blizzard last tinted it, captured by hooking SetVertexColor
 -- (reading it back from a restricted region isn't reliable).
-addon.nativeColors = addon.nativeColors or setmetatable({}, { __mode = "k" })
-addon.active = addon.active or false
+Nameplates.nativeColors = Nameplates.nativeColors or setmetatable({}, { __mode = "k" })
+Nameplates.active = Nameplates.active or false
 
 local function captureNativeColor(texture)
-    if not texture or texture.next_colorHooked then
+    if not texture or texture.tpnp_colorHooked then
         return
     end
-    texture.next_colorHooked = true
+    texture.tpnp_colorHooked = true
     hooksecurefunc(texture, "SetVertexColor", function(self, r, g, b)
         if type(r) == "number" then
-            addon.nativeColors[self] = { r = r, g = g, b = b }
+            Nameplates.nativeColors[self] = { r = r, g = g, b = b }
         end
     end)
 end
@@ -156,10 +158,10 @@ end
 
 -- A host can carry several independent sets of parts (the health bar hosts its own and the badge's).
 local function getParts(host, key)
-    local sets = host.next_highlight
+    local sets = host.tpnp_highlight
     if not sets then
         sets = {}
-        host.next_highlight = sets
+        host.tpnp_highlight = sets
     end
     local parts = sets[key]
     if not parts then
@@ -196,9 +198,9 @@ local function renderBlizzard(host, parts, style, r, g, b, a, geo)
 
     -- The redrawn default border passes Blizzard's own atlas; our styles use the plain tintable one.
     local atlas = style.atlas or geo.atlas or BLIZZARD_BORDER_ATLAS
-    if texture.next_atlas ~= atlas then
+    if texture.tpnp_atlas ~= atlas then
         texture:SetAtlas(atlas)
-        texture.next_atlas = atlas
+        texture.tpnp_atlas = atlas
     end
     -- The "Rounded" style strips a pre-colored atlas's baked-in color so the vertex color can tint it.
     texture:SetDesaturated(style.desaturate == true)
@@ -340,21 +342,21 @@ local function renderSurface(host, key, style, geo)
 end
 
 -- Draws `style` on any status bar (live nameplate or the settings preview); nil style hides it.
-function addon:RenderBarHighlight(bar, style)
+function Nameplates:RenderBarHighlight(bar, style)
     renderSurface(bar, "bar", style, barGeometry(bar))
 end
 
 -- Nameplate bar state ---------------------------------------------------------
 
 local function currentTargetStyle()
-    if not NextTargetDB.currentTargetEnabled then
+    if not Nameplates.db.currentTargetEnabled then
         return nil
     end
     return {
-        color = NextTargetDB.currentTargetColor,
-        thickness = NextTargetDB.currentTargetThickness,
-        offset = NextTargetDB.currentTargetOffset,
-        mode = normalizeMode(NextTargetDB.currentTargetStyle or addon:GetDefault("currentTargetStyle")),
+        color = Nameplates.db.currentTargetColor,
+        thickness = Nameplates.db.currentTargetThickness,
+        offset = Nameplates.db.currentTargetOffset,
+        mode = normalizeMode(Nameplates.db.currentTargetStyle or Nameplates:GetDefault("currentTargetStyle")),
         origin = "currentTarget",
     }
 end
@@ -427,7 +429,7 @@ local function nativeCopyStyle(style, native)
     if not atlas then
         return nil
     end
-    local color = addon.nativeColors[native] or { r = 1, g = 1, b = 1 }
+    local color = Nameplates.nativeColors[native] or { r = 1, g = 1, b = 1 }
     return {
         color = { r = color.r, g = color.g, b = color.b, a = 1 },
         atlas = atlas,
@@ -445,26 +447,26 @@ end
 
 -- Returns the style to draw on the health bar (or nil) and whether Blizzard's border should be hidden.
 local function resolveBarStyle(bar)
-    if not addon.active then
+    if not Nameplates.active then
         return nil, false
     end
 
     -- The game draws its own current-target highlight, so ours only overrides quest highlights.
-    if bar.next_questStyle and isBarForUnit(bar, "target") then
+    if bar.tpnp_questStyle and isBarForUnit(bar, "target") then
         local targetStyle = currentTargetStyle()
         if targetStyle then
             return targetStyle, true
         end
     end
-    if bar.next_questStyle then
-        return bar.next_questStyle, true
+    if bar.tpnp_questStyle then
+        return bar.tpnp_questStyle, true
     end
 
     -- Nothing of ours on this bar; optionally hide or redraw Blizzard's default border.
-    if NextTargetDB.hideDefaultBorder then
+    if Nameplates.db.hideDefaultBorder then
         return nil, true
     end
-    if NextTargetDB.fixDefaultBorderOffset and usesNativeBorder(bar) and isSelectedBar(bar) then
+    if Nameplates.db.fixDefaultBorderOffset and usesNativeBorder(bar) and isSelectedBar(bar) then
         return DEFAULT_BORDER_STYLE, true
     end
     return nil, false
@@ -485,7 +487,7 @@ end
 -- offset" redraws it (while the unit is the target/focus). Blizzard only toggles that border's shown
 -- state, so we hide it via alpha instead of fighting its updates.
 local function refreshBadge(bar)
-    local unitFrame = bar.next_unitFrame
+    local unitFrame = bar.tpnp_unitFrame
     local badge = unitFrame and unitFrame.PlayerLevelDiffFrame
     local native = badge and badge.selectedBorder
     if not native then
@@ -493,9 +495,9 @@ local function refreshBadge(bar)
     end
     captureNativeColor(native)
 
-    local hideBadge = addon.active and NextTargetDB.hideLevelBadgeBorder
+    local hideBadge = Nameplates.active and Nameplates.db.hideLevelBadgeBorder
     local badgeStyle
-    if addon.active and not hideBadge and NextTargetDB.fixDefaultBorderOffset and isSelectedBar(bar) then
+    if Nameplates.active and not hideBadge and Nameplates.db.fixDefaultBorderOffset and isSelectedBar(bar) then
         badgeStyle = nativeCopyStyle(DEFAULT_BORDER_STYLE, native)
         if badgeStyle then
             badgeStyle.nativeEdgeAdjust = LEVEL_BADGE_EDGE_ADJUST
@@ -517,15 +519,15 @@ local function refreshBar(bar, fromHook)
             hideNative = false
         end
     end
-    addon:RenderBarHighlight(bar, style)
+    Nameplates:RenderBarHighlight(bar, style)
 
     if hideNative then
         if bar.selectedBorder then
             bar.selectedBorder:Hide()
         end
-        bar.next_hidNativeBorder = true
-    elseif bar.next_hidNativeBorder then
-        bar.next_hidNativeBorder = false
+        bar.tpnp_hidNativeBorder = true
+    elseif bar.tpnp_hidNativeBorder then
+        bar.tpnp_hidNativeBorder = false
         if not fromHook then
             restoreNativeBorder(bar)
         end
@@ -537,10 +539,10 @@ local function onSelectionBorderUpdated(bar)
 end
 
 local function ensureHooked(bar)
-    if addon.hookedBars[bar] then
+    if Nameplates.hookedBars[bar] then
         return
     end
-    addon.hookedBars[bar] = true
+    Nameplates.hookedBars[bar] = true
     captureNativeColor(bar.selectedBorder)
     if type(bar.UpdateSelectionBorder) == "function" then
         hooksecurefunc(bar, "UpdateSelectionBorder", onSelectionBorderUpdated)
@@ -555,7 +557,7 @@ local function syncBars(questStyles, barTokens)
             local bar = resolveHealthBar(plate)
             if bar then
                 -- A bar always belongs to the same pooled unit frame; remember it to reach the level badge.
-                bar.next_unitFrame = bar.next_unitFrame or plate.UnitFrame
+                bar.tpnp_unitFrame = bar.tpnp_unitFrame or plate.UnitFrame
                 ensureHooked(bar)
             end
         end
@@ -564,14 +566,14 @@ local function syncBars(questStyles, barTokens)
         ensureHooked(bar)
     end
 
-    for bar in pairs(addon.hookedBars) do
-        bar.next_questStyle = questStyles[bar]
+    for bar in pairs(Nameplates.hookedBars) do
+        bar.tpnp_questStyle = questStyles[bar]
         refreshBar(bar)
     end
 
-    wipeTable(addon.barsByUnit)
+    wipeTable(Nameplates.barsByUnit)
     for token, bar in pairs(barTokens) do
-        addon.barsByUnit[token] = bar
+        Nameplates.barsByUnit[token] = bar
     end
 end
 
@@ -584,15 +586,15 @@ local function determineStyle(result)
     }
 
     local prefix = configMap[result.reason]
-    if not prefix or not NextTargetDB[prefix .. "Enabled"] then
+    if not prefix or not Nameplates.db[prefix .. "Enabled"] then
         return nil
     end
 
     return {
-        color = NextTargetDB[prefix .. "Color"],
-        thickness = NextTargetDB[prefix .. "Thickness"],
-        offset = NextTargetDB[prefix .. "Offset"],
-        mode = normalizeMode(NextTargetDB[prefix .. "Style"] or addon:GetDefault(prefix .. "Style")),
+        color = Nameplates.db[prefix .. "Color"],
+        thickness = Nameplates.db[prefix .. "Thickness"],
+        offset = Nameplates.db[prefix .. "Offset"],
+        mode = normalizeMode(Nameplates.db[prefix .. "Style"] or Nameplates:GetDefault(prefix .. "Style")),
         origin = prefix,
     }
 end
@@ -616,26 +618,26 @@ local function isCurrentTarget(result)
     return false
 end
 
-function addon:ClearHighlights()
+function Nameplates:ClearHighlights()
     for bar in pairs(self.hookedBars) do
-        bar.next_questStyle = nil
+        bar.tpnp_questStyle = nil
         refreshBar(bar)
     end
     wipeTable(self.barsByUnit)
 end
 
 -- Called on NAME_PLATE_UNIT_REMOVED so a pooled unit frame never carries a stale quest style to its next unit.
-function addon:ReleaseNamePlateUnit(unitToken)
+function Nameplates:ReleaseNamePlateUnit(unitToken)
     local bar = unitToken and self.barsByUnit[unitToken]
     if not bar then
         return
     end
     self.barsByUnit[unitToken] = nil
-    bar.next_questStyle = nil
+    bar.tpnp_questStyle = nil
     refreshBar(bar)
 end
 
-function addon:CollectHighlights()
+function Nameplates:CollectHighlights()
     local relevantUnits = self:GetRelevantUnits()
     local results = {}
     local questStyles = {}
@@ -650,7 +652,7 @@ function addon:CollectHighlights()
             results[#results + 1] = classification
 
             local style = determineStyle(classification)
-            classification.usesTargetStyle = classification.isCurrentTarget and NextTargetDB.currentTargetEnabled
+            classification.usesTargetStyle = classification.isCurrentTarget and Nameplates.db.currentTargetEnabled
                 and style ~= nil
             if style then
                 classification.highlighted = true
