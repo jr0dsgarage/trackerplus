@@ -12,6 +12,32 @@ local secureButtons = {}
 local activeButtons = 0
 local activeSecureButtons = 0
 
+-- Opens the game's color picker on `color` ({r, g, b, a}), editing it in place. onChange runs after
+-- every change, including Cancel, which puts back the values the picker opened with.
+function addon:OpenColorPicker(color, onChange)
+    local original = { r = color.r, g = color.g, b = color.b, a = color.a }
+
+    local function apply()
+        color.r, color.g, color.b = ColorPickerFrame:GetColorRGB()
+        color.a = ColorPickerFrame:GetColorAlpha()
+        onChange()
+    end
+
+    ColorPickerFrame:SetupColorPickerAndShow({
+        r = color.r or 1,
+        g = color.g or 1,
+        b = color.b or 1,
+        opacity = color.a or 1,
+        hasOpacity = true,
+        swatchFunc = apply,
+        opacityFunc = apply,
+        cancelFunc = function()
+            color.r, color.g, color.b, color.a = original.r, original.g, original.b, original.a
+            onChange()
+        end,
+    })
+end
+
 -- Helper to create or update border lines
 function addon:CreateBorderLines(bar, size)
     size = tonumber(size) or 1

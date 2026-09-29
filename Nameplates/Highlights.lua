@@ -3,7 +3,6 @@ local _, TrackerPlus = ...
 TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
 local Nameplates = TrackerPlus.Nameplates
 
-local wipeTable = Nameplates.WipeTable
 
 -- Blizzard's nameplate health bar ships a `selectedBorder` texture (this atlas) that it shows for the
 -- target and focus via NamePlateHealthBarMixin:UpdateSelectionBorder. We hook that method per bar so
@@ -51,10 +50,7 @@ local function captureNativeColor(texture)
 end
 
 local function normalizeMode(mode)
-    if mode == "border" or not mode then
-        return "outline"
-    end
-    return mode
+    return mode or "outline"
 end
 
 local function resolveHealthBar(plate)
@@ -64,16 +60,6 @@ local function resolveHealthBar(plate)
     end
     local container = unitFrame.HealthBarsContainer
     return (container and container.healthBar) or unitFrame.healthBar
-end
-
-local function acquireNameplate(unitData)
-    if unitData.frame then
-        return unitData.frame
-    end
-    if C_NamePlate and C_NamePlate.GetNamePlateForUnit then
-        return C_NamePlate.GetNamePlateForUnit(unitData.unit)
-    end
-    return nil
 end
 
 local function isBarForUnit(bar, unitToken)
@@ -356,7 +342,7 @@ local function currentTargetStyle()
         color = Nameplates.db.currentTargetColor,
         thickness = Nameplates.db.currentTargetThickness,
         offset = Nameplates.db.currentTargetOffset,
-        mode = normalizeMode(Nameplates.db.currentTargetStyle or Nameplates:GetDefault("currentTargetStyle")),
+        mode = normalizeMode(Nameplates.db.currentTargetStyle),
         origin = "currentTarget",
     }
 end
@@ -571,7 +557,7 @@ local function syncBars(questStyles, barTokens)
         refreshBar(bar)
     end
 
-    wipeTable(Nameplates.barsByUnit)
+    wipe(Nameplates.barsByUnit)
     for token, bar in pairs(barTokens) do
         Nameplates.barsByUnit[token] = bar
     end
@@ -594,28 +580,14 @@ local function determineStyle(result)
         color = Nameplates.db[prefix .. "Color"],
         thickness = Nameplates.db[prefix .. "Thickness"],
         offset = Nameplates.db[prefix .. "Offset"],
-        mode = normalizeMode(Nameplates.db[prefix .. "Style"] or Nameplates:GetDefault(prefix .. "Style")),
+        mode = normalizeMode(Nameplates.db[prefix .. "Style"]),
         origin = prefix,
     }
 end
 
 local function isCurrentTarget(result)
-    if not result or not result.unit then
-        return false
-    end
-
-    if result.unit == "target" then
-        return true
-    end
-
-    if C_NamePlate and C_NamePlate.GetNamePlateForUnit then
-        local targetPlate = C_NamePlate.GetNamePlateForUnit("target")
-        if targetPlate and result.frame and targetPlate == result.frame then
-            return true
-        end
-    end
-
-    return false
+    local targetPlate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("target")
+    return targetPlate ~= nil and targetPlate == result.frame
 end
 
 function Nameplates:ClearHighlights()
@@ -623,7 +595,7 @@ function Nameplates:ClearHighlights()
         bar.tpnp_questStyle = nil
         refreshBar(bar)
     end
-    wipeTable(self.barsByUnit)
+    wipe(self.barsByUnit)
 end
 
 -- Called on NAME_PLATE_UNIT_REMOVED so a pooled unit frame never carries a stale quest style to its next unit.
@@ -646,36 +618,26 @@ function Nameplates:CollectHighlights()
     for _, unitData in ipairs(relevantUnits) do
         local classification = self:ClassifyUnit(unitData)
         if classification then
-            classification.frame = classification.frame or unitData.frame
-            classification.highlighted = false
+            -- The classification is cached across passes, so every per-pass field is reassigned here.
+            local style = determineStyle(classification)
+            classification.highlighted = style ~= nil
+            classification.highlightStyle = style
+            classification.suppressedReason = not style and classification.reason or nil
             classification.isCurrentTarget = isCurrentTarget(classification)
+            classification.usesTargetStyle = style ~= nil and classification.isCurrentTarget
+                and Nameplates.db.currentTargetEnabled
             results[#results + 1] = classification
 
-            local style = determineStyle(classification)
-            classification.usesTargetStyle = classification.isCurrentTarget and Nameplates.db.currentTargetEnabled
-                and style ~= nil
             if style then
-                classification.highlighted = true
-                if classification.note == "Disabled in settings" then
-                    classification.note = nil
-                end
-                classification.highlightStyle = style
-                local plate = acquireNameplate(classification)
+                local plate = classification.frame
                 local bar = resolveHealthBar(plate)
                 if bar then
                     questStyles[bar] = style
-                    local token = plate and plate.namePlateUnitToken
+                    local token = plate.namePlateUnitToken
                     if token then
                         barTokens[token] = bar
                     end
                 end
-            elseif classification.reason then
-                if not classification.note then
-                    classification.note = "Disabled in settings"
-                end
-                classification.suppressedReason = classification.reason
-            elseif classification.usesTargetStyle and not classification.note then
-                classification.note = "Current target (target style only)"
             end
         end
     end

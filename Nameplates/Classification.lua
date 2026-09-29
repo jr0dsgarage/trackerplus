@@ -3,7 +3,6 @@ local _, TrackerPlus = ...
 TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
 local Nameplates = TrackerPlus.Nameplates
 
-local wipeTable = Nameplates.WipeTable
 local strgsub = string.gsub
 local strlower = string.lower
 
@@ -128,49 +127,27 @@ local UNIT_CACHE_PENDING_OBJECTIVE_SECONDS = 0.1
 
 local questCache = { timestamp = 0, entries = {} }
 local unitCache = {}
-local tooltipTextCache = {}
 
 local function resetCaches()
     questCache.timestamp = 0
-    if wipeTable then
-        wipeTable(questCache.entries)
-        wipeTable(tooltipTextCache)
-    else
-        questCache.entries = {}
-        tooltipTextCache = {}
-    end
-    unitCache = {}
+    wipe(questCache.entries)
+    wipe(unitCache)
 end
 
-
-
-
-
-
-
-local function getCachedTooltipText(text)
-    if type(text) ~= "string" then
-        return nil
-    end
-
+-- Tooltip line without color codes and with whitespace collapsed; nil if it can't be read.
+local function sanitizeTooltipText(text)
     local sanitized = stripColorCodes(text)
     if sanitized then
         sanitized = safeGsub(sanitized, "%s+", " ")
         sanitized = trim(sanitized)
     end
-
-    if sanitized then
-        return sanitized
-    end
-
-    return nil
+    return sanitized
 end
 
 local function parseTooltip(unit)
     local info = {
         hasQuestObjective = false,
         hasCompletedObjective = false,
-        hasEnemyForcesLine = false,
         lines = {},
         normalizedLines = nil,
     }
@@ -181,15 +158,13 @@ local function parseTooltip(unit)
             for _, line in ipairs(data.lines) do
                 local text = line.leftText
                 if type(text) == "string" then
-                    local sanitized = getCachedTooltipText(text)
+                    local sanitized = sanitizeTooltipText(text)
                     if sanitized then
                         info.lines[#info.lines + 1] = sanitized
 
                         local lower = safeLower(sanitized)
+                        -- Dungeon "Enemy Forces" progress isn't a quest objective.
                         local isEnemyForcesLine = safeContains(lower, "enemy forces")
-                        if isEnemyForcesLine then
-                            info.hasEnemyForcesLine = true
-                        end
 
                         local current, total = safeMatch(sanitized, "(%d+)%s*/%s*(%d+)")
                         if current and total and not isEnemyForcesLine then
@@ -493,9 +468,6 @@ local function matchQuestFromTooltip(unit, tooltipInfo, questEntries)
     end
 
     local normalizedTooltipLines = tooltipInfo.normalizedLines
-    if not normalizedTooltipLines and tooltipInfo.lines then
-        normalizedTooltipLines = normalizeLines(tooltipInfo.lines)
-    end
 
     if normalizedTooltipLines then
         for _, entry in ipairs(questEntries) do
@@ -563,16 +535,11 @@ local function classifyUnit(unitData)
     end
     local hasSoftTarget = hasQuestItemIcon(unit)
     local isQuestBoss = UnitIsQuestBoss and UnitIsQuestBoss(unit)
-    local isBossUnit = UnitIsBossMob and UnitIsBossMob(unit)
-    local unitNameNormalized = normalizeText(unitName)
 
     local classification = UnitClassification and UnitClassification(unit)
     local isRare = classification == "rare" or classification == "rareelite" or classification == "elite"
 
     local reason
-    local isMythicBoss = false
-    local isMythicEnemyForces = false
-    local mythicBossName
     if hasSoftTarget or hasQuestItem then
         reason = "Has Quest Item"
     elseif tooltipInfo.hasQuestObjective then
@@ -582,42 +549,6 @@ local function classifyUnit(unitData)
             reason = "World Quest"
         else
             reason = "Quest Objective"
-        end
-    end
-
-    if not reason and inChallengeMode then
-        local isNpc = not UnitIsPlayer(unit)
-        local matchedBoss
-        if isNpc and mythicStatus and mythicStatus.bosses and unitNameNormalized then
-            for _, boss in ipairs(mythicStatus.bosses) do
-                if boss and not boss.completed and boss.normalized then
-                    if safeContains(boss.normalized, unitNameNormalized) or safeContains(unitNameNormalized, boss.normalized) then
-                        matchedBoss = boss
-                        break
-                    end
-                end
-            end
-        end
-
-        if not matchedBoss and isNpc and isBossUnit then
-            matchedBoss = { description = unitName, normalized = unitNameNormalized, completed = false }
-        end
-
-        if matchedBoss then
-            reason = "Mythic Objective"
-            isMythicBoss = true
-            mythicBossName = matchedBoss.description or unitName
-        else
-            local reactionToPlayer = UnitReaction and UnitReaction(unit, "player")
-            local hostile = not reactionToPlayer or reactionToPlayer <= 4
-            local enemyForcesAvailable = mythicStatus and mythicStatus.hasEnemyForces and not mythicStatus.enemyForcesComplete
-            if not enemyForcesAvailable and tooltipInfo.hasEnemyForcesLine then
-                enemyForcesAvailable = not tooltipInfo.hasCompletedObjective
-            end
-            if isNpc and hostile and enemyForcesAvailable then
-                reason = "Mythic Objective"
-                isMythicEnemyForces = true
-            end
         end
     end
 
@@ -688,12 +619,8 @@ local function addUnit(target, unitToken, frame)
 end
 
 local function getRelevantUnits()
+    -- Only units with a nameplate: without one there is no health bar to highlight.
     local units = {}
-
-    addUnit(units, "target")
-    addUnit(units, "focus")
-    addUnit(units, "mouseover")
-
     if C_NamePlate and C_NamePlate.GetNamePlates then
         for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
             local token = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.displayedUnit)

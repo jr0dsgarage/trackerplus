@@ -26,6 +26,8 @@ RenderWorldQuests.lua     – World quests section (manual render only; does not
 RenderHeaders.lua         – Normal trackable list (major/minor headers + quest items)
 TrackerRenderer.lua       – Orchestrator: categorises trackables, delegates to sections
 TrackerFrame.lua          – Main UI window, scrolling, drag/resize, layout anchors
+Nameplates/Classification.lua – Quest log + nameplate tooltip analysis, caching
+Nameplates/Highlights.lua – Highlight rendering on nameplate health bars
 Settings.lua              – Configuration UI (custom scrollable options panel)
 ```
 
@@ -179,6 +181,21 @@ Two sections of TrackerPlus "borrow" Blizzard's native tracker frames — the sc
 - [TrackerRenderer.lua](../TrackerRenderer.lua): Render orchestrator.
 - [TrackerFrame.lua](../TrackerFrame.lua): UI window, scrolling, layout.
 - [TrackerUtils.lua](../TrackerUtils.lua): Button pooling, sorting, grouping.
+
+## Nameplates Module
+Highlights enemy nameplates that are quest targets. Everything lives on `addon.Nameplates` (`TrackerPlus.Nameplates`). Its settings, debug window, events/commands and settings subpage are the `-- Nameplates:` `do ... end` blocks at the end of `Database.lua`, `DebugFrame.lua`, `Core.lua` and `Settings.lua`; classification and rendering are in `Nameplates/`. It has its own event frame and settings table `Nameplates.db` (`TrackerPlusDB.nameplates`, imported once from the old standalone addon's `NextTargetDB`). Reuse TrackerPlus helpers (`addon.Print`, `addon.DeepCopy`, `addon:OpenColorPicker`, `addon:AcquireTooltip`, `addon.OpenSettings(pageID)`) rather than adding local copies.
+
+**Update pipeline:** WoW event → `Nameplates:RequestUpdate()` (0.05s debounce) → `UpdateHighlight()` → `CollectHighlights()` classifies each visible nameplate (`Classification.lua`) → `syncBars` applies styles (`Highlights.lua`). Quest-data events also call `ResetCaches()`. Highlights are off inside instances.
+
+**Classification:** there is no API for "this mob is a quest objective", so `Classification.lua` reads the unit's tooltip (`C_TooltipInfo.GetUnit`) for `x/y` and `%` progress lines, matches quests via `C_QuestLog.UnitIsRelatedToQuest` then tooltip quest names, and treats a shown `SoftTargetFrame.Icon` as a quest item. String operations go through `safe*` pcall wrappers because tooltip text can be a secret value on 12.x. Classification results are cached per plate; `CollectHighlights` must reassign every per-pass field it writes onto them.
+
+**Health bar resolution (12.x):** `plate.UnitFrame.HealthBarsContainer.healthBar` (alias `plate.UnitFrame.healthBar`). Two field reads, so it isn't cached; unit frames are pooled and move between plates, so never cache a bar on the plate.
+
+**Replacing Blizzard's selected border:** the health bar owns `selectedBorder` (atlas `UI-HUD-Nameplates-Selected`), toggled by Blizzard's `UpdateSelectionBorder()` on target/focus change. Each bar gets `hooksecurefunc(bar, "UpdateSelectionBorder", ...)` so we react right after Blizzard, with no flash. When we style a bar we hide `selectedBorder`; when we stop, we re-show it based on target/focus. We only ever hide Blizzard's texture, never recolor it, and never call `UpdateSelectionBorder()` from addon code (it would run Blizzard's unit checks tainted). The current-target style only applies to a targeted plate that also has a quest style; the game draws its own target highlight otherwise.
+
+**Styles** (`*Style` per highlight type: currentTarget, questObjective, questItem, worldQuest, bonusObjective, each with `*Enabled`, `*Color`, `*Thickness` (outline only), `*Offset`): `blizzard` (our copy of the selected-border atlas anchored to Blizzard's), `outline` (`NamePlateFullBorderTemplate`, with a local fallback mixin), `glow` (`ButtonGreenGlow-NineSlice-*`, additive), `rounded` (the CooldownManager selected atlas, desaturated if no neutral variant exists). `Nameplates:RenderBarHighlight(bar, style)` draws on any status bar (live plates and the settings preview); nil hides.
+
+**Per-bar parts:** each bar lazily creates its parts once (`bar.tpnp_highlight`) and shows/hides them per update; no global pool. `Nameplates.hookedBars` tracks hooked bars; `Nameplates.barsByUnit` maps plate tokens to quest-styled bars so `NAME_PLATE_UNIT_REMOVED` clears a style before the unit frame is reused.
 
 ## Regression Guardrails (Do Not Reintroduce)
 

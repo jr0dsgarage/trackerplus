@@ -27,10 +27,6 @@ RenderHeaders.lua
 RenderQuestTimers.lua
 TrackerRenderer.lua
 TrackerFrame.lua
-Nameplates/Database.lua
 Nameplates/Classification.lua
 Nameplates/Highlights.lua
-Nameplates/Debug.lua
-Nameplates/Core.lua
-Nameplates/Settings.lua
 Settings.lua
