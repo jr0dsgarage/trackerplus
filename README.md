@@ -10,21 +10,21 @@ On first load it sits exactly where the game's own tracker is, at the same size,
 
 Each kind of content gets its own section, top to bottom:
 
-| Section | What's in it |
-| --- | --- |
-| **Quest popups** | Auto-accept and auto-complete quest popups. Click one to accept or turn in. |
-| **Scenario** | The current scenario, delve or dungeon objectives. |
-| **Quest Timers** | Countdowns for timed quests. |
-| **Active Quest** | The quest you're focused on (super-tracked). |
-| **Follow the Arrow** | The current step of a [FollowTheArrow](#optional-addons) guide. Off by default. |
-| **Campaign** | Campaign quests. |
-| **Bonus Objectives** | Area bonus objectives you're working on. |
-| **World Quests** | Tracked and in-progress world quests. |
-| **Quests** | All other tracked quests, grouped under zone headers. |
-| **Achievements** | Tracked achievements and their criteria. |
-| **Professions** | Tracked recipes and their reagents. |
-| **Monthly Activities** | Tracked Trading Post / Traveler's Log activities. |
-| **Endeavors** | Tracked housing endeavors. |
+| Section | Version(s) | What's in it |
+| --- | --- | --- |
+| **Quest popups** | Retail | Auto-accept and auto-complete quest popups. Click one to accept or turn in. |
+| **Scenario** | Retail | The current scenario, delve or dungeon objectives. |
+| **Quest Timers** | Retail, Forever | Countdowns for timed quests. |
+| **Active Quest** | Retail, Forever | The quest you're focused on (super-tracked). |
+| **Follow the Arrow** | Retail | The current step of a [FollowTheArrow](#optional-addons) guide. Off by default. |
+| **Campaign** | Retail | Campaign quests. |
+| **Bonus Objectives** | Retail | Area bonus objectives you're working on. |
+| **World Quests** | Retail | Tracked and in-progress world quests. |
+| **Quests** | Retail, Forever | All other tracked quests, grouped under zone headers. |
+| **Achievements** | Retail | Tracked achievements and their criteria. |
+| **Professions** | Retail | Tracked recipes and their reagents. |
+| **Monthly Activities** | Retail | Tracked Trading Post / Traveler's Log activities. |
+| **Endeavors** | Retail | Tracked housing endeavors. |
 
 Each type can be turned off under **Settings → Tracking**. Headers collapse and expand with a click. Shift-click a section header to collapse all of its zone groups at once.
 
