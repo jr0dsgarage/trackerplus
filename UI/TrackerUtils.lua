@@ -391,6 +391,136 @@ function addon:LinkQuestToChat(questID)
     if openChat then openChat(link) end
 end
 
+-- Open the world map on a quest's zone. Super-tracking is left to the quest's POI
+-- button, so a plain click never changes which quest is focused.
+--
+-- Deliberately does not open the quest's details pane. Any map work done from addon
+-- code taints it, and the map's quest pins then hit a blocked SetPassThroughButtons
+-- call when Blizzard refreshes them:
+--   * ToggleWorldMap() acquires pins under our taint, and Blizzard reuses them later
+--     even on a plain M-key open.
+--   * QuestMapFrame_ShowQuestDetails() stores the quest in DetailsFrame.questID, which
+--     every quest-pin refresh reads (QuestMapFrame_GetFocusedQuestID), so even a
+--     secure QUEST_LOG_UPDATE refresh turns tainted while that pane is up.
+-- C_Map.OpenWorldMap fires WORLD_MAP_OPEN for Blizzard's own handler to answer, so
+-- the map opens without running any map code as us.
+--
+-- In place of the details pane, the clicked quest is scrolled into view in the map's
+-- quest list and given a glow (see the quest list focus section below). Both stay
+-- clear of anything the pins read.
+function addon:OpenMapToQuest(questID)
+    if not questID then return end
+
+    self:SetQuestLogFocus(questID)
+
+    if WorldMapFrame and WorldMapFrame:IsShown() then
+        -- The list is already built, so no rebuild is coming to apply the focus.
+        self:ApplyQuestLogFocus()
+        return
+    end
+
+    if C_Map and C_Map.OpenWorldMap then
+        local mapID = GetQuestUiMapID and GetQuestUiMapID(questID)
+        C_Map.OpenWorldMap(mapID and mapID > 0 and mapID or nil)
+    else
+        -- No taint-free route on this client; opening the map is still worth it.
+        ToggleWorldMap()
+    end
+
+    -- The list's rows can be laid out without final screen positions until the next
+    -- frame, which would leave the first scroll attempt short.
+    C_Timer.After(0, function() addon:ApplyQuestLogFocus() end)
+end
+
+-------------------------------------------------------------------------------
+-- Quest list focus: the quest last clicked in the tracker, highlighted in the map's
+-- quest list until the map closes.
+--
+-- Blizzard rebuilds the list from its row pools on every QuestLogQuests_Update, so
+-- the glow is re-applied from a post-hook each time. Only our own textures are added
+-- to the rows, kept in a weak table rather than as fields on Blizzard's pooled
+-- buttons, and scrolling goes through ScrollToQuest, which only reads row positions
+-- and moves the scroll frame. Nothing that the map's pin refresh reads is written.
+-------------------------------------------------------------------------------
+local QUEST_LOG_FOCUS_ATLAS = "questlog-quest-glow-yellow"
+local QUEST_LOG_FOCUS_ALPHA = 0.6
+
+local focusGlows = setmetatable({}, { __mode = "k" })
+local questLogFocusID = nil
+-- Scrolling happens once per click, not on every rebuild, or each quest update would
+-- yank the list back while the player scrolls it.
+local questLogFocusScrollPending = false
+
+local function FindQuestLogTitle(questID)
+    local pool = QuestScrollFrame and QuestScrollFrame.titleFramePool
+    if not (questID and pool) then return nil end
+    for titleFrame in pool:EnumerateActive() do
+        if titleFrame.questID == questID then
+            return titleFrame
+        end
+    end
+end
+
+function addon:SetQuestLogFocus(questID)
+    questLogFocusID = questID
+    questLogFocusScrollPending = questID ~= nil
+
+    -- The list leaves out quests under collapsed headers, so open the quest's header.
+    -- ExpandQuestHeader is C-side; the resulting QUEST_LOG_UPDATE rebuilds the list
+    -- securely and the hook below then finishes the scroll.
+    if questID and ExpandQuestHeader and C_QuestLog and C_QuestLog.GetHeaderIndexForQuest then
+        local headerIndex = C_QuestLog.GetHeaderIndexForQuest(questID)
+        local info = headerIndex and C_QuestLog.GetInfo(headerIndex)
+        if info and info.isCollapsed then
+            ExpandQuestHeader(headerIndex)
+        end
+    end
+end
+
+function addon:ApplyQuestLogFocus()
+    for _, glow in pairs(focusGlows) do
+        glow:Hide()
+    end
+
+    local titleFrame = FindQuestLogTitle(questLogFocusID)
+    if not titleFrame then return end
+
+    local glow = focusGlows[titleFrame]
+    if not glow then
+        glow = titleFrame:CreateTexture(nil, "BACKGROUND")
+        glow:SetAtlas(QUEST_LOG_FOCUS_ATLAS)
+        glow:SetAllPoints(titleFrame)
+        glow:SetAlpha(QUEST_LOG_FOCUS_ALPHA)
+        focusGlows[titleFrame] = glow
+    end
+    glow:Show()
+
+    -- ScrollToQuest compares screen positions, which a freshly laid-out row may not
+    -- have yet; the pending flag then carries the scroll to the next attempt.
+    if questLogFocusScrollPending and QuestScrollFrame.ScrollToQuest
+        and titleFrame:GetTop() and QuestScrollFrame:GetTop() then
+        questLogFocusScrollPending = false
+        QuestScrollFrame:ScrollToQuest(questLogFocusID)
+    end
+end
+
+function addon:InitQuestLogFocus()
+    if self._questLogFocusHooked then return end
+    if not (QuestLogQuests_Update and WorldMapFrame) then return end
+    self._questLogFocusHooked = true
+
+    hooksecurefunc("QuestLogQuests_Update", function()
+        if questLogFocusID then
+            addon:ApplyQuestLogFocus()
+        end
+    end)
+
+    WorldMapFrame:HookScript("OnHide", function()
+        addon:SetQuestLogFocus(nil)
+        addon:ApplyQuestLogFocus()
+    end)
+end
+
 -- Handle trackable click
 function addon:OnTrackableClick(trackable, mouseButton)
     if not trackable then return end
@@ -439,14 +569,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     if QuestMapFrame and QuestMapFrame.GetDetailQuestID and QuestMapFrame:GetDetailQuestID() == questID and QuestMapFrame:IsVisible() then
                         -- Already shown, do nothing or toggle? Standard behavior is just show.
                     else
-                        -- Ensure map is open
-                        if not WorldMapFrame or not WorldMapFrame:IsShown() then
-                             ToggleWorldMap()
-                        end
-                        -- Select quest
-                        if QuestMapFrame then
-                             QuestMapFrame_ShowQuestDetails(questID)
-                        end
+                        self:OpenMapToQuest(questID)
                     end
                 end
             elseif trackable.type == "achievement" then
@@ -513,8 +636,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 
                 -- Open Quest Log (Show in Map)
                 rootDescription:CreateButton("Show in Quest Log", function()
-                     if not WorldMapFrame or not WorldMapFrame:IsShown() then ToggleWorldMap() end
-                     QuestMapFrame_ShowQuestDetails(questID)
+                    addon:OpenMapToQuest(questID)
                 end)
                 
                 -- Share

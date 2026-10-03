@@ -312,6 +312,7 @@ mapEvents:SetScript("OnEvent", function(self, event, arg1)
         elseif arg1 == "Blizzard_WorldMap" then
             self:UnregisterEvent("ADDON_LOADED")
             addon:InitMapPOIColors()
+            if addon.InitQuestLogFocus then addon:InitQuestLogFocus() end
         end
     elseif event == "PLAYER_LEVEL_UP" then
         -- Every pin's difficulty color shifts when the player's level does. Deferred

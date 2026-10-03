@@ -6,6 +6,7 @@ local ipairs, tonumber = ipairs, tonumber
 local format = string.format
 local floor, max, abs = math.floor, math.max, math.abs
 local GetTime = GetTime
+local InCombatLockdown = InCombatLockdown
 
 -------------------------------------------------------------------------------
 -- Quest Timer section — "Quest Timer: MM:SS" rows pinned above the quest list
@@ -124,6 +125,12 @@ function addon:RefreshQuestTimers()
     local timerFrame = self.questTimerFrame
     if not timerFrame then return end
 
+    -- Resizing this section re-flows the scroll area, whose content holds the secure
+    -- quest item buttons, so in combat every geometry call below is blocked. Rows
+    -- already showing keep counting down via OnUpdate; the rest waits for
+    -- PLAYER_REGEN_ENABLED.
+    if InCombatLockdown() then return end
+
     local db = self.db
     local now = GetTime()
     local count = CollectTimers(scratch)
@@ -221,6 +228,7 @@ function addon:InitQuestTimerSection()
     events:RegisterEvent("QUEST_LOG_UPDATE")
     events:RegisterEvent("QUEST_ACCEPTED")
     events:RegisterEvent("QUEST_REMOVED")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
     events:SetScript("OnEvent", function()
         addon:RefreshQuestTimers()
     end)

@@ -465,7 +465,9 @@ end
 -- cannot disagree; the inset arithmetic is only a fallback for the first pass, before
 -- the scroll frame's own anchors have resolved.
 function addon:UpdateContentWidth()
-    if not contentFrame then return end
+    -- The content frame parents the secure quest item buttons, so resizing it is
+    -- blocked in combat. Every render path re-runs this once combat ends.
+    if not contentFrame or InCombatLockdown() then return end
 
     local width = scrollFrame and scrollFrame:GetWidth() or 0
     if width <= 1 then
