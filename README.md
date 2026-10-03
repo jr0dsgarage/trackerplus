@@ -1,181 +1,127 @@
 # TrackerPlus
 
-**Advanced Quest & Objective Tracker Replacement for World of Warcraft**
+A replacement for World of Warcraft's objective tracker, with difficulty-colored quests, world map pin coloring, a "you're standing in this quest's area" marker, and quest target highlights on enemy nameplates.
 
-TrackerPlus is a comprehensive replacement for WoW's built-in quest tracker, offering advanced categorization, customization, and a clean, modern interface.
+On first load it sits exactly where the game's own tracker is, at the same size, and follows any changes you make to that tracker in Edit Mode. Move or resize TrackerPlus yourself and it stays where you put it.
 
-## Features
+## The tracker
 
-### 🎯 Core Functionality
-- **Complete Quest Tracker Replacement** - Fully replaces the default Blizzard tracker
-- **Smart Categorization** - Automatically groups quests by zone and category
-- **Multiple Trackable Types**:
-  - Regular Quests (Campaign, Side quests, etc.)
-  - World Quests
-  - Tracked Achievements with criteria progress
-  - Bonus Objectives
-  - Scenario/Dungeon Objectives
-  - Profession Quest Tracking
+### Sections
 
-### 🎨 Customization
-- **Color Picker Integration** - Customize every color:
-  - Background color with alpha transparency
-  - Border color (optional border display)
-  - Header text color
-  - Quest text color
-  - Objective text color
-  - Completed objective color (green by default)
-  - Failed quest color (red by default)
-  
-- **Font Customization**:
-  - Adjustable font size (8-24pt)
-  - Header font size (10-28pt)
-  - Multiple font face options
-  - Outline options (None, Outline, Thick, Monochrome)
+Each kind of content gets its own section, top to bottom:
 
-- **Frame Customization**:
-  - Adjustable width (150-500px)
-  - Adjustable height (200-800px)
-  - Frame scale (0.5x - 2.0x)
-  - Optional border with customizable size
-  - Movable and lockable position
-  - No visible scrollbar (uses mouse wheel)
+| Section | What's in it |
+| --- | --- |
+| **Quest popups** | Auto-accept and auto-complete quest popups. Click one to accept or turn in. |
+| **Scenario** | The current scenario, delve or dungeon objectives. |
+| **Quest Timers** | Countdowns for timed quests. |
+| **Active Quest** | The quest you're focused on (super-tracked). |
+| **Follow the Arrow** | The current step of a [FollowTheArrow](#optional-addons) guide. Off by default. |
+| **Campaign** | Campaign quests. |
+| **Bonus Objectives** | Area bonus objectives you're working on. |
+| **World Quests** | Tracked and in-progress world quests. |
+| **Quests** | All other tracked quests, grouped under zone headers. |
+| **Achievements** | Tracked achievements and their criteria. |
+| **Professions** | Tracked recipes and their reagents. |
+| **Monthly Activities** | Tracked Trading Post / Traveler's Log activities. |
+| **Endeavors** | Tracked housing endeavors. |
 
-### 📊 Display Options
-- **Quest Information**:
-  - Show/hide quest levels
-  - Show/hide quest type badges (Elite, Dungeon, Raid, etc.)
-  - Distance to objective in yards
-  - Objective progress (X/Y format)
-  - Completed objectives highlighted in green
+Each type can be turned off under **Settings → Tracking**. Headers collapse and expand with a click. Shift-click a section header to collapse all of its zone groups at once.
 
-- **Organization**:
-  - Group by zone
-  - Group by category
-  - Multiple sort methods:
-    - Distance (closest first)
-    - Level (highest first)
-    - Name (alphabetical)
-    - Manual (track order)
+### Quest colors
 
-### 🎮 Interaction
-- **Left-Click Quest** - Opens quest details/map location
-- **Right-Click Quest** - Untrack quest (configurable)
-- **Mouse Wheel** - Scroll through tracked quests
-- **Drag Frame** - Move tracker when unlocked
-- **Hover Tooltips** - Full quest/achievement details
+- **By difficulty.** Quest names are colored gray, green, yellow, orange or red the same way the quest log colors them. The game decides how hard the quest is for you, so scaling quests are colored correctly. Turn this off to use one flat quest color instead.
+- **Focused quest.** The quest you're focused on is always shown in gold.
+- **Standing in the quest area.** While you're inside the shaded area the map draws for a quest, that quest's row is marked. Choose a style (stripe on the left or right, bracket, outline, background tint, or a gradient fade from the left or right) and a color.
 
-### ⚙️ Advanced Features
-- **Smart Visibility**:
-  - Hide in dungeons/raids (optional)
-  - Hide during combat (optional)
-  - Auto-fade when empty (optional)
-  - Manual enable/disable toggle
+### World map pins
 
-- **Performance Optimized**:
-  - Debounced updates (0.1s default)
-  - Efficient quest data caching
-  - Smart event handling
-  - Minimal memory footprint
+The game's own quest pins on the world map get a ring in the same color as that quest's name in the tracker, so the map and the tracker always agree. You can pick a soft glow or a solid circle, and set its thickness and how opaque the glow is.
 
-- **Quest Type Coloring**:
-  - Normal quests - Gold
-  - Elite quests - Orange
-  - Dungeon quests - Blue
-  - Raid quests - Purple
-  - PvP quests - Red
-  - World quests - Cyan
-  - Profession quests - Green
+### Clicking
 
-### 🎯 Nameplate Highlights
-Highlights the nameplates of enemies you need for your active quests, using the in-game tooltip to decide what counts and the quest log to pick the color:
-- **Quest Objectives** - standard kill/collect quests
-- **Quest Items** - mobs that drop quest items, even when they aren't a kill objective
-- **World Quests** and **Bonus Objectives** - targets for active world quests and area bonus objectives
-- **Current Target** - when your target is a quest objective, draws the Current Target style instead of the quest highlight; other targets keep the game's own target highlight
-- **Styles** - Blizzard (the game's own selection texture), Outline, Glow, or Rounded, each with its own color, thickness, and offset
-- Configure under **TrackerPlus → Nameplates** in the Settings panel (with a live preview plate), or `/tp nameplates`
+| On a… | Click | Shift-click | Right-click |
+| --- | --- | --- | --- |
+| Quest | Open the map to it | Link it in chat | Menu: Focus, Stop Tracking, Show in Quest Log, Share (in a group), Link to Chat, Abandon |
+| World quest / bonus objective | — | Link it in chat | — |
+| Achievement | Open it in the Achievements window | Stop tracking | — |
+| Recipe | Open it in your profession window | Stop tracking | — |
+| Monthly activity | Open the Traveler's Log | Stop tracking | — |
+| Endeavor | Open it in the housing window | Stop tracking | — |
 
-## Commands
+Quest items show a button you can click to use the item, the same as on the default tracker. The mouse wheel scrolls the tracker; there's no visible scrollbar.
 
-- `/trackerplus` or `/tp` - Open settings panel
-- `/tp toggle` - Enable/disable tracker
-- `/tp lock` - Lock frame position
-- `/tp unlock` - Unlock frame to move
-- `/tp reset` - Reset all settings to defaults
-- `/tp nameplates` - Open Nameplates settings
-- `/tp nameplates toggle` - Enable/disable nameplate highlights
-- `/tp nameplates debug` - Toggle the nameplate debug window
+### Title bar
+
+The title bar has buttons to lock or unlock the frame, open settings, minimize the tracker, and turn Follow the Arrow on or off (that button only shows when FollowTheArrow is loaded). When the frame is unlocked, drag it by the title bar to move it and drag a bottom corner to resize it.
+
+## Nameplate highlights
+
+Enemy nameplates are highlighted when that enemy is something your quests need. The game's own unit tooltip decides what counts, so the highlights match what the game considers a quest target.
+
+| Highlight | Used for | Default color |
+| --- | --- | --- |
+| **Quest Objective** | Enemies you need to kill for a quest | Yellow |
+| **Quest Item** | Enemies that drop an item you need for a quest, even when killing them isn't an objective | Cyan |
+| **World Quest** | Targets for active world quests | Blue |
+| **Bonus Objective** | Targets for area bonus objectives | Pink |
+| **Current Target** | Your target, when it's also a quest target | Green |
+
+When you target an enemy that isn't a quest target, the game's normal target border is shown instead.
+
+Each highlight can be turned on or off separately and has its own style, color, thickness and offset. The styles are **Blizzard** (the game's own target border), **Outline**, **Glow** and **Rounded**. The settings page has a preview nameplate so you can see your changes before going into the world.
+
+There are also options to hide the game's default health bar and level badge borders, or to redraw the default border so it sits evenly around the health bar.
+
+## Settings
+
+Type `/tp` or open **Game Menu → Options → AddOns → TrackerPlus**. The settings are split into pages:
+
+- **TrackerPlus**: turn the tracker on or off, and lock it.
+- **General**: hide the tracker in instances or in combat, hide it when there's nothing tracked, turn tooltips on or off, and reset all settings.
+- **Appearance**: Match Game Tracker, width, height and scale, border, the expand/collapse icon style and position, header backgrounds, progress bar style, fonts, and colors for every text and content type.
+- **Layout**: indents and spacing.
+- **Tracking**: which content types to show, quest level, difficulty colors, world map pin colors, the quest area marker, zone headers and sort order. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetically.
+- **Nameplates**: everything under [Nameplate highlights](#nameplate-highlights).
+- **Debug**: logging and layout overlays, for troubleshooting.
+
+## Slash commands
+
+| Command | Does |
+| --- | --- |
+| `/tp` or `/trackerplus` | Open settings |
+| `/tp toggle` | Turn the tracker on or off |
+| `/tp lock` / `/tp unlock` | Lock or unlock the frame |
+| `/tp reset` | Reset all settings to their defaults |
+| `/tp nameplates` | Open the Nameplates settings page |
+| `/tp nameplates toggle` | Turn nameplate highlights on or off |
+| `/tp nameplates debug` | Show the nameplate debug window |
+
+## Optional addons
+
+- **[FollowTheArrow](https://www.curseforge.com/wow/addons/followthearrow)**: when it's loaded, TrackerPlus can show the current guide step in its own section. Turn it on with the arrow button in the title bar or under **Settings → Tracking**.
+- **Auctionator**: its crafting search button is moved into the Professions section.
 
 ## Installation
 
-1. Extract the `TrackerPlus` folder to your WoW addons directory:
-   ```
-   World of Warcraft\_retail_\Interface\AddOns\
-   ```
-2. Restart World of Warcraft or reload UI (`/reload`)
-3. Type `/tp` to configure
+1. Copy the `TrackerPlus` folder into `World of Warcraft\_retail_\Interface\AddOns\`.
+2. Restart the game, or type `/reload`.
 
-## Default Key Features
+Settings are saved per account in `TrackerPlusDB`.
 
-- **Scrollable without scrollbar** - Clean look with mouse wheel support
-- **No border by default** - Minimalist design (can be enabled)
-- **Semi-transparent background** - Blends with UI (fully customizable)
-- **Zone-based grouping** - Automatically organizes by location
-- **Distance sorting** - Closest quests appear first
-- **All trackable types enabled** - Quests, achievements, world quests, etc.
+## For developers
 
-## Configuration
-
-Access the full settings panel via:
-- `/tp` or `/trackerplus`
-- Game Menu → Interface → AddOns → TrackerPlus
-
-### Settings Sections
-
-1. **General Settings** - Enable/disable, lock frame
-2. **Appearance** - Frame size, scale, border options
-3. **Font Settings** - Font size and header size
-4. **Display Options** - Quest level, type, distance, headers
-5. **Trackable Types** - Toggle quest types, achievements, etc.
-6. **Advanced Options** - Hide in instance/combat, tooltips
-7. **Color Settings** - Comprehensive color picker interface
-8. **Nameplates** - Nameplate highlight styles and preview
-
-## Technical Details
-
-- **Interface Version**: 120000 (WoW 12.0.0.0)
-- **API Compliance**: Uses latest WoW 12.0 APIs
-- **SavedVariables**: `TrackerPlusDB`
-- **Load Order**: Database → Core → TrackerFrame → Settings
-
-## Architecture
-
-- **Database.lua** - Settings persistence and defaults management
-- **Core.lua** - Event handling and the update loop
-- **Settings.lua** - Modern WoW settings panel with full customization
-- **Data/** - Collecting quests, achievements and other trackables; objective parsing, quest colors, sorting
-- **Render/** - Drawing each tracker section (active quest, campaign, scenarios, world quests, ...)
-- **UI/** - The tracker window, its title bar, button pooling and "Match Game Tracker"
-- **Map/** - World map quest pin colors and quest-area highlighting
-- **Nameplates/** - Quest target highlights on enemy nameplates
-
-## Compatibility
-
-- **WoW Version**: 12.0.0.0+ (The War Within and beyond)
-- **No conflicts** with other quest addons
-- Works with all quest types including campaign, world quests, and achievements
+| Folder / file | What it does |
+| --- | --- |
+| `Database.lua` | Default settings and saved-variable migrations |
+| `Core.lua` | Events, the update loop and slash commands |
+| `Data/` | Collects quests, achievements and other trackables; parses objectives, picks quest colors and sorts trackables |
+| `Render/` | Draws each tracker section; `TrackerRenderer.lua` lays them out |
+| `UI/` | The tracker frame, title bar, button pools, click handling and Match Game Tracker |
+| `Map/` | World map pin colors and the quest area marker |
+| `Nameplates/` | Nameplate highlights, their settings page and debug window |
+| `Settings.lua` | The settings pages |
 
 ## Credits
 
-Created by **jr0dsgarage**
-
-Matches the design philosophy of the `next` and `knack` addon suite.
-
-## License
-
-All rights reserved. For personal use only.
-
----
-
-**Enjoy enhanced quest tracking with TrackerPlus!** 🎯
+Created by **jr0dsgarage**. All rights reserved; for personal use only.
