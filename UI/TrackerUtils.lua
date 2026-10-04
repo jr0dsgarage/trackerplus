@@ -377,11 +377,9 @@ function addon:GetOrCreateSecureButton(parent)
     return button
 end
 
--- Insert a quest link into the active chat box, opening chat first if none is active.
+-- Insert a link into the active chat box, opening chat first if none is active.
 -- ChatFrameUtil replaces the ChatEdit_* globals on newer clients.
-function addon:LinkQuestToChat(questID)
-    if not questID then return end
-    local link = GetQuestLink(questID)
+local function InsertChatLink(link)
     if not link then return end
 
     local insertLink = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
@@ -389,6 +387,60 @@ function addon:LinkQuestToChat(questID)
 
     local openChat = (ChatFrameUtil and ChatFrameUtil.OpenChat) or ChatFrame_OpenChat
     if openChat then openChat(link) end
+end
+
+function addon:LinkQuestToChat(questID)
+    if not questID then return end
+    InsertChatLink(GetQuestLink(questID))
+end
+
+-- Same link calls Blizzard's own tracker modules make on a CHATLINK click.
+local function GetTrackableLink(trackable)
+    local t, id = trackable.type, trackable.id
+    if t == "achievement" then
+        return GetAchievementLink and GetAchievementLink(id)
+    elseif t == "profession" then
+        return C_TradeSkillUI and C_TradeSkillUI.GetRecipeLink and C_TradeSkillUI.GetRecipeLink(id)
+    elseif t == "monthly" then
+        return C_PerksActivities and C_PerksActivities.GetPerksActivityChatLink
+            and C_PerksActivities.GetPerksActivityChatLink(id)
+    elseif t == "endeavor" then
+        return C_NeighborhoodInitiative and C_NeighborhoodInitiative.GetInitiativeTaskChatLink
+            and C_NeighborhoodInitiative.GetInitiativeTaskChatLink(id)
+    end
+    local questID = trackable.questID or id
+    return questID and GetQuestLink(questID)
+end
+
+function addon:LinkTrackableToChat(trackable)
+    if not trackable then return end
+    InsertChatLink(GetTrackableLink(trackable))
+end
+
+-- Untrack a non-quest trackable. Returns true when the type supports it.
+function addon:StopTrackingTrackable(trackable)
+    local t, id = trackable.type, trackable.id
+    if t == "achievement" then
+        if C_ContentTracking and C_ContentTracking.StopTracking then
+            C_ContentTracking.StopTracking(Enum.ContentTrackingType.Achievement, id, Enum.ContentTrackingStopType.Manual)
+        elseif RemoveTrackedAchievement then
+            RemoveTrackedAchievement(id)
+        end
+    elseif t == "profession" then
+        C_TradeSkillUI.SetRecipeTracked(id, false, trackable.isRecraft)
+    elseif t == "monthly" then
+        -- C_PerksActivities, not C_PerksProgram: the latter is the vendor
+        -- side of the feature and has no tracking functions.
+        if not (C_PerksActivities and C_PerksActivities.RemoveTrackedPerksActivity) then return false end
+        C_PerksActivities.RemoveTrackedPerksActivity(id)
+    elseif t == "endeavor" then
+        if not (C_NeighborhoodInitiative and C_NeighborhoodInitiative.RemoveTrackedInitiativeTask) then return false end
+        C_NeighborhoodInitiative.RemoveTrackedInitiativeTask(id)
+    else
+        return false
+    end
+    self:RequestUpdate()
+    return true
 end
 
 -- Open the world map on a quest's zone. Super-tracking is left to the quest's POI
@@ -527,33 +579,8 @@ function addon:OnTrackableClick(trackable, mouseButton)
     
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
-             -- Shift+Left: Link to Chat (quests/campaigns), Stop Tracking otherwise
-            local t = trackable.type
-            if t == "quest" or t == "campaign" or t == "worldquest" or t == "bonus" or t == "supertrack" then
-                self:LinkQuestToChat(trackable.id or trackable.questID)
-                return
-            elseif trackable.type == "achievement" then
-                if C_ContentTracking and C_ContentTracking.StopTracking then
-                    C_ContentTracking.StopTracking(Enum.ContentTrackingType.Achievement, trackable.id, Enum.ContentTrackingStopType.Manual)
-                elseif RemoveTrackedAchievement then
-                    RemoveTrackedAchievement(trackable.id)
-                end
-            elseif trackable.type == "profession" then
-                C_TradeSkillUI.SetRecipeTracked(trackable.id, false, trackable.isRecraft)
-            elseif trackable.type == "monthly" then
-                -- C_PerksActivities, not C_PerksProgram: the latter is the vendor
-                -- side of the feature and has no tracking functions.
-                if C_PerksActivities and C_PerksActivities.RemoveTrackedPerksActivity then
-                    C_PerksActivities.RemoveTrackedPerksActivity(trackable.id)
-                end
-            elseif trackable.type == "endeavor" then
-                if C_NeighborhoodInitiative and C_NeighborhoodInitiative.RemoveTrackedInitiativeTask then
-                     C_NeighborhoodInitiative.RemoveTrackedInitiativeTask(trackable.id)
-                else
-                    print("Shift-click to remove Endeavors not supported.")
-                end
-            end
-            self:RequestUpdate()
+            -- Shift+Left: Link to Chat (untracking lives in the right-click menu)
+            self:LinkTrackableToChat(trackable)
         else
             -- Left click: Focus/navigate to quest
             if trackable.type == "autoquest" then
@@ -658,6 +685,19 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     C_QuestLog.SetAbandonQuest()
                     local title = C_QuestLog.GetTitleForQuestID(questID)
                     StaticPopup_Show("ABANDON_QUEST", title)
+                end)
+            end)
+        elseif trackable.type == "achievement" or trackable.type == "profession"
+            or trackable.type == "monthly" or trackable.type == "endeavor" then
+            MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
+                rootDescription:CreateTitle(trackable.title)
+
+                rootDescription:CreateButton("Link to Chat", function()
+                    addon:LinkTrackableToChat(trackable)
+                end)
+
+                rootDescription:CreateButton("Stop Tracking", function()
+                    addon:StopTrackingTrackable(trackable)
                 end)
             end)
         end

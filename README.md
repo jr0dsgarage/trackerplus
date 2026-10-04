@@ -44,10 +44,10 @@ The game's own quest pins on the world map get a ring in the same color as that 
 | --- | --- | --- | --- |
 | Quest | Open the map to it | Link it in chat | Menu: Focus, Stop Tracking, Show in Quest Log, Share (in a group), Link to Chat, Abandon |
 | World quest / bonus objective | — | Link it in chat | — |
-| Achievement | Open it in the Achievements window | Stop tracking | — |
-| Recipe | Open it in your profession window | Stop tracking | — |
-| Monthly activity | Open the Traveler's Log | Stop tracking | — |
-| Endeavor | Open it in the housing window | Stop tracking | — |
+| Achievement | Open it in the Achievements window | Link it in chat | Menu: Link to Chat, Stop Tracking |
+| Recipe | Open it in your profession window | Link it in chat | Menu: Link to Chat, Stop Tracking |
+| Monthly activity | Open the Traveler's Log | Link it in chat | Menu: Link to Chat, Stop Tracking |
+| Endeavor | Open it in the housing window | Link it in chat | Menu: Link to Chat, Stop Tracking |
 
 Quest items show a button you can click to use the item, the same as on the default tracker. The mouse wheel scrolls the tracker; there's no visible scrollbar.
 
