@@ -95,6 +95,54 @@ local function SaveDraggedSize()
     trackerFrame:SetSize(width, height)
 end
 
+-- Re-anchors the tracker by db.frameAnchor (e.g. TOPRIGHT) without moving it on
+-- screen, so resizing keeps that point fixed instead of growing around whatever
+-- anchor StartMoving happened to leave (often CENTER). The frame is tied to the same
+-- point on UIParent, so it also stays put relative to that screen corner/edge.
+local function ApplyTrackerAnchor()
+    if not trackerFrame then return end
+    local anchor = addon.db.frameAnchor or "TOPRIGHT"
+
+    local point, relativeTo, relativePoint = trackerFrame:GetPoint()
+    if not point then return end
+    if relativeTo and relativeTo ~= UIParent then return end
+    if point == anchor and relativePoint == anchor then return end
+
+    local left, right = trackerFrame:GetLeft(), trackerFrame:GetRight()
+    local top, bottom = trackerFrame:GetTop(), trackerFrame:GetBottom()
+    if not (left and right and top and bottom) then return end
+
+    -- Offsets are in the tracker's own scale; express UIParent's size in it too.
+    local ratio = UIParent:GetEffectiveScale() / trackerFrame:GetEffectiveScale()
+    local parentW, parentH = UIParent:GetWidth() * ratio, UIParent:GetHeight() * ratio
+
+    local x, y
+    if anchor:find("LEFT") then
+        x = left
+    elseif anchor:find("RIGHT") then
+        x = right - parentW
+    else
+        x = (left + right) / 2 - parentW / 2
+    end
+    if anchor:find("TOP") then
+        y = top - parentH
+    elseif anchor:find("BOTTOM") then
+        y = bottom
+    else
+        y = (top + bottom) / 2 - parentH / 2
+    end
+
+    trackerFrame:ClearAllPoints()
+    trackerFrame:SetPoint(anchor, UIParent, anchor, x, y)
+    addon.db.framePosition = {point = anchor, relativePoint = anchor, x = x, y = y}
+end
+
+function addon:ApplyTrackerAnchor()
+    -- Minimized, the frame is a button-sized box anchored by the button itself.
+    if self.db.minimized then return end
+    ApplyTrackerAnchor()
+end
+
 -- Create the main tracker frame
 function addon:CreateTrackerFrame()
     if trackerFrame then
@@ -193,6 +241,8 @@ function addon:CreateTrackerFrame()
         -- Save position including relativePoint
         local point, _, relativePoint, x, y = self:GetPoint()
         addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
+        -- Swap to the chosen anchor (and save that) so later resizes keep it fixed.
+        addon:ApplyTrackerAnchor()
         addon:ClaimManualGeometry()
     end)
     
@@ -212,6 +262,7 @@ function addon:CreateTrackerFrame()
     trackerFrame.resizeBR:SetScript("OnMouseUp", function()
         trackerFrame:StopMovingOrSizing()
         SaveDraggedSize()
+        addon:ApplyTrackerAnchor()
         addon:ClaimManualGeometry()
         -- Update content width
         addon:UpdateContentWidth()
@@ -237,6 +288,7 @@ function addon:CreateTrackerFrame()
     trackerFrame.resizeBL:SetScript("OnMouseUp", function()
         trackerFrame:StopMovingOrSizing()
         SaveDraggedSize()
+        addon:ApplyTrackerAnchor()
         addon:ClaimManualGeometry()
         addon:UpdateContentWidth()
         addon:RequestUpdate()
@@ -684,7 +736,8 @@ function addon:UpdateTrackerAppearance()
         end
     end
     
-    -- Update size
+    -- Update size, keeping the chosen anchor point where it is
+    ApplyTrackerAnchor()
     trackerFrame:SetSize(db.frameWidth, db.frameHeight)
     
     -- Update content width synchronously
@@ -738,7 +791,11 @@ function addon:UpdateTrackerAppearance()
     end
 end
 
--- Refresh the tracker display
+-- Refresh the tracker display after a style setting changed (fonts, sizes, colors,
+-- spacing). UpdateTracker only repaints when the collected data or frame size
+-- changed, so without marking the layout dirty a style change would sit unseen
+-- until the next unrelated quest event.
 function addon:RefreshDisplay()
+    self._layoutDirty = true
     self:RequestUpdate()
 end

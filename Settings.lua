@@ -91,43 +91,96 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
 end
 
 -- Helper: Create Slider
-local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, yOffset)
+-- withInput: show the value in an editable box ("Frame Width: [ 250 ]") instead of
+-- baked into the label, so an exact number can be typed.
+local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, yOffset, withInput)
     local slider = CreateFrame("Slider", addonName .. dbKey .. "Slider", parent, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", 20, yOffset - 10) -- Give some room for label
     slider:SetWidth(200)
     slider:SetHeight(17)
     slider:SetOrientation("HORIZONTAL")
-    
+
     local label = _G[slider:GetName() .. "Text"]
     local low = _G[slider:GetName() .. "Low"]
     local high = _G[slider:GetName() .. "High"]
-    
+
+    local function FormatValue(v)
+        if step >= 1 then return tostring(v) end
+        return string.format("%.2f", v)
+    end
+
+    local input
+    if withInput then
+        label:SetText(text .. ":")
+
+        input = CreateFrame("EditBox", addonName .. dbKey .. "Input", slider, "InputBoxTemplate")
+        input:SetSize(50, 20)
+        input:SetPoint("LEFT", label, "RIGHT", 10, 0)
+        input:SetAutoFocus(false)
+        input:SetJustifyH("CENTER")
+        input:SetMaxLetters(6)
+        slider.valueInput = input
+        slider.formatValue = FormatValue
+
+        local function Commit(self)
+            local num = tonumber(self:GetText())
+            if num then
+                num = math.max(minVal, math.min(maxVal, num))
+                slider:SetValue(num)
+            end
+            -- Re-show the stored value: covers invalid input, clamping, and rounding.
+            self:SetText(FormatValue(addon.db[dbKey] or minVal))
+        end
+
+        input:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+        input:SetScript("OnEscapePressed", function(self)
+            self:SetText(FormatValue(addon.db[dbKey] or minVal))
+            self:ClearFocus()
+        end)
+        input:SetScript("OnEditFocusLost", Commit)
+    end
+
     local val = addon.db[dbKey] or minVal
-    label:SetText(text .. ": " .. val)
+    if input then
+        input:SetText(FormatValue(val))
+        input:SetCursorPosition(0)
+    else
+        label:SetText(text .. ": " .. val)
+    end
     low:SetText(minVal)
     high:SetText(maxVal)
-    
+
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
     slider:SetObeyStepOnDrag(true)
     slider:SetValue(val)
-    
+
     slider:SetScript("OnValueChanged", function(self, value)
         -- Round value if step >= 1
         if step >= 1 then
             value = math.floor(value + 0.5)
         else
-            value = math.floor(value * 100) / 100
+            value = math.floor(value * 100 + 0.5) / 100
         end
-        
+
         addon:SetSetting(dbKey, value)
-        label:SetText(text .. ": " .. value)
+        if input then
+            if not input:HasFocus() then
+                input:SetText(FormatValue(value))
+            end
+        else
+            label:SetText(text .. ": " .. value)
+        end
         
         -- Immediate updates
         if dbKey == "frameWidth" or dbKey == "frameHeight" or dbKey == "frameScale" or dbKey == "barBorderSize" then
             addon:UpdateTrackerAppearance()
             if dbKey == "barBorderSize" then addon:RefreshDisplay() end
-        elseif dbKey == "fontSize" or dbKey == "headerFontSize" or dbKey:find("^spacing") then
+        elseif dbKey == "headerFontSize" then
+            -- The tracker's own title uses the header font too.
+            addon:UpdateTrackerAppearance()
+            addon:RefreshDisplay()
+        elseif dbKey == "fontSize" or dbKey == "objectiveFontSize" or dbKey:find("^spacing") then
             addon:RefreshDisplay()
         elseif dbKey == "mapPOIOutlineThickness" or dbKey == "mapPOIGlowOpacity" then
             -- Map pins are Blizzard's, outside our render pass entirely.
@@ -153,10 +206,12 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     label:SetPoint("TOPLEFT", 16, yOffset - 5)
     label:SetText(text)
-    
+
+    -- Sits under its label. The template has ~16px of padding on its left, so x=0
+    -- lines its box up with the label text.
     local dropdown = CreateFrame("Frame", addonName .. dbKey .. "Dropdown", parent, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("TOPLEFT", 140, yOffset) -- Use fixed offset to align with others
-    UIDropDownMenu_SetWidth(dropdown, 140)
+    dropdown:SetPoint("TOPLEFT", 0, yOffset - 20)
+    UIDropDownMenu_SetWidth(dropdown, 180)
     
     local function init(self, level)
         local info = UIDropDownMenu_CreateInfo()
@@ -168,7 +223,10 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
                 UIDropDownMenu_SetSelectedValue(dropdown, self.value)
                 
                 -- Trigger updates
-                if dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then
+                if dbKey == "frameAnchor" then
+                    -- Only changes which point is pinned; the frame doesn't move.
+                    addon:ApplyTrackerAnchor()
+                elseif dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then
                     addon:RefreshDisplay()
                 elseif dbKey == "sortMethod" then
                     -- Sorting happens in CollectTrackables, so this needs a full
@@ -212,7 +270,203 @@ local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
            dropdown:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
     end
     
-    return yOffset - 35
+    return yOffset - 55
+end
+
+-- Fonts every client ships, so the list is never empty without LibSharedMedia.
+local BUILTIN_FONTS = {
+    { "Friz Quadrata TT", "Fonts\\FRIZQT__.TTF" },
+    { "Arial Narrow", "Fonts\\ARIALN.TTF" },
+    { "Skurri", "Fonts\\SKURRI.TTF" },
+    { "Morpheus", "Fonts\\MORPHEUS.TTF" },
+}
+
+local function NormalizeFontPath(path)
+    return (path:lower():gsub("/", "\\"))
+end
+
+-- Font objects used to draw each menu entry in its own font, one per file. Also
+-- doubles as a load test: false means the file wouldn't load, and such fonts are
+-- left out of the list, since picking one makes the tracker text vanish.
+local fontPreviewObjects = {}
+local fontPreviewCount = 0
+local function GetFontPreviewObject(path)
+    local key = NormalizeFontPath(path)
+    local obj = fontPreviewObjects[key]
+    if obj == nil then
+        fontPreviewCount = fontPreviewCount + 1
+        obj = CreateFont(addonName .. "FontPreview" .. fontPreviewCount)
+        -- Only an explicit false is a failure; a client that returns nothing
+        -- from SetFont shouldn't lose every font.
+        if obj:SetFont(path, 12, "") == false then obj = false end
+        fontPreviewObjects[key] = obj
+    end
+    return obj or nil
+end
+
+-- Every font we can find, as a sorted { {name, path}, ... } list, deduplicated by
+-- file. Built on demand so fonts registered by addons that loaded after us count:
+--   * LibSharedMedia (if any addon loaded it): fonts other addons registered by name
+--   * the built-in game fonts above
+--   * every Font object in the UI (GetFonts), which picks up font files that
+--     addons use without registering them; these are named after their file
+local function GetAvailableFonts()
+    local list, seen = {}, {}
+    local function add(name, path)
+        if type(path) ~= "string" or path == "" then return end
+        local key = NormalizeFontPath(path)
+        if seen[key] then return end
+        seen[key] = true
+        if not GetFontPreviewObject(path) then return end
+        list[#list + 1] = { name = name, path = path }
+    end
+
+    local lsm = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if lsm then
+        for _, name in ipairs(lsm:List("font")) do
+            add(name, lsm:Fetch("font", name, true))
+        end
+    end
+
+    for _, font in ipairs(BUILTIN_FONTS) do
+        add(font[1], font[2])
+    end
+
+    if GetFonts then
+        local ok, fontNames = pcall(GetFonts)
+        if ok and type(fontNames) == "table" then
+            for _, entry in ipairs(fontNames) do
+                local obj = type(entry) == "string" and _G[entry] or entry
+                if type(obj) == "table" and obj.GetFont then
+                    local path = obj:GetFont()
+                    if type(path) == "string" then
+                        add(path:match("([^\\/]+)%.%w+$") or path, path)
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(list, function(a, b) return a.name:lower() < b.name:lower() end)
+    return list
+end
+
+local function GetFontDisplayName(path, fonts)
+    if type(path) ~= "string" then return "Unknown" end
+    local key = NormalizeFontPath(path)
+    for _, font in ipairs(fonts or GetAvailableFonts()) do
+        if NormalizeFontPath(font.path) == key then return font.name end
+    end
+    return path:match("([^\\/]+)%.%w+$") or path
+end
+
+-- Long lists are split into alphabetical submenus so the menu stays on screen.
+local FONT_MENU_FLAT_LIMIT = 25
+local FONT_MENU_CHUNK = 20
+
+local function ApplyFontChange(dbKey)
+    if dbKey == "headerFontFace" then
+        -- The tracker's own title uses the header font too.
+        addon:UpdateTrackerAppearance()
+    end
+    addon:RefreshDisplay()
+end
+
+-- One per font dropdown; run when the menu closes so a hover preview never outlives it.
+local fontPreviewEnders = {}
+local fontMenuHooked = false
+
+-- Helper: Create Font Dropdown (lists every available font, shown in that font).
+-- Hovering an entry previews it on the tracker; leaving or closing puts it back.
+local function CreateFontDropdown(parent, text, dbKey, tooltip, yOffset)
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", 16, yOffset - 5)
+    label:SetText(text)
+
+    local dropdown = CreateFrame("Frame", addonName .. dbKey .. "Dropdown", parent, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("TOPLEFT", 0, yOffset - 20)
+    UIDropDownMenu_SetWidth(dropdown, 180)
+
+    local fonts -- rebuilt each time the menu opens
+
+    -- The saved font while a hovered one is temporarily in the db; nil when not previewing.
+    local previewOriginal
+    local function EndPreview()
+        if previewOriginal == nil then return end
+        addon.db[dbKey] = previewOriginal
+        previewOriginal = nil
+        ApplyFontChange(dbKey)
+    end
+    table.insert(fontPreviewEnders, EndPreview)
+    if not fontMenuHooked and DropDownList1 then
+        fontMenuHooked = true
+        DropDownList1:HookScript("OnHide", function()
+            for _, endPreview in ipairs(fontPreviewEnders) do endPreview() end
+        end)
+    end
+
+    local function AddFontButton(font, level)
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = font.name
+        info.value = font.path
+        info.fontObject = GetFontPreviewObject(font.path)
+        -- Checked against the saved font, not one being previewed.
+        local current = previewOriginal or addon.db[dbKey]
+        info.checked = type(current) == "string"
+            and NormalizeFontPath(current) == NormalizeFontPath(font.path)
+        info.funcOnEnter = function()
+            if previewOriginal == nil then previewOriginal = addon.db[dbKey] end
+            addon.db[dbKey] = font.path
+            ApplyFontChange(dbKey)
+        end
+        info.funcOnLeave = EndPreview
+        info.func = function()
+            previewOriginal = nil -- keep it: this is now the saved font
+            addon:SetSetting(dbKey, font.path)
+            UIDropDownMenu_SetText(dropdown, font.name)
+            CloseDropDownMenus()
+            ApplyFontChange(dbKey)
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+
+    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
+        level = level or 1
+        if level == 1 then
+            fonts = GetAvailableFonts()
+            if #fonts <= FONT_MENU_FLAT_LIMIT then
+                for _, font in ipairs(fonts) do AddFontButton(font, level) end
+                return
+            end
+            for first = 1, #fonts, FONT_MENU_CHUNK do
+                local last = math.min(first + FONT_MENU_CHUNK - 1, #fonts)
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = fonts[first].name .. "  -  " .. fonts[last].name
+                info.hasArrow = true
+                info.notCheckable = true
+                info.menuList = first
+                UIDropDownMenu_AddButton(info, level)
+            end
+        elseif menuList and fonts then
+            for i = menuList, math.min(menuList + FONT_MENU_CHUNK - 1, #fonts) do
+                AddFontButton(fonts[i], level)
+            end
+        end
+    end)
+
+    UIDropDownMenu_SetText(dropdown, GetFontDisplayName(addon.db[dbKey]))
+
+    if tooltip then
+        dropdown:SetScript("OnEnter", function(self)
+            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            tooltipFrame:SetText(text)
+            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
+            tooltipFrame:Show()
+        end)
+        dropdown:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
+    end
+
+    return yOffset - 55
 end
 
 -- Helper: Create Color Picker
@@ -302,6 +556,29 @@ local function EndSection(frame, innerY)
     return height + 15 -- Return total consumed height (height + margin)
 end
 
+-- Helper: Start a Boxed Section in one of two side-by-side columns (1 = left,
+-- 2 = right), each half of the page's 600px. Finish the pair with EndColumnRow.
+local function StartColumnSection(parent, title, yOffset, column)
+    local frame, innerY = StartSection(parent, title, yOffset)
+    frame:ClearAllPoints()
+    if column == 1 then
+        frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yOffset)
+        frame:SetPoint("RIGHT", parent, "LEFT", 295, 0)
+    else
+        frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 305, yOffset)
+        frame:SetPoint("RIGHT", parent, "RIGHT", -15, 0)
+    end
+    return frame, innerY
+end
+
+-- Helper: End a pair of column sections, matching their heights so the boxes line up
+local function EndColumnRow(left, leftInnerY, right, rightInnerY)
+    local consumed = math.max(EndSection(left, leftInnerY), EndSection(right, rightInnerY))
+    left:SetHeight(consumed - 15)
+    right:SetHeight(consumed - 15)
+    return consumed
+end
+
 -- External update function to sync UI with DB changes (e.g. from resizing)
 function addon:UpdateSettingWidgets()
     -- Helpers to update specific types if needed
@@ -313,7 +590,14 @@ function addon:UpdateSettingWidgets()
             slider:SetScript("OnValueChanged", nil)
             slider:SetValue(addon.db[dbKey])
             slider:SetScript("OnValueChanged", oldScript)
-            
+
+            if slider.valueInput then
+                if not slider.valueInput:HasFocus() then
+                    slider.valueInput:SetText(slider.formatValue(addon.db[dbKey]))
+                end
+                return
+            end
+
             -- Update Text
             local label = _G[slider:GetName() .. "Text"]
             if label then
@@ -444,14 +728,25 @@ local function InitUI()
     local p2 = appearancePageInfo.content
     y = -5
     
-    s, sy = StartSection(p2, "Dimensions", y)
-    sy = CreateCheckbox(s, "Match Game Tracker", "matchBlizzardTracker", "Place and size the tracker exactly over the game's own objective tracker, following any changes you make to it in the game's Edit Mode. Turns itself off as soon as you drag or resize TrackerPlus yourself; re-check it to snap back.", sy)
-    sy = CreateSlider(s, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", sy)
-    sy = CreateSlider(s, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", sy)
-    sy = CreateSlider(s, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", sy)
-    y = y - EndSection(s, sy)
-    
-    s, sy = StartSection(p2, "Styling", y)
+    -- Dimensions | Styling side by side
+    local dimSection, dimY = StartColumnSection(p2, "Dimensions", y, 1)
+    dimY = CreateCheckbox(dimSection, "Match Game Tracker", "matchBlizzardTracker", "Place and size the tracker exactly over the game's own objective tracker, following any changes you make to it in the game's Edit Mode. Turns itself off as soon as you drag or resize TrackerPlus yourself; re-check it to snap back.", dimY)
+    dimY = CreateDropdown(dimSection, "Anchor", "frameAnchor", {
+        {text = "Top Left", value = "TOPLEFT"},
+        {text = "Top", value = "TOP"},
+        {text = "Top Right", value = "TOPRIGHT"},
+        {text = "Left", value = "LEFT"},
+        {text = "Center", value = "CENTER"},
+        {text = "Right", value = "RIGHT"},
+        {text = "Bottom Left", value = "BOTTOMLEFT"},
+        {text = "Bottom", value = "BOTTOM"},
+        {text = "Bottom Right", value = "BOTTOMRIGHT"},
+    }, "The point of the tracker that stays in place when it's resized. Top Right grows down and to the left; Bottom Left grows up and to the right.", dimY)
+    dimY = CreateSlider(dimSection, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", dimY, true)
+    dimY = CreateSlider(dimSection, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", dimY, true)
+    dimY = CreateSlider(dimSection, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", dimY, true)
+
+    s, sy = StartColumnSection(p2, "Styling", y, 2)
     sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker", sy)
     sy = CreateDropdown(s, "Expand/Collapse Icon", "headerIconStyle", {
         {text = "None", value = "none"},
@@ -544,11 +839,28 @@ local function InitUI()
     
     sy = CreateMediaDropdown(s, "Bar Texture", "barTexture", "Texture used for progress bars", sy)
 
-    y = y - EndSection(s, sy)
+    y = y - EndColumnRow(dimSection, dimY, s, sy)
     
+    -- Fonts: one row per text type, font picker on the left and its size on the right
     s, sy = StartSection(p2, "Fonts", y)
-    sy = CreateSlider(s, "Font Size", "fontSize", 8, 24, 1, "Size of the quest text", sy)
-    sy = CreateSlider(s, "Header Size", "headerFontSize", 10, 28, 1, "Size of the headers", sy)
+    local fontLeft = CreateFrame("Frame", nil, s)
+    fontLeft:SetPoint("TOPLEFT", s, "TOPLEFT", 0, 0)
+    fontLeft:SetSize(290, 1)
+    local fontRight = CreateFrame("Frame", nil, s)
+    fontRight:SetPoint("TOPLEFT", s, "TOPLEFT", 295, 0)
+    fontRight:SetSize(290, 1)
+
+    local FONT_ROWS = {
+        { "Header Font", "headerFontFace", "Header Font Size", "headerFontSize", 10, 28, "the tracker title and section/zone headers" },
+        { "Quest Name Font", "fontFace", "Quest Name Font Size", "fontSize", 8, 24, "quest and other trackable names" },
+        { "Objective Font", "objectiveFontFace", "Objective Font Size", "objectiveFontSize", 8, 24, "objective lines under each quest" },
+    }
+    for _, row in ipairs(FONT_ROWS) do
+        CreateFontDropdown(fontLeft, row[1], row[2], "Font used for " .. row[7] .. ". Lists every font available, including ones installed by other addons.", sy)
+        -- Nudged down so the slider's label lines up with the dropdown's label.
+        CreateSlider(fontRight, row[3], row[4], row[5], row[6], 1, "Size of " .. row[7], sy - 8, true)
+        sy = sy - 60
+    end
     y = y - EndSection(s, sy)
     
     s, sy = StartSection(p2, "Colors", y)
@@ -580,7 +892,9 @@ local function InitUI()
     local p3 = layoutPageInfo.content
     y = -5
     
-    s, sy = StartSection(p3, "Horizontal Spacing", y)
+    -- Horizontal | Vertical side by side
+    local hSection, hY = StartColumnSection(p3, "Horizontal Spacing", y, 1)
+    s, sy = hSection, hY
     sy = CreateSlider(s, "Major Header Indent", "spacingMajorHeaderIndent", 0, 50, 1, "Left indent for major category headers (Quests, Achievements)", sy)
     sy = CreateSlider(s, "Minor Header Indent", "spacingMinorHeaderIndent", 0, 50, 1, "Left indent for zone/subgroup headers", sy)
     sy = CreateSlider(s, "Quest/Item Indent", "spacingTrackableIndent", 0, 50, 1, "Left indent for individual quests and trackables", sy)
@@ -589,13 +903,13 @@ local function InitUI()
     sy = CreateSlider(s, "Objective Indent", "spacingObjectiveIndent", 0, 50, 1, "Extra indent for objective lines (relative to quest)", sy)
     sy = CreateSlider(s, "Progress Bar Inset", "spacingProgressBarInset", 0, 50, 1, "Horizontal margin for progress bars from edges", sy)
     sy = CreateSlider(s, "Progress Bar Padding", "spacingProgressBarPadding", 0, 20, 1, "Vertical padding between text and progress bar", sy)
-    y = y - EndSection(s, sy)
-    
-    s, sy = StartSection(p3, "Vertical Spacing", y)
+    hY = sy
+
+    s, sy = StartColumnSection(p3, "Vertical Spacing", y, 2)
     sy = CreateSlider(s, "Item Spacing", "spacingItemVertical", 0, 20, 1, "Vertical gap between trackable items", sy)
     sy = CreateSlider(s, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers", sy)
     sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers", sy)
-    y = y - EndSection(s, sy)
+    y = y - EndColumnRow(hSection, hY, s, sy)
     
     p3:SetHeight(math.abs(y) + 20)
     

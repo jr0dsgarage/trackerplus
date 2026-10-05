@@ -170,11 +170,22 @@ function addon:OrganizeTrackables(trackables)
                 wipe(sortedZones)
                 for zoneName, _ in pairs(zones) do sortedZones[#sortedZones + 1] = zoneName end
                 table.sort(sortedZones)
-                
+
+                -- Auto-minimize (header "A"): only the current zone and zones whose
+                -- quest area we're standing in stay open. See AutoMinimizeHeaders.lua.
+                local autoKeep
+                if bucketType == "quest" and self.db.autoMinimizeHeaders then
+                    self._autoKeepZones = self._autoKeepZones or {}
+                    autoKeep = self:GetAutoExpandZones(items, self._autoKeepZones)
+                end
+
                 for _, zoneName in ipairs(sortedZones) do
                     local zoneItems = zones[zoneName]
                     local minorKey = "MINOR_" .. bucketType .. "_" .. zoneName
                     self.knownMinorKeys[majorKey][#self.knownMinorKeys[majorKey] + 1] = minorKey
+                    if autoKeep then
+                        self.db.collapsedHeaders[minorKey] = not autoKeep[zoneName]
+                    end
                     local minorCollapsed = self.db.collapsedHeaders[minorKey]
                     
                     -- Minor Header
@@ -707,7 +718,14 @@ end
 -- Toggle header collapse state
 function addon:ToggleHeader(key, recursive)
     if not self.db.collapsedHeaders then self.db.collapsedHeaders = {} end
-    
+
+    -- Toggling a quest zone header by hand overrides auto-minimize, which would
+    -- otherwise undo the click on the next paint. Turn it off until re-enabled.
+    if self.db.autoMinimizeHeaders and key
+        and (key:find("^MINOR_quest_") or (recursive and key == "MAJOR_quest")) then
+        self:SetAutoMinimize(false)
+    end
+
     if recursive and key:find("MAJOR_") then
         -- Recursive toggling logic (Shift+Click)
         local currentState = self.db.collapsedHeaders[key]

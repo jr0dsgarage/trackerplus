@@ -16,6 +16,7 @@ Data/ActivityCollectors.lua
 Data/QuestColors.lua
 Data/TrackableSort.lua
 UI/TrackerUtils.lua
+UI/AutoMinimizeHeaders.lua
 Map/MapPOIColor.lua
 Map/QuestAreaHighlight.lua
 Render/RendererUtils.lua

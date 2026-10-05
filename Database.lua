@@ -14,6 +14,8 @@ local DEFAULTS = {
     frameWidth = 250,
     frameHeight = 400,
     frameScale = 1.0,
+    -- The point of the tracker that stays put when it's resized (any SetPoint name).
+    frameAnchor = "TOPRIGHT",
     -- While true, the tracker mirrors the game's own objective tracker position and
     -- size (including changes made in the game's Edit Mode). Automatically cleared
     -- the first time the player drags or resizes the tracker themselves.
@@ -28,11 +30,15 @@ local DEFAULTS = {
     headerIconPosition = "right", -- "left", "right"
     headerBackgroundStyle = "questlog", -- "none", "questlog", "tracker"
     
-    -- Font Settings
+    -- Font Settings (fontFace/fontSize are the quest name font)
     fontSize = 12,
     fontFace = "Fonts\\FRIZQT__.TTF",
     fontOutline = "OUTLINE",
-    
+
+    -- Objective Font (objective, task and note lines under a quest)
+    objectiveFontSize = 11,
+    objectiveFontFace = "Fonts\\FRIZQT__.TTF",
+
     -- Header Font
     headerFontSize = 14,
     headerFontFace = "Fonts\\FRIZQT__.TTF",
@@ -66,6 +72,7 @@ local DEFAULTS = {
     showZoneHeaders = true,
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
+    autoMinimizeHeaders = false, -- Collapse quest zone headers except the current zone and quest areas we stand in
     
     -- Grouping & Sorting
     groupByZone = true,
@@ -180,6 +187,17 @@ function addon:InitDatabase()
     if not TrackerPlusDB.settings then
         TrackerPlusDB.settings = DeepCopy(DEFAULTS)
     else
+        -- Migration: objectives used to be drawn in the quest font at one size
+        -- smaller. Carry that over (before defaults merge in) so nothing changes on
+        -- screen for existing profiles.
+        local settings = TrackerPlusDB.settings
+        if settings.objectiveFontSize == nil then
+            settings.objectiveFontSize = (tonumber(settings.fontSize) or DEFAULTS.fontSize) - 1
+        end
+        if settings.objectiveFontFace == nil and settings.fontFace and settings.fontFace ~= "Friz Quadrata TT" then
+            settings.objectiveFontFace = settings.fontFace
+        end
+
         -- Merge any new defaults
         for key, value in pairs(DEFAULTS) do
             if TrackerPlusDB.settings[key] == nil then

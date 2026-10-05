@@ -274,6 +274,14 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     if isQuest and POIButtonUtil then
         button.poiButton:Show()
         if button.icon then button.icon:Hide() end
+
+        -- Keep the button level with the title's first line as the quest name font
+        -- grows or shrinks. Its position was tuned at size 12, and the line's middle
+        -- moves down by half of any size increase. Offsets are in the button's own
+        -- (0.75-scaled) units, hence the division.
+        local poiShift = ((db.fontSize or 12) - 12) / 2
+        button.poiButton:ClearAllPoints()
+        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, -poiShift / 0.75)
         
         button.poiButton.questID = item.id
         if button.poiButton.SetQuestID then
@@ -471,7 +479,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 bulletLine:Hide()
             else
                 bulletLine:SetPoint("TOPLEFT", button, "TOPLEFT", leftPadding + db.spacingObjectiveIndent, currentY)
-                bulletLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                bulletLine:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
                 bulletLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
                 bulletLine:SetText("  -")
                 bulletLine:Show()
@@ -487,7 +495,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             
             local prefixWidth = 0
             if prefixText ~= "" and not isAchievementTextThenProgress then
-                prefixLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                prefixLine:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
                 prefixLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
                 prefixLine:SetText(prefixText)
                 prefixLine:ClearAllPoints()
@@ -524,7 +532,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             objLine:ClearAllPoints()
             -- Anchor to right of prefix (or bullet if no prefix)
             objLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)
-            objLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+            objLine:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
             --local objColor = obj.finished and db.completeColor or db.objectiveColor -- Already set above
             objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
             objLine:SetText(isAchievementObjective and achievementBodyText or bodyText)
@@ -536,7 +544,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
             
             local lineH = objLine:GetStringHeight()
-            local minLineH = max(1, db.fontSize - 1)
+            local minLineH = max(1, db.objectiveFontSize)
             if lineH < minLineH then
                 lineH = minLineH
             end
@@ -557,7 +565,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 progressLine:SetWordWrap(true)
                 progressLine:ClearAllPoints()
                 progressLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)
-                progressLine:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+                progressLine:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
                 progressLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
                 progressLine:SetText(" - " .. prefixText)
                 progressLine:SetJustifyH("LEFT")

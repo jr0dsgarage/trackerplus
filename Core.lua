@@ -134,6 +134,9 @@ function addon:Initialize()
     -- Stripe beside quests whose shaded map area the player is standing in
     self:UpdateQuestAreaWatcher()
 
+    -- Collapse quest zone headers we are not in (header "A" toggle)
+    self:UpdateAutoMinimizeWatcher()
+
     -- Initial update
     self:RequestUpdate()
     self._layoutDirty = true

@@ -505,7 +505,7 @@ function addon:RenderFollowTheArrowSection()
             taskLabels[i] = ftaFrame:CreateFontString(nil, "OVERLAY")
         end
         local lbl = taskLabels[i]
-        lbl:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+        lbl:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
         lbl:SetTextColor(db.objectiveColor.r, db.objectiveColor.g, db.objectiveColor.b, db.objectiveColor.a)
         lbl:SetText("• " .. taskText)
         lbl:SetJustifyH("LEFT")
@@ -515,7 +515,7 @@ function addon:RenderFollowTheArrowSection()
         lbl:SetPoint("TOPRIGHT", ftaFrame, "TOPRIGHT", -5,          -ftaYOffset)
         lbl:SetHeight(0)
         lbl:Show()
-        local lblH = max(db.fontSize + 2, lbl:GetStringHeight() + 2)
+        local lblH = max(db.objectiveFontSize + 3, lbl:GetStringHeight() + 2)
         lbl:SetHeight(lblH)
         ftaYOffset = ftaYOffset + lblH + 2
     end
@@ -538,7 +538,7 @@ function addon:RenderFollowTheArrowSection()
             noteLabels[i] = ftaFrame:CreateFontString(nil, "OVERLAY")
         end
         local lbl = noteLabels[i]
-        lbl:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+        lbl:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
         lbl:SetTextColor(0.8, 0.8, 0.6, 1) -- Slightly warm for notes
         lbl:SetText(noteText)
         lbl:SetJustifyH("LEFT")
@@ -548,7 +548,7 @@ function addon:RenderFollowTheArrowSection()
         lbl:SetPoint("TOPRIGHT", ftaFrame, "TOPRIGHT", -5,          -ftaYOffset)
         lbl:SetHeight(0)
         lbl:Show()
-        local lblH = max(db.fontSize + 2, lbl:GetStringHeight() + 2)
+        local lblH = max(db.objectiveFontSize + 3, lbl:GetStringHeight() + 2)
         lbl:SetHeight(lblH)
         ftaYOffset = ftaYOffset + lblH + 2
     end

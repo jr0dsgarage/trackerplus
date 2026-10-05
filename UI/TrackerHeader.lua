@@ -64,10 +64,10 @@ function addon:CreateTrackerHeader(trackerFrame)
     )
     trackerFrame.title:SetText("Tracker Plus")
 
-    -- FTA Toggle Button (arrow icon, to the left of the lock button)
+    -- FTA Toggle Button (arrow icon, to the left of the auto-minimize button)
     trackerFrame.ftaToggleBtn = CreateFrame("Button", nil, trackerFrame)
     trackerFrame.ftaToggleBtn:SetSize(16, 16)
-    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -74, 0)
+    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -94, 0)
     local ftaArrowTex = trackerFrame.ftaToggleBtn:CreateTexture(nil, "ARTWORK")
     ftaArrowTex:SetAllPoints()
     ftaArrowTex:SetTexture("Interface\\Minimap\\MinimapArrow")
@@ -94,6 +94,42 @@ function addon:CreateTrackerHeader(trackerFrame)
         tooltip:Show()
     end)
     trackerFrame.ftaToggleBtn:SetScript("OnLeave", function()
+        addon:HideSharedTooltip()
+    end)
+
+    -- Auto-minimize Toggle Button ("A", to the left of the lock button). Gold when
+    -- on, grey when off -- including when a manual header toggle switched it off.
+    trackerFrame.autoMinBtn = CreateFrame("Button", nil, trackerFrame)
+    trackerFrame.autoMinBtn:SetSize(16, 16)
+    trackerFrame.autoMinBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -74, 0)
+    local autoMinText = trackerFrame.autoMinBtn:CreateFontString(nil, "ARTWORK")
+    autoMinText:SetPoint("CENTER", 0, 0)
+    autoMinText:SetFont(self.db.headerFontFace or "Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    autoMinText:SetText("A")
+    trackerFrame.autoMinBtn._text = autoMinText
+    trackerFrame.autoMinBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    local function UpdateAutoMinColor()
+        if addon.db and addon.db.autoMinimizeHeaders then
+            autoMinText:SetTextColor(1, 0.82, 0, 1)   -- gold when enabled
+        else
+            autoMinText:SetTextColor(0.5, 0.5, 0.5, 1) -- grey when disabled
+        end
+    end
+    trackerFrame.autoMinBtn.UpdateColor = UpdateAutoMinColor
+    UpdateAutoMinColor()
+    trackerFrame.autoMinBtn:SetScript("OnClick", function(self)
+        addon:SetAutoMinimize(not addon.db.autoMinimizeHeaders)
+        if self:IsMouseOver() then
+            self:GetScript("OnEnter")(self)
+        end
+    end)
+    trackerFrame.autoMinBtn:SetScript("OnEnter", function(self)
+        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+        tooltip:SetText(addon.db.autoMinimizeHeaders and "Auto-minimize Zones: On" or "Auto-minimize Zones: Off")
+        tooltip:AddLine("Keeps only your current zone and any quest area you're standing in expanded. Toggling a zone header by hand turns this off.", 1, 1, 1, true)
+        tooltip:Show()
+    end)
+    trackerFrame.autoMinBtn:SetScript("OnLeave", function()
         addon:HideSharedTooltip()
     end)
 
@@ -164,6 +200,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     -- on top of the gear and swallowing its clicks.
     local chromeLevel = (trackerFrame:GetFrameLevel() or 1) + 50
     trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
+    trackerFrame.autoMinBtn:SetFrameLevel(chromeLevel)
     trackerFrame.lockBtn:SetFrameLevel(chromeLevel)
     trackerFrame.settingsParam:SetFrameLevel(chromeLevel)
     trackerFrame.minMaxBtn:SetFrameLevel(chromeLevel)
@@ -225,6 +262,7 @@ function addon:CreateTrackerHeader(trackerFrame)
             -- Hide Elements
             trackerFrame.settingsParam:Hide()
             trackerFrame.lockBtn:Hide()
+            trackerFrame.autoMinBtn:Hide()
             if trackerFrame.ftaToggleBtn then trackerFrame.ftaToggleBtn:Hide() end
             trackerFrame.title:Hide()
             trackerFrame.headerBg:Hide()
@@ -269,6 +307,7 @@ function addon:CreateTrackerHeader(trackerFrame)
             -- Show Elements
             trackerFrame.settingsParam:Show()
             trackerFrame.lockBtn:Show()
+            trackerFrame.autoMinBtn:Show()
             -- Stays hidden when FollowTheArrow isn't loaded.
             addon:UpdateFTAToggleVisibility()
             trackerFrame.title:Show()
@@ -287,8 +326,8 @@ function addon:CreateTrackerHeader(trackerFrame)
             if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
             -- Always right-aligned, matching where the button is first anchored and
-            -- keeping it in the same chrome row as the settings, lock and Follow the
-            -- Arrow buttons (anchored RIGHT at -34, -54 and -74). This used to follow
+            -- keeping it in the same chrome row as the settings, lock, auto-minimize and
+            -- Follow the Arrow buttons (anchored RIGHT at -34, -54, -74 and -94). This used to follow
             -- db.headerIconPosition, but that setting controls which side the
             -- expand/collapse arrows sit on for headers inside the quest list, not the
             -- tracker window's own chrome. Since it defaults to "left", the button

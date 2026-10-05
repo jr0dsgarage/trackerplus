@@ -22,7 +22,7 @@ Each kind of content gets its own section, top to bottom:
 | **World Quests** | Retail | Tracked and in-progress world quests. |
 | **Quests** | Retail, Forever | All other tracked quests, grouped under zone headers. |
 | **Achievements** | Retail | Tracked achievements and their criteria. |
-| **Professions** | Retail | Tracked recipes and their reagents. |
+| **Professions** | Retail, Forever | Tracked recipes and their reagents. |
 | **Monthly Activities** | Retail | Tracked Trading Post / Traveler's Log activities. |
 | **Endeavors** | Retail | Tracked housing endeavors. |
 
