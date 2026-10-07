@@ -396,7 +396,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
 
     local titleText = item.title
     if db.showQuestLevel and item.level and item.level > 0 then
-        titleText = format("[%d] %s", item.level, titleText)
+        titleText = format("[%d%s] %s", item.level, item.isGroupQuest and "+" or "", titleText)
     end
 
     if item.questType

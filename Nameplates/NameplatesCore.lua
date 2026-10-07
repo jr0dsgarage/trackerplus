@@ -80,6 +80,10 @@ eventHandlers.PLAYER_ENTERING_WORLD = function(self)
     self:RequestUpdate()
 end
 
+eventHandlers.SUPER_TRACKING_CHANGED = function(self)
+    self:RequestUpdate()
+end
+
 eventHandlers.QUEST_LOG_UPDATE = handleQuestDataChanged
 eventHandlers.QUEST_ACCEPTED = handleQuestDataChanged
 eventHandlers.QUEST_REMOVED = handleQuestDataChanged
@@ -100,6 +104,7 @@ Nameplates.frame:RegisterEvent("PLAYER_TARGET_CHANGED")
 Nameplates.frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 Nameplates.frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 Nameplates.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+Nameplates.frame:RegisterEvent("SUPER_TRACKING_CHANGED")
 Nameplates.frame:RegisterEvent("QUEST_LOG_UPDATE")
 Nameplates.frame:RegisterEvent("QUEST_ACCEPTED")
 Nameplates.frame:RegisterEvent("QUEST_REMOVED")

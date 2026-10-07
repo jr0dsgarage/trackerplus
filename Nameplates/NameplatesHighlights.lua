@@ -563,6 +563,31 @@ local function syncBars(questStyles, barTokens)
     end
 end
 
+local function buildStyle(prefix)
+    return {
+        color = Nameplates.db[prefix .. "Color"],
+        thickness = Nameplates.db[prefix .. "Thickness"],
+        offset = Nameplates.db[prefix .. "Offset"],
+        mode = normalizeMode(Nameplates.db[prefix .. "Style"]),
+        origin = prefix,
+    }
+end
+
+-- True when the unit is an objective of the super-tracked quest. Checked per pass (not via the cached
+-- classification) since a unit can belong to several quests and the super-tracked one can change.
+local function isActiveQuestObjective(result)
+    local getSuperTracked = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID
+    local superID = getSuperTracked and getSuperTracked()
+    if not superID or superID == 0 then
+        return false
+    end
+    if result.questID == superID then
+        return true
+    end
+    local isRelated = C_QuestLog and C_QuestLog.UnitIsRelatedToQuest
+    return isRelated ~= nil and result.unit ~= nil and isRelated(result.unit, superID) == true
+end
+
 local function determineStyle(result)
     local configMap = {
         ["Has Quest Item"] = "questItem",
@@ -576,13 +601,7 @@ local function determineStyle(result)
         return nil
     end
 
-    return {
-        color = Nameplates.db[prefix .. "Color"],
-        thickness = Nameplates.db[prefix .. "Thickness"],
-        offset = Nameplates.db[prefix .. "Offset"],
-        mode = normalizeMode(Nameplates.db[prefix .. "Style"]),
-        origin = prefix,
-    }
+    return buildStyle(prefix)
 end
 
 local function isCurrentTarget(result)
@@ -620,10 +639,16 @@ function Nameplates:CollectHighlights()
         if classification then
             -- The classification is cached across passes, so every per-pass field is reassigned here.
             local style = determineStyle(classification)
+            classification.isCurrentTarget = isCurrentTarget(classification)
+            -- The Active Quest color only replaces a quest style on units that aren't the current target.
+            classification.isActiveQuest = classification.reason ~= nil and not classification.isCurrentTarget
+                and Nameplates.db.activeQuestEnabled and isActiveQuestObjective(classification)
+            if classification.isActiveQuest then
+                style = buildStyle("activeQuest")
+            end
             classification.highlighted = style ~= nil
             classification.highlightStyle = style
             classification.suppressedReason = not style and classification.reason or nil
-            classification.isCurrentTarget = isCurrentTarget(classification)
             classification.usesTargetStyle = style ~= nil and classification.isCurrentTarget
                 and Nameplates.db.currentTargetEnabled
             results[#results + 1] = classification

@@ -223,6 +223,8 @@ function Nameplates:UpdateDebugFrame(results)
             local reason = info.reason or "Active highlight"
             if info.usesTargetStyle then
                 reason = string.format("%s (current target style)", reason)
+            elseif info.isActiveQuest then
+                reason = string.format("%s (active quest style)", reason)
             end
             local highlightOnText = buildOnText(info)
             highlightExplanation = string.format(

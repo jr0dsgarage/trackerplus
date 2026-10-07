@@ -37,6 +37,7 @@ local ui = {
 
 local highlightOptions = {
     { key = "currentTarget", label = "Current Target" },
+    { key = "activeQuest", label = "Active Quest Target" },
     { key = "questObjective", label = "Quest Objective Target" },
     { key = "questItem", label = "Quest Item Target" },
     { key = "worldQuest", label = "World Quest Objective Target" },

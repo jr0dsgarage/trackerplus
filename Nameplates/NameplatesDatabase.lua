@@ -18,6 +18,12 @@ local DEFAULTS = {
     currentTargetThickness = 2,
     currentTargetOffset = 0,
     currentTargetStyle = "blizzard",
+    -- Objectives of the Active (super-tracked) quest; overrides the other quest styles, but never the current target.
+    activeQuestEnabled = true,
+    activeQuestColor = { r = 1, g = 0.5, b = 0, a = 0.9 },  -- Orange
+    activeQuestThickness = 3,
+    activeQuestOffset = 0,
+    activeQuestStyle = "blizzard",
     questObjectiveEnabled = true,
     questObjectiveColor = { r = 1, g = 1, b = 0, a = 0.9 },
     questObjectiveThickness = 3,
@@ -57,6 +63,7 @@ local MIGRATION_MAP = {
 
 local STYLE_KEYS = {
     "currentTargetStyle",
+    "activeQuestStyle",
     "questObjectiveStyle",
     "questItemStyle",
     "worldQuestStyle",

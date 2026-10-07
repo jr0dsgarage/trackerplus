@@ -70,6 +70,9 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         -- use it while the title keeps displaying level.
         difficultyLevel = info.difficultyLevel,
         questType = self:GetQuestTypeName(questID),
+        -- Drives the "+" in "[28+]", matching the default quest log's marker for
+        -- elite / group quests.
+        isGroupQuest = self:IsGroupQuest(questID, info),
         isComplete = isComplete,
         isFailed = info.isFailed,
         isWorldQuest = isWorldQuest,
@@ -340,6 +343,16 @@ function addon:CollectAutoQuests(trackables)
 end
 
 -- Get quest type name
+function addon:IsGroupQuest(questID, info)
+    if info and (tonumber(info.suggestedGroup) or 0) > 0 then
+        return true
+    end
+    local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
+    if not tagInfo then return false end
+    if tagInfo.isElite then return true end
+    return Enum.QuestTag and tagInfo.tagID == Enum.QuestTag.Group or false
+end
+
 function addon:GetQuestTypeName(questID)
     local questInfo = C_QuestLog.GetQuestTagInfo(questID)
     
