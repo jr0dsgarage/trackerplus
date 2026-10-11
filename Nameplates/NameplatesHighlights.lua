@@ -373,6 +373,8 @@ end
 -- so our color can tint it. Positioned with the tuned default-border geometry, then the style's Offset.
 local ROUNDED_NEUTRAL_ATLASES = { "UI-HUD-CoolDownManager-Selected", "UI-HUD-CoolDownManager-Selected-white" }
 local ROUNDED_FALLBACK_ATLAS = "UI-HUD-CoolDownManager-Selected-yellow"
+-- DEFAULT_BORDER_EDGE_ADJUST with the top edge raised 1px (tuned in-game) so it meets the nameplate's top.
+local ROUNDED_EDGE_ADJUST = { left = 2, top = 2, right = 1, bottom = 1 }
 local roundedNeutralAtlas
 
 local function findNeutralRoundedAtlas()
@@ -401,7 +403,7 @@ local function renderRounded(host, parts, style, r, g, b, a, geo)
         desaturate = desaturate,
         offset = style.offset,
         nativeInset = 0,
-        nativeEdgeAdjust = DEFAULT_BORDER_EDGE_ADJUST,
+        nativeEdgeAdjust = ROUNDED_EDGE_ADJUST,
     }
     renderBlizzard(host, parts, rounded, r, g, b, a, geo)
 end
