@@ -144,6 +144,29 @@ function addon:ApplyTrackerAnchor()
 end
 
 -- Create the main tracker frame
+-- We keep Blizzard's tracker alive but invisible (alpha 0) so the sections that
+-- borrow its frames keep updating, and an alive frame still hit-tests: its quest
+-- block title buttons swallow clicks aimed at our header buttons whenever its
+-- strata outranks ours. Strata outranks frame level, so no amount of levelling
+-- fixes that -- we have to share its strata and win on level instead.
+--
+-- That strata isn't fixed: older clients declare ObjectiveTrackerFrame
+-- frameStrata="LOW", the classic beta now runs it at MEDIUM. So read it from the
+-- live frame instead of hard-coding it; Core hooks SetFrameStrata to re-run this.
+function addon:MatchBlizzardTrackerStrata()
+    if not self.trackerFrame then return end
+
+    local strata = "LOW"
+    local blizz = ObjectiveTrackerFrame
+    if blizz and blizz.GetFrameStrata then
+        strata = blizz:GetFrameStrata() or strata
+    end
+
+    if self.trackerFrame:GetFrameStrata() ~= strata then
+        self.trackerFrame:SetFrameStrata(strata)
+    end
+end
+
 function addon:CreateTrackerFrame()
     if trackerFrame then
         return trackerFrame
@@ -154,15 +177,8 @@ function addon:CreateTrackerFrame()
     -- Published now, not at the end: RestorePosition (below) already needs it.
     self.trackerFrame = trackerFrame
     trackerFrame:SetSize(self.db.frameWidth, self.db.frameHeight)
-    -- Sit in the same strata as the frame we replace: Blizzard's ObjectiveTrackerFrame
-    -- is declared frameStrata="LOW". We keep that tracker alive but invisible (alpha 0)
-    -- so the sections that borrow its frames keep updating, and an alive frame still
-    -- hit-tests. At BACKGROUND -- the lowest strata there is -- that invisible tracker
-    -- and all of its children sat above this entire window, swallowing clicks aimed at
-    -- the header buttons. Strata outranks frame level, so no amount of levelling fixed
-    -- it. LOW still keeps the tracker behind normal UI panels, which live at MEDIUM and
-    -- above.
-    trackerFrame:SetFrameStrata("LOW")
+    -- Sit in the same strata as the frame we replace (see MatchBlizzardTrackerStrata).
+    self:MatchBlizzardTrackerStrata()
     -- Within that strata, sit above Blizzard's suppressed tracker and its children,
     -- which use low default levels. Everything else here derives its level from
     -- GetFrameLevel(), so the relative layering inside the tracker is unchanged.

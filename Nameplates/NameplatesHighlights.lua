@@ -472,18 +472,17 @@ end
 -- on the health bar: "Disable Default Level Badge border" hides it, otherwise "Fix Default border
 -- offset" redraws it (while the unit is the target/focus). Blizzard only toggles that border's shown
 -- state, so we hide it via alpha instead of fighting its updates.
-local function refreshBadge(bar)
-    local unitFrame = bar.tpnp_unitFrame
-    local badge = unitFrame and unitFrame.PlayerLevelDiffFrame
+-- active: whether our settings apply at all; selected: whether the badge's unit is the target/focus.
+local function renderBadgeBorder(badge, active, selected)
     local native = badge and badge.selectedBorder
     if not native then
         return
     end
     captureNativeColor(native)
 
-    local hideBadge = Nameplates.active and Nameplates.db.hideLevelBadgeBorder
+    local hideBadge = active and Nameplates.db.hideLevelBadgeBorder
     local badgeStyle
-    if Nameplates.active and not hideBadge and Nameplates.db.fixDefaultBorderOffset and isSelectedBar(bar) then
+    if active and not hideBadge and Nameplates.db.fixDefaultBorderOffset and selected then
         badgeStyle = nativeCopyStyle(DEFAULT_BORDER_STYLE, native)
         if badgeStyle then
             badgeStyle.nativeEdgeAdjust = LEVEL_BADGE_EDGE_ADJUST
@@ -492,6 +491,16 @@ local function refreshBadge(bar)
 
     renderSurface(badge, "badge", badgeStyle, badgeGeometry(badge))
     native:SetAlpha((hideBadge or badgeStyle ~= nil) and 0 or 1)
+end
+
+local function refreshBadge(bar)
+    local unitFrame = bar.tpnp_unitFrame
+    renderBadgeBorder(unitFrame and unitFrame.PlayerLevelDiffFrame, Nameplates.active, isSelectedBar(bar))
+end
+
+-- The settings preview's badge: drawn as a selected plate's would be, whether or not highlights are on.
+function Nameplates:RenderPreviewBadgeBorder(badge)
+    renderBadgeBorder(badge, true, true)
 end
 
 -- fromHook: Blizzard just ran UpdateSelectionBorder, so its own border state is already correct.

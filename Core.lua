@@ -169,6 +169,16 @@ function addon:Initialize()
             addon.hookedTrackerMouse = true
         end
 
+        -- Follow the tracker's strata if the game moves it after load, so its
+        -- invisible children never end up layered above our window.
+        if not addon.hookedTrackerStrata then
+            hooksecurefunc(ObjectiveTrackerFrame, "SetFrameStrata", function()
+                addon:MatchBlizzardTrackerStrata()
+            end)
+            addon.hookedTrackerStrata = true
+        end
+        self:MatchBlizzardTrackerStrata()
+
         -- Initial visibility check
         self:UpdateDefaultTrackerVisibility()
     end

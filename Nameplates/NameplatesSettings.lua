@@ -91,6 +91,12 @@ local function applyPreviewHighlight(style)
         if healthBar.deselectedOverlay then
             healthBar.deselectedOverlay:SetShown(ui.preview.activeKey ~= "currentTarget")
         end
+        -- The level badge follows the "Disable Default Level Badge border" / "Fix Default border offset" options.
+        local badge = ui.preview.plate.UnitFrame.PlayerLevelDiffFrame
+        if badge and badge.selectedBorder then
+            badge.selectedBorder:Show()
+            Nameplates:RenderPreviewBadgeBorder(badge)
+        end
     end
 end
 
@@ -459,6 +465,18 @@ local function createBlizzardPreviewPlate(parent)
     for _, texture in ipairs(unitFrame.aggroHighlightTextures or {}) do
         texture:Hide()
     end
+    -- Heal prediction and absorb pieces on the health bar; the over-absorb glows otherwise show as a
+    -- red sliver at the bar's left end and a blue one at its right.
+    local hiddenBarKeys = {
+        "myHealPrediction", "otherHealPrediction", "totalAbsorb", "totalAbsorbOverlay", "myHealAbsorb",
+        "myHealAbsorbLeftShadow", "myHealAbsorbRightShadow", "overAbsorbGlow", "overHealAbsorbGlow",
+    }
+    for _, key in ipairs(hiddenBarKeys) do
+        local region = healthBar[key]
+        if region and region.Hide then
+            region:Hide()
+        end
+    end
 
     -- The level badge, as Blizzard's preview shows it.
     local badge = unitFrame.PlayerLevelDiffFrame
@@ -566,6 +584,9 @@ local function buildSettingsUI()
         checkbox:SetScript("OnClick", function(self)
             onClick(self:GetChecked() and true or false)
             applySettings()
+            if ui.preview.activeKey then
+                updatePreview(ui.preview.activeKey)
+            end
         end)
         addTooltip(checkbox, label, tooltip)
         lastOption = checkbox
