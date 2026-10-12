@@ -90,10 +90,8 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
     return yOffset - 30
 end
 
--- Helper: Create Slider
--- withInput: show the value in an editable box ("Frame Width: [ 250 ]") instead of
--- baked into the label, so an exact number can be typed.
-local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, yOffset, withInput)
+-- Helper: Create Slider (value shown in an editable box so an exact number can be typed).
+local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, yOffset)
     local slider = CreateFrame("Slider", addonName .. dbKey .. "Slider", parent, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", 20, yOffset - 10) -- Give some room for label
     slider:SetWidth(200)
@@ -109,44 +107,44 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
         return string.format("%.2f", v)
     end
 
-    local input
-    if withInput then
-        label:SetText(text .. ":")
+    label:SetText(text)
 
-        input = CreateFrame("EditBox", addonName .. dbKey .. "Input", slider, "InputBoxTemplate")
-        input:SetSize(50, 20)
-        input:SetPoint("LEFT", label, "RIGHT", 10, 0)
-        input:SetAutoFocus(false)
-        input:SetJustifyH("CENTER")
-        input:SetMaxLetters(6)
-        slider.valueInput = input
-        slider.formatValue = FormatValue
+    local input = CreateFrame("EditBox", addonName .. dbKey .. "Input", slider, "InputBoxTemplate")
+    input:SetSize(50, 20)
+    input:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", 0, 0)
+    input:SetAutoFocus(false)
+    input:SetJustifyH("CENTER")
+    input:SetMaxLetters(6)
+    slider.valueInput = input
+    slider.formatValue = FormatValue
 
-        local function Commit(self)
-            local num = tonumber(self:GetText())
-            if num then
-                num = math.max(minVal, math.min(maxVal, num))
-                slider:SetValue(num)
-            end
-            -- Re-show the stored value: covers invalid input, clamping, and rounding.
-            self:SetText(FormatValue(addon.db[dbKey] or minVal))
+    -- Label flush left and value box flush right, both above the track.
+    label:ClearAllPoints()
+    label:SetPoint("BOTTOMLEFT", slider, "TOPLEFT", 0, 4)
+    label:SetPoint("RIGHT", input, "LEFT", -10, 0)
+    label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
+
+    local function Commit(self)
+        local num = tonumber(self:GetText())
+        if num then
+            num = math.max(minVal, math.min(maxVal, num))
+            slider:SetValue(num)
         end
-
-        input:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        input:SetScript("OnEscapePressed", function(self)
-            self:SetText(FormatValue(addon.db[dbKey] or minVal))
-            self:ClearFocus()
-        end)
-        input:SetScript("OnEditFocusLost", Commit)
+        -- Re-show the stored value: covers invalid input, clamping, and rounding.
+        self:SetText(FormatValue(addon.db[dbKey] or minVal))
     end
+
+    input:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    input:SetScript("OnEscapePressed", function(self)
+        self:SetText(FormatValue(addon.db[dbKey] or minVal))
+        self:ClearFocus()
+    end)
+    input:SetScript("OnEditFocusLost", Commit)
 
     local val = addon.db[dbKey] or minVal
-    if input then
-        input:SetText(FormatValue(val))
-        input:SetCursorPosition(0)
-    else
-        label:SetText(text .. ": " .. val)
-    end
+    input:SetText(FormatValue(val))
+    input:SetCursorPosition(0)
     low:SetText(minVal)
     high:SetText(maxVal)
 
@@ -164,12 +162,8 @@ local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, 
         end
 
         addon:SetSetting(dbKey, value)
-        if input then
-            if not input:HasFocus() then
-                input:SetText(FormatValue(value))
-            end
-        else
-            label:SetText(text .. ": " .. value)
+        if not input:HasFocus() then
+            input:SetText(FormatValue(value))
         end
         
         -- Immediate updates
@@ -591,28 +585,8 @@ function addon:UpdateSettingWidgets()
             slider:SetValue(addon.db[dbKey])
             slider:SetScript("OnValueChanged", oldScript)
 
-            if slider.valueInput then
-                if not slider.valueInput:HasFocus() then
-                    slider.valueInput:SetText(slider.formatValue(addon.db[dbKey]))
-                end
-                return
-            end
-
-            -- Update Text
-            local label = _G[slider:GetName() .. "Text"]
-            if label then
-                local text = label:GetText() or ""
-                -- Assuming text format "Name: Value"
-                local name = text:match("^(.*):")
-                if name then
-                    -- Handle rounding if needed, but for frame dimension integers are fine.
-                    -- If scale (float), might need formatting.
-                    local msg = name .. ": " .. addon.db[dbKey]
-                     if dbKey == "frameScale" then
-                         msg = string.format("%s: %.2f", name, addon.db[dbKey])
-                     end
-                    label:SetText(msg)
-                end
+            if not slider.valueInput:HasFocus() then
+                slider.valueInput:SetText(slider.formatValue(addon.db[dbKey]))
             end
         end
     end
@@ -742,9 +716,9 @@ local function InitUI()
         {text = "Bottom", value = "BOTTOM"},
         {text = "Bottom Right", value = "BOTTOMRIGHT"},
     }, "The point of the tracker that stays in place when it's resized. Top Right grows down and to the left; Bottom Left grows up and to the right.", dimY)
-    dimY = CreateSlider(dimSection, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", dimY, true)
-    dimY = CreateSlider(dimSection, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", dimY, true)
-    dimY = CreateSlider(dimSection, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", dimY, true)
+    dimY = CreateSlider(dimSection, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", dimY)
+    dimY = CreateSlider(dimSection, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", dimY)
+    dimY = CreateSlider(dimSection, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", dimY)
 
     s, sy = StartColumnSection(p2, "Styling", y, 2)
     sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker", sy)
@@ -858,7 +832,7 @@ local function InitUI()
     for _, row in ipairs(FONT_ROWS) do
         CreateFontDropdown(fontLeft, row[1], row[2], "Font used for " .. row[7] .. ". Lists every font available, including ones installed by other addons.", sy)
         -- Nudged down so the slider's label lines up with the dropdown's label.
-        CreateSlider(fontRight, row[3], row[4], row[5], row[6], 1, "Size of " .. row[7], sy - 8, true)
+        CreateSlider(fontRight, row[3], row[4], row[5], row[6], 1, "Size of " .. row[7], sy - 8)
         sy = sy - 60
     end
     y = y - EndSection(s, sy)
