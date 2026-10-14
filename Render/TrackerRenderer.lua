@@ -262,21 +262,27 @@ function addon:ShowTrackableTooltip(button, trackable)
             tooltip:AddLine(trackable.zone, 0.5, 0.8, 1)
         end
 
-        -- Add quest short description — fetched fresh on each hover so it never goes stale
-        local shortDesc = addon:GetQuestShortDescription(trackable.id, trackable.logIndex)
-        if shortDesc and shortDesc ~= "" then
+        -- Add quest objective summary — fetched fresh on each hover so it never goes stale
+        local objectiveSummary = addon:GetQuestObjectiveText(trackable.id, trackable.logIndex)
+        if objectiveSummary and objectiveSummary ~= "" then
             tooltip:AddLine(" ")
-            tooltip:AddLine(shortDesc, 0.9, 0.9, 0.9, true)
+            tooltip:AddLine(objectiveSummary, 0.9, 0.9, 0.9, true)
         end
 
         if trackable.objectives and #trackable.objectives > 0 then
-            tooltip:AddLine(" ")
+            local addedSpacer = false
             for i, objective in ipairs(trackable.objectives) do
                 if i > 5 then
                     break
                 end
                 local text = objective and objective.text
-                if text and text ~= "" then
+                -- Quests without countable objectives show the summary as their
+                -- only objective line; don't print it twice.
+                if text and text ~= "" and text ~= objectiveSummary then
+                    if not addedSpacer then
+                        tooltip:AddLine(" ")
+                        addedSpacer = true
+                    end
                     if objective.finished then
                         tooltip:AddLine("• " .. text, 0.5, 1, 0.5, true)
                     else

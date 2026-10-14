@@ -189,9 +189,13 @@ function addon:IsCampaignQuestLogEntry(logIndex, info)
     return false
 end
 
-function addon:GetQuestShortDescription(questID, logIndex)
+function addon:GetQuestObjectiveText(questID, logIndex)
     if not GetQuestLogQuestText then return nil end
 
+    -- GetQuestLogQuestText returns (description, objectives); we want the
+    -- objectives summary ("Investigate the disappearance of..."), not the
+    -- quest-giver's flavor text.
+    --
     -- GetQuestLogQuestText reads whichever quest is currently *selected*, so the
     -- quest has to be selected first. The legacy SelectQuestLogEntry(logIndex) no
     -- longer does that on this client, which is why every quest's tooltip showed
@@ -226,8 +230,8 @@ function addon:GetQuestShortDescription(questID, logIndex)
     if not selected then return nil end
 
     local desc
-    local ok, questText = pcall(GetQuestLogQuestText)
-    if ok then desc = questText end
+    local ok, _, objectivesText = pcall(GetQuestLogQuestText)
+    if ok then desc = objectivesText end
 
     -- Put the player's selection back.
     if previousQuestID and previousQuestID ~= 0 and previousQuestID ~= questID
