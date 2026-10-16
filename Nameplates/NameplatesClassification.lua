@@ -144,6 +144,39 @@ local function sanitizeTooltipText(text)
     return sanitized
 end
 
+-- Records an objective line's "x/y" or "n%" progress on the parsed tooltip info.
+local function readObjectiveProgress(info, sanitized)
+    local lower = safeLower(sanitized)
+    -- Dungeon "Enemy Forces" progress isn't a quest objective.
+    if safeContains(lower, "enemy forces") then
+        return
+    end
+
+    local current, total = safeMatch(sanitized, "(%d+)%s*/%s*(%d+)")
+    local currentNum, totalNum = tonumber(current), tonumber(total)
+    if currentNum and totalNum then
+        if currentNum >= totalNum then
+            info.hasCompletedObjective = true
+        else
+            info.hasQuestObjective = true
+        end
+    end
+
+    local percentNum = tonumber((safeMatch(sanitized, "(%d?%d?%d)%%")))
+    if percentNum and not safeContains(lower, "threat") then
+        if percentNum >= 100 then
+            info.hasCompletedObjective = true
+        else
+            info.hasQuestObjective = true
+        end
+    end
+end
+
+local isSecretValue = rawget(_G, "issecretvalue") or function() return false end
+local lineTypes = Enum and Enum.TooltipDataLineType
+local QUEST_TITLE_LINE = lineTypes and lineTypes.QuestTitle
+local QUEST_OBJECTIVE_LINE = lineTypes and lineTypes.QuestObjective
+
 local function parseTooltip(unit)
     local info = {
         hasQuestObjective = false,
@@ -156,42 +189,26 @@ local function parseTooltip(unit)
         local data = C_TooltipInfo.GetUnit(unit)
         if data then
             for _, line in ipairs(data.lines) do
-                local text = line.leftText
-                if type(text) == "string" then
+                local lineType, text = line.type, line.leftText
+                -- Restricted tooltips (instance combat) hide their contents; nothing after this is readable either.
+                if isSecretValue(lineType) or isSecretValue(text) then
+                    break
+                end
+
+                -- With typed lines only quest titles (matched against the quest log) and objectives
+                -- (progress) matter; otherwise every line is a candidate for both.
+                local isTitle, isObjective = true, true
+                if QUEST_OBJECTIVE_LINE then
+                    isTitle = lineType == QUEST_TITLE_LINE
+                    isObjective = lineType == QUEST_OBJECTIVE_LINE
+                end
+
+                if (isTitle or isObjective) and type(text) == "string" then
                     local sanitized = sanitizeTooltipText(text)
                     if sanitized then
                         info.lines[#info.lines + 1] = sanitized
-
-                        local lower = safeLower(sanitized)
-                        -- Dungeon "Enemy Forces" progress isn't a quest objective.
-                        local isEnemyForcesLine = safeContains(lower, "enemy forces")
-
-                        local current, total = safeMatch(sanitized, "(%d+)%s*/%s*(%d+)")
-                        if current and total and not isEnemyForcesLine then
-                            local currentNum = tonumber(current)
-                            local totalNum = tonumber(total)
-                            if currentNum and totalNum then
-                                if currentNum >= totalNum then
-                                    info.hasCompletedObjective = true
-                                else
-                                    info.hasQuestObjective = true
-                                end
-                            end
-                        end
-
-                        local percentValue = safeMatch(sanitized, "(%d?%d?%d)%%")
-                        if percentValue then
-                            local isThreatLine = safeContains(lower, "threat")
-                            if not isThreatLine and not isEnemyForcesLine then
-                                local percentNum = tonumber(percentValue)
-                                if percentNum then
-                                    if percentNum >= 100 then
-                                        info.hasCompletedObjective = true
-                                    else
-                                        info.hasQuestObjective = true
-                                    end
-                                end
-                            end
+                        if isObjective then
+                            readObjectiveProgress(info, sanitized)
                         end
                     end
                 end
@@ -505,8 +522,10 @@ local function classifyUnit(unitData)
     end
 
     local unit = unitData.unit
-    local unitName = UnitName(unit)
-    if type(unitName) ~= "string" then
+    -- On restricted maps the unit's identity (name, GUID, tooltip) can be hidden from addons; skip until it isn't.
+    local identityHidden = C_Secrets and C_Secrets.ShouldUnitIdentityBeSecret and C_Secrets.ShouldUnitIdentityBeSecret(unit)
+    local unitName = not identityHidden and UnitName(unit)
+    if type(unitName) ~= "string" or isSecretValue(unitName) then
         unitCache[cacheKey] = {
             result = nil,
             expires = now + UNIT_CACHE_SECONDS,

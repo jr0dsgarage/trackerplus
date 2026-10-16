@@ -10,13 +10,12 @@ Nameplates.pendingUpdate = Nameplates.pendingUpdate or false
 local Print = TrackerPlus.Print
 
 function Nameplates:UpdateHighlight()
-    local inInstance = IsInInstance()
     -- Read by the selection border hook: when inactive, Blizzard's native border is left alone.
-    self.active = Nameplates.db.enabled and not inInstance
+    self.active = Nameplates.db.enabled
 
     if not self.active then
         self:ClearHighlights()
-        if not inInstance and Nameplates.db.debugMode then
+        if Nameplates.db.debugMode then
             self:UpdateDebugFrame({})
         end
         return
