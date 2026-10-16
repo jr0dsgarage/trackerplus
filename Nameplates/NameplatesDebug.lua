@@ -169,8 +169,11 @@ function Nameplates:UpdateDebugFrame(results)
 
     local lines = {}
     local targetName = UnitName("target") or "none"
+    -- Secret strings can't go through table.concat below.
+    if issecretvalue and issecretvalue(targetName) then
+        targetName = "<hidden by game>"
+    end
     lines[#lines + 1] = "Target: " .. targetName
-    lines[#lines + 1] = "Tracked units: " .. tostring(#results)
 
     local totalNameplates, hostileNameplates = 0, 0
     if C_NamePlate and C_NamePlate.GetNamePlates then
@@ -184,6 +187,12 @@ function Nameplates:UpdateDebugFrame(results)
                 end
             end
         end
+    end
+
+    -- Hostile plates missing from the results were skipped, normally because the game hid the unit's identity.
+    lines[#lines + 1] = string.format("Tracked units: %d of %d hostile nameplates", #results, hostileNameplates)
+    if hostileNameplates > #results then
+        lines[#lines + 1] = string.format("Skipped units (name/tooltip hidden by game): %d", hostileNameplates - #results)
     end
 
     local highlightedCount, filteredCount = 0, 0
