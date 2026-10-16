@@ -596,7 +596,12 @@ local function isActiveQuestObjective(result)
         return true
     end
     local isRelated = C_QuestLog and C_QuestLog.UnitIsRelatedToQuest
-    return isRelated ~= nil and result.unit ~= nil and isRelated(result.unit, superID) == true
+    if not isRelated or not result.unit then
+        return false
+    end
+    local related = isRelated(result.unit, superID)
+    -- Can be secret on restricted maps, where it can't be compared.
+    return not (issecretvalue and issecretvalue(related)) and related == true
 end
 
 local function determineStyle(result)

@@ -192,7 +192,7 @@ function Nameplates:UpdateDebugFrame(results)
     -- Hostile plates missing from the results were skipped, normally because the game hid the unit's identity.
     lines[#lines + 1] = string.format("Tracked units: %d of %d hostile nameplates", #results, hostileNameplates)
     if hostileNameplates > #results then
-        lines[#lines + 1] = string.format("Skipped units (name/tooltip hidden by game): %d", hostileNameplates - #results)
+        lines[#lines + 1] = string.format("Skipped units: %d", hostileNameplates - #results)
     end
 
     local highlightedCount, filteredCount = 0, 0
@@ -289,6 +289,10 @@ function Nameplates:UpdateDebugFrame(results)
 
         if info.tooltipLines and #info.tooltipLines > 0 then
             lines[#lines + 1] = "    " .. table.concat(info.tooltipLines, " / ")
+        end
+
+        if info.hiddenTooltipLines and info.hiddenTooltipLines > 0 then
+            lines[#lines + 1] = string.format("    Quest lines with text hidden by game: %d (read by line type)", info.hiddenTooltipLines)
         end
     end
 

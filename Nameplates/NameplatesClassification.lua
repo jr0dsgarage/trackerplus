@@ -144,7 +144,15 @@ local function sanitizeTooltipText(text)
     return sanitized
 end
 
--- Records an objective line's "x/y" or "n%" progress on the parsed tooltip info.
+local function recordObjective(info, completed)
+    if completed then
+        info.hasCompletedObjective = true
+    else
+        info.hasQuestObjective = true
+    end
+end
+
+-- Records "x/y" or "n%" progress found in a line's text; for tooltips without line types.
 local function readObjectiveProgress(info, sanitized)
     local lower = safeLower(sanitized)
     -- Dungeon "Enemy Forces" progress isn't a quest objective.
@@ -155,61 +163,93 @@ local function readObjectiveProgress(info, sanitized)
     local current, total = safeMatch(sanitized, "(%d+)%s*/%s*(%d+)")
     local currentNum, totalNum = tonumber(current), tonumber(total)
     if currentNum and totalNum then
-        if currentNum >= totalNum then
-            info.hasCompletedObjective = true
-        else
-            info.hasQuestObjective = true
-        end
+        recordObjective(info, currentNum >= totalNum)
     end
 
     local percentNum = tonumber((safeMatch(sanitized, "(%d?%d?%d)%%")))
     if percentNum and not safeContains(lower, "threat") then
-        if percentNum >= 100 then
-            info.hasCompletedObjective = true
-        else
-            info.hasQuestObjective = true
-        end
+        recordObjective(info, percentNum >= 100)
     end
 end
 
 local isSecretValue = rawget(_G, "issecretvalue") or function() return false end
+
+-- nil in place of a secret, so the value can be tested and compared safely.
+local function readable(value)
+    if isSecretValue(value) then
+        return nil
+    end
+    return value
+end
+
 local lineTypes = Enum and Enum.TooltipDataLineType
 local QUEST_TITLE_LINE = lineTypes and lineTypes.QuestTitle
 local QUEST_OBJECTIVE_LINE = lineTypes and lineTypes.QuestObjective
+
+-- Whether a typed objective line is finished, from the fields Blizzard's own check icon uses.
+-- On restricted maps (dungeons) all of them are hidden: it's still an objective, so it counts as unfinished.
+local function isObjectiveLineCompleted(line)
+    local completed = readable(line.completed)
+    if type(completed) == "boolean" then
+        return completed
+    end
+    local fulfilled, required = readable(line.numFulfilled), readable(line.numRequired)
+    if type(fulfilled) == "number" and type(required) == "number" and required > 0 then
+        return fulfilled >= required
+    end
+    return false
+end
+
+-- Keeps a line's text for title matching and the debug window; returns it sanitized, or nil if unreadable.
+local function addTextLine(info, text)
+    if isSecretValue(text) then
+        info.hiddenLineCount = info.hiddenLineCount + 1
+        return nil
+    end
+    local sanitized = type(text) == "string" and sanitizeTooltipText(text)
+    if sanitized then
+        info.lines[#info.lines + 1] = sanitized
+        return sanitized
+    end
+    return nil
+end
 
 local function parseTooltip(unit)
     local info = {
         hasQuestObjective = false,
         hasCompletedObjective = false,
+        questIDs = {},
         lines = {},
         normalizedLines = nil,
+        hiddenLineCount = 0,
     }
 
     if C_TooltipInfo and C_TooltipInfo.GetUnit then
         local data = C_TooltipInfo.GetUnit(unit)
         if data then
             for _, line in ipairs(data.lines) do
-                local lineType, text = line.type, line.leftText
-                -- Restricted tooltips (instance combat) hide their contents; nothing after this is readable either.
-                if isSecretValue(lineType) or isSecretValue(text) then
+                local lineType = line.type
+                -- Restricted tooltips can hide everything from addons; nothing after this is readable either.
+                if isSecretValue(lineType) then
                     break
                 end
 
-                -- With typed lines only quest titles (matched against the quest log) and objectives
-                -- (progress) matter; otherwise every line is a candidate for both.
-                local isTitle, isObjective = true, true
                 if QUEST_OBJECTIVE_LINE then
-                    isTitle = lineType == QUEST_TITLE_LINE
-                    isObjective = lineType == QUEST_OBJECTIVE_LINE
-                end
-
-                if (isTitle or isObjective) and type(text) == "string" then
-                    local sanitized = sanitizeTooltipText(text)
-                    if sanitized then
-                        info.lines[#info.lines + 1] = sanitized
-                        if isObjective then
-                            readObjectiveProgress(info, sanitized)
+                    if lineType == QUEST_TITLE_LINE then
+                        local questID = readable(line.id)
+                        if type(questID) == "number" then
+                            info.questIDs[#info.questIDs + 1] = questID
                         end
+                        addTextLine(info, line.leftText)
+                    elseif lineType == QUEST_OBJECTIVE_LINE then
+                        recordObjective(info, isObjectiveLineCompleted(line))
+                        addTextLine(info, line.leftText)
+                    end
+                else
+                    -- Untyped tooltips: every line is a candidate title, and its text the only progress source.
+                    local sanitized = addTextLine(info, line.leftText)
+                    if sanitized then
+                        readObjectiveProgress(info, sanitized)
                     end
                 end
             end
@@ -472,7 +512,7 @@ local function matchQuestFromTooltip(unit, tooltipInfo, questEntries)
     if unit and unitIsRelatedToQuest then
         for _, entry in ipairs(questEntries) do
             if entry.questID then
-                local related = unitIsRelatedToQuest(unit, entry.questID)
+                local related = readable(unitIsRelatedToQuest(unit, entry.questID))
                 if related then
                     return entry, "unit-related"
                 end
@@ -482,6 +522,15 @@ local function matchQuestFromTooltip(unit, tooltipInfo, questEntries)
 
     if not tooltipInfo then
         return nil, nil
+    end
+
+    -- Quest title lines carry the quest's ID, an exact match where the title text is only a fuzzy one.
+    for _, questID in ipairs(tooltipInfo.questIDs) do
+        for _, entry in ipairs(questEntries) do
+            if entry.questID == questID then
+                return entry, "tooltip-id"
+            end
+        end
     end
 
     local normalizedTooltipLines = tooltipInfo.normalizedLines
@@ -522,10 +571,11 @@ local function classifyUnit(unitData)
     end
 
     local unit = unitData.unit
-    -- On restricted maps the unit's identity (name, GUID, tooltip) can be hidden from addons; skip until it isn't.
-    local identityHidden = C_Secrets and C_Secrets.ShouldUnitIdentityBeSecret and C_Secrets.ShouldUnitIdentityBeSecret(unit)
-    local unitName = not identityHidden and UnitName(unit)
-    if type(unitName) ~= "string" or isSecretValue(unitName) then
+    local unitName = UnitName(unit)
+    if isSecretValue(unitName) then
+        -- Identity hidden on restricted maps; the tooltip's line types can still mark a quest target.
+        unitName = "<hidden by game>"
+    elseif type(unitName) ~= "string" then
         unitCache[cacheKey] = {
             result = nil,
             expires = now + UNIT_CACHE_SECONDS,
@@ -553,9 +603,9 @@ local function classifyUnit(unitData)
         end
     end
     local hasSoftTarget = hasQuestItemIcon(unit)
-    local isQuestBoss = UnitIsQuestBoss and UnitIsQuestBoss(unit)
+    local isQuestBoss = UnitIsQuestBoss and readable(UnitIsQuestBoss(unit))
 
-    local classification = UnitClassification and UnitClassification(unit)
+    local classification = UnitClassification and readable(UnitClassification(unit))
     local isRare = classification == "rare" or classification == "rareelite" or classification == "elite"
 
     local reason
@@ -581,6 +631,7 @@ local function classifyUnit(unitData)
         questType = questType,
         questMatchSource = questMatchSource,
         tooltipLines = tooltipInfo.lines,
+        hiddenTooltipLines = tooltipInfo.hiddenLineCount,
         isWorldQuest = isWorldQuest,
         isBonusObjective = isBonusObjective,
         hasSoftTarget = hasSoftTarget,
