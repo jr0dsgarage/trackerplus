@@ -2,6 +2,35 @@ local addonName, addon = ...
 
 -- Localize hot-path globals
 local ipairs, tostring = ipairs, tostring
+local format = string.format
+
+local function OnExpandClick(self)
+    local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+    addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
+end
+
+local function OnExpandEnter(self)
+    local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+    local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+    if isMainHeader then
+        tooltip:SetText(self._headerCollapsed and "Hold SHIFT to Expand All" or "Hold SHIFT to Minimize All")
+    else
+        tooltip:SetText(self._headerCollapsed and "Click to Expand" or "Click to Collapse")
+    end
+    tooltip:Show()
+end
+
+local function OnExpandLeave()
+    addon:HideSharedTooltip()
+end
+
+local function OnHeaderClick(self, mouseButton)
+    if mouseButton == "LeftButton" then
+        local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
+        -- Shift recursive toggle is only for major/main headers
+        addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
+    end
+end
 
 -------------------------------------------------------------------------------
 -- RenderNormalTrackables — Headers + quest items inside the scroll content frame
@@ -16,6 +45,21 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
     local currentMinorHeaderTitle = nil
     local renderedNormalItems = 0
     local renderedHeaders = 0
+
+    -- Header presentation depends only on settings, so its cache signatures are
+    -- built once per pass and compared per header.
+    local iconStyle = db.headerIconStyle or "standard"
+    local iconPos = db.headerIconPosition or "left"
+    local bgStyle = db.headerBackgroundStyle or "questlog"
+    local headerColor = db.headerColor
+    local expandSigCollapsed = iconStyle .. "|" .. iconPos .. "|1"
+    local expandSigExpanded = iconStyle .. "|" .. iconPos .. "|0"
+    local textLayoutSig = iconStyle .. ":" .. iconPos
+    local bgSigMajor, bgSigMinor = bgStyle .. ":1", bgStyle .. ":0"
+    local textStyleSigMajor = format("%s:%s:%s:%s:%s:%s:%s", tostring(db.headerFontFace), tostring(db.headerFontSize + 2),
+        tostring(db.headerFontOutline), tostring(headerColor.r), tostring(headerColor.g), tostring(headerColor.b), tostring(headerColor.a))
+    local textStyleSigMinor = format("%s:%s:%s:%s:%s:%s:%s", tostring(db.headerFontFace), tostring(db.headerFontSize),
+        tostring(db.headerFontOutline), tostring(headerColor.r * 0.9), tostring(headerColor.g * 0.9), tostring(headerColor.b * 0.9), tostring(headerColor.a))
 
     -- Compatibility: Auctionator Crafting Search Button — pre-hide before render pass.
     -- Will be reparented and shown when the Professions major header is encountered below.
@@ -57,16 +101,12 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                     header.expandBtn._iconPos = nil
                 end
             end
-            header:Show()
             
             -- Padding/Indentation
             local xOffset = isMajor and db.spacingMajorHeaderIndent or db.spacingMinorHeaderIndent
             
             header:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", xOffset, -yOffset)
             header:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", 0, -yOffset)
-            
-            -- Ensure any hijacked "Active Quest" artifacts are hidden
-            if header.styledBackdrop then header.styledBackdrop:Hide() end
             
             -- Compatibility: Auctionator Crafting Search Button
             if isMajor and item.key == "MAJOR_profession" then
@@ -92,9 +132,6 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 header.expandBtn:SetPoint("LEFT", 4, 0)
             end
             
-            
-            local iconStyle = db.headerIconStyle or "standard"
-            local iconPos = db.headerIconPosition or "left"
             local isCollapsed = item.collapsed
             
             -- Position Button (Left or Right)
@@ -109,9 +146,7 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             end
             
             -- Reset button state to prevent specific style overlapping (e.g. Text + Texture)
-            local styleSignature = table.concat({
-                tostring(iconStyle), tostring(iconPos), tostring(isCollapsed)
-            }, "|")
+            local styleSignature = isCollapsed and expandSigCollapsed or expandSigExpanded
             if header.expandBtn._styleSignature ~= styleSignature then
                 header.expandBtn:SetText("")
                 header.expandBtn:SetNormalTexture("")
@@ -164,53 +199,22 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             
             header.expandBtn._headerKey = item.key
             header.expandBtn._headerCollapsed = isCollapsed
-            if not header.expandBtn._handlersBound then
-                -- Icon Tooltip & Click (Exclusive)
-                header.expandBtn:SetScript("OnClick", function(self)
-                     local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
-                     addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
-                end)
-                
-                header.expandBtn:SetScript("OnEnter", function(self)
-                     local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-                     local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
-                     if isMainHeader then
-                         if self._headerCollapsed then
-                             tooltip:SetText("Hold SHIFT to Expand All")
-                         else
-                             tooltip:SetText("Hold SHIFT to Minimize All")
-                         end
-                     else
-                         if self._headerCollapsed then
-                             tooltip:SetText("Click to Expand")
-                         else
-                             tooltip:SetText("Click to Collapse")
-                         end
-                     end
-                     tooltip:Show()
-                end)
-                header.expandBtn:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
-                header.expandBtn._handlersBound = true
+            -- Shared with the Campaign header's expand button (RenderCampaign.lua),
+            -- so rebind whenever it last served that.
+            if header.expandBtn._expandMode ~= "header" then
+                header.expandBtn:SetScript("OnClick", OnExpandClick)
+                header.expandBtn:SetScript("OnEnter", OnExpandEnter)
+                header.expandBtn:SetScript("OnLeave", OnExpandLeave)
+                header.expandBtn._expandMode = "header"
             end
 
             
             -- Title Text
-            local headerFontSize = isMajor and (db.headerFontSize + 2) or db.headerFontSize
-            local headerColorR = isMajor and db.headerColor.r or (db.headerColor.r * 0.9)
-            local headerColorG = isMajor and db.headerColor.g or (db.headerColor.g * 0.9)
-            local headerColorB = isMajor and db.headerColor.b or (db.headerColor.b * 0.9)
-            local headerTextStyleSignature = table.concat({
-                tostring(db.headerFontFace),
-                tostring(headerFontSize),
-                tostring(db.headerFontOutline),
-                tostring(headerColorR),
-                tostring(headerColorG),
-                tostring(headerColorB),
-                tostring(db.headerColor.a)
-            }, ":")
+            local headerTextStyleSignature = isMajor and textStyleSigMajor or textStyleSigMinor
             if header._textStyleSignature ~= headerTextStyleSignature then
-                header.text:SetFont(db.headerFontFace, headerFontSize, db.headerFontOutline)
-                header.text:SetTextColor(headerColorR, headerColorG, headerColorB, db.headerColor.a)
+                local shade = isMajor and 1 or 0.9
+                header.text:SetFont(db.headerFontFace, isMajor and (db.headerFontSize + 2) or db.headerFontSize, db.headerFontOutline)
+                header.text:SetTextColor(headerColor.r * shade, headerColor.g * shade, headerColor.b * shade, headerColor.a)
                 header.text:SetJustifyH("LEFT")
                 header._textStyleSignature = headerTextStyleSignature
             end
@@ -220,8 +224,7 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 header._titleText = item.title
             end
 
-            local headerTextLayoutSignature = table.concat({iconStyle, iconPos}, ":")
-            if header._textLayoutSignature ~= headerTextLayoutSignature then
+            if header._textLayoutSignature ~= textLayoutSig then
                 -- RESET TEXT POINT for recycled headers
                 header.text:ClearAllPoints()
 
@@ -238,12 +241,10 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                     header.text:SetPoint("TOPLEFT", 22, -2)
                     header.text:SetPoint("TOPRIGHT", -5, -2)
                 end
-                header._textLayoutSignature = headerTextLayoutSignature
+                header._textLayoutSignature = textLayoutSig
             end
             
-            local bgStyle = db.headerBackgroundStyle or "questlog"
-
-            local bgSignature = table.concat({bgStyle, tostring(isMajor and 1 or 0)}, ":")
+            local bgSignature = isMajor and bgSigMajor or bgSigMinor
             if header._bgSignature ~= bgSignature then
                 header.bg:ClearAllPoints()
 
@@ -284,19 +285,12 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 header:SetHeight(headerHeight)
                 header._height = headerHeight
             end
-            header:Show()
             
             -- Store header data for click handling
             header.trackableData = item
             header._headerKey = item.key
             if header._scriptMode ~= "header" then
-                header:SetScript("OnClick", function(self, mouseButton)
-                    if mouseButton == "LeftButton" then
-                        local isMainHeader = self._headerKey and self._headerKey:find("^MAJOR_")
-                        -- Shift recursive toggle is only for major/main headers
-                        addon:ToggleHeader(self._headerKey, isMainHeader and IsShiftKeyDown())
-                    end
-                end)
+                header:SetScript("OnClick", OnHeaderClick)
                 -- Clear other scripts that might conflict
                 header:SetScript("OnMouseUp", nil)
 
@@ -307,19 +301,6 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
             end
             
             yOffset = yOffset + (isMajor and db.spacingMajorHeaderAfter or db.spacingMinorHeaderAfter)
-            
-            -- Cleanup extra elements if reused
-            if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
-            if header.objectiveBullets then for _, obj in ipairs(header.objectiveBullets) do obj:Hide() end end
-            if header.objectivePrefixes then for _, obj in ipairs(header.objectivePrefixes) do obj:Hide() end end
-            if header.objectiveProgresses then for _, obj in ipairs(header.objectiveProgresses) do obj:Hide() end end
-            if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
-            if header.distance then header.distance:Hide() end
-            
-            -- Ensure POI buttons and Item buttons are hidden on headers
-            if header.poiButton then header.poiButton:Hide() end
-            if header.itemButton then header.itemButton:Hide() end
-            if header.icon then header.icon:Hide() end
             end -- End skip minor header check
 
         else

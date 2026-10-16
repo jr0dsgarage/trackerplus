@@ -266,7 +266,7 @@ function Nameplates:UpdateDebugFrame(results)
 
         lines[#lines + 1] = highlightExplanation
 
-    local hasQuestMeta = (info.questName and info.questName ~= "") or info.questID or info.questType or info.questMatchSource or info.hasTooltipObjective
+        local hasQuestMeta = (info.questName and info.questName ~= "") or info.questID or info.questType or info.questMatchSource or info.hasTooltipObjective
         if hasQuestMeta then
             local questBits = {}
             questBits[#questBits + 1] = string.format("ID: %s", info.questID or "n/a")

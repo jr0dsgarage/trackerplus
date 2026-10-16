@@ -4,7 +4,7 @@ TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
 local Nameplates = TrackerPlus.Nameplates
 
 -- Current database version - increment when migrations are added
-local DB_VERSION = 2
+local DB_VERSION = 3
 
 local DEFAULTS = {
     enabled = true,
@@ -20,7 +20,8 @@ local DEFAULTS = {
     currentTargetStyle = "blizzard",
     -- Objectives of the Active (super-tracked) quest; overrides the other quest styles, but never the current target.
     activeQuestEnabled = true,
-    activeQuestColor = { r = 1, g = 0.5, b = 0, a = 0.9 },  -- Orange
+    -- The tracker's quest-area highlight blue (questAreaHighlightColor in Database.lua).
+    activeQuestColor = { r = 0.30, g = 0.58, b = 1, a = 1 },
     activeQuestThickness = 3,
     activeQuestOffset = 0,
     activeQuestStyle = "blizzard",
@@ -86,10 +87,6 @@ local function mergeDefaults(target, source)
     end
 end
 
-function Nameplates:GetDefault(key)
-    return deepCopy(DEFAULTS[key])
-end
-
 function Nameplates:InitializeDB()
     -- Stored beside TrackerPlus's own settings, which InitDatabase keeps under TrackerPlusDB.settings.
     TrackerPlusDB = TrackerPlusDB or {}
@@ -137,6 +134,15 @@ function Nameplates:InitializeDB()
             questColor.g = DEFAULTS.questObjectiveColor.g
             questColor.b = DEFAULTS.questObjectiveColor.b
             questColor.a = DEFAULTS.questObjectiveColor.a
+        end
+
+        -- Migration (v3): the Active Quest default changed from orange to the quest-area
+        -- blue. Profiles still on the old orange default get the new one; a profile that
+        -- picked a different color keeps it.
+        local activeColor = Nameplates.db.activeQuestColor
+        if currentVersion < 3 and activeColor and activeColor.r == 1 and activeColor.g == 0.5
+            and activeColor.b == 0 and activeColor.a == 0.9 then
+            Nameplates.db.activeQuestColor = deepCopy(DEFAULTS.activeQuestColor)
         end
 
         -- Mark database as migrated

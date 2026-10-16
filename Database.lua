@@ -69,14 +69,11 @@ local DEFAULTS = {
     highlightQuestsInArea = true, -- Highlight a quest while standing inside its shaded map area
     questAreaHighlightStyle = "stripe", -- See STYLES in QuestAreaHighlight.lua
     questAreaHighlightColor = {r = 0.30, g = 0.58, b = 1, a = 1}, -- Sampled from the map's quest-area edge glow
-    showZoneHeaders = true,
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
     autoMinimizeHeaders = false, -- Collapse quest zone headers except the current zone and quest areas we stand in
     
-    -- Grouping & Sorting
-    groupByZone = true,
-    groupByCategory = true,
+    -- Sorting
     sortMethod = "difficulty_asc",  -- "difficulty_asc", "difficulty_desc", "proximity", "alphabetical"
     
     -- State
@@ -101,15 +98,7 @@ local DEFAULTS = {
     
     -- Quest Type Colors
     questTypeColors = {
-        normal = {r = 1, g = 0.82, b = 0, a = 1},
-        elite = {r = 1, g = 0.5, b = 0, a = 1},
-        dungeon = {r = 0.5, g = 0.5, b = 1, a = 1},
-        raid = {r = 1, g = 0, b = 1, a = 1},
-        pvp = {r = 1, g = 0.1, b = 0.1, a = 1},
-        legendary = {r = 1, g = 0.5, b = 0, a = 1},
-        artifact = {r = 0.9, g = 0.8, b = 0.5, a = 1},
         worldQuest = {r = 0.25, g = 0.78, b = 0.92, a = 1},
-        profession = {r = 0.5, g = 1, b = 0.5, a = 1},
     },
     
     -- Interaction
@@ -132,7 +121,6 @@ local DEFAULTS = {
     spacingMinorHeaderIndent = 5,      -- Indent for minor zone headers
     spacingTrackableIndent = 10,       -- Indent for quest/achievement items
     spacingPOIButton = 16,             -- Left padding when POI button is present
-    spacingItemButton = 20,            -- Additional padding when item button exists
     spacingObjectiveIndent = 0,        -- Additional indent for objectives (relative to parent)
     spacingItemVertical = 4,           -- Vertical spacing between trackable items
     spacingMajorHeaderAfter = 26,      -- Vertical space after major headers
@@ -256,6 +244,23 @@ function addon:InitDatabase()
         -- Migration: quest type toggle removed
         TrackerPlusDB.settings.showQuestType = nil
 
+        -- Migration: settings that never affected anything. Zone grouping is always on.
+        TrackerPlusDB.settings.showZoneHeaders = nil
+        TrackerPlusDB.settings.groupByZone = nil
+        TrackerPlusDB.settings.groupByCategory = nil
+        TrackerPlusDB.settings.spacingItemButton = nil
+
+        -- Migration: only the world quest type color is read; drop the others
+        -- (normal, elite, dungeon, raid, pvp, legendary, artifact, profession).
+        local questTypeColors = TrackerPlusDB.settings.questTypeColors
+        if type(questTypeColors) == "table" then
+            for key in pairs(questTypeColors) do
+                if DEFAULTS.questTypeColors[key] == nil then
+                    questTypeColors[key] = nil
+                end
+            end
+        end
+
         -- Migration: clamp bar border size to new 0..10 range
         if TrackerPlusDB.settings.barBorderSize == nil then
             TrackerPlusDB.settings.barBorderSize = DEFAULTS.barBorderSize
@@ -309,7 +314,6 @@ function addon:InitDatabase()
     
     -- Create reference to settings
     addon.db = TrackerPlusDB.settings
-    addon.DEFAULTS = DEFAULTS
 end
 
 -- Reset settings to defaults
@@ -320,11 +324,6 @@ function addon:ResetDatabase()
     -- Nameplates keeps its own settings table beside ours.
     addon.Nameplates:ResetDB()
     addon.Nameplates:RequestUpdate()
-end
-
--- Get a setting value
-function addon:GetSetting(key)
-    return addon.db[key]
 end
 
 -- Set a setting value

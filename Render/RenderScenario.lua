@@ -1,52 +1,69 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
--- (LSM, bit_band, floor, match, and the DebugLayout alias were only used by the manual
--- scenario-mirror render branch removed above; dropped along with it.)
 local ipairs, pcall, tostring = ipairs, pcall, tostring
 local format = string.format
 local max = math.max
 local hooksecurefunc = hooksecurefunc
 
-local function EnsureScenarioBorrowAnchor(owner, borrowedFrame)
-    if not (owner and owner.scenarioFrame and borrowedFrame) then
+-- Canonical borrow anchor: one point only, pinned to scenarioFrame TOPRIGHT (0, 0).
+-- Repair only when dirty to minimize churn, but strip immediately if Blizzard injects
+-- extra points or wrong offsets.
+local function NormalizeScenarioBorrowAnchor(scenarioFrame, borrowedFrame)
+    local parent = borrowedFrame:GetParent()
+    local numPoints = borrowedFrame:GetNumPoints()
+    local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)
+    local isDirty =
+        parent ~= scenarioFrame
+        or numPoints ~= 1
+        or point ~= "TOPRIGHT"
+        or relativeTo ~= scenarioFrame
+        or relativePoint ~= "TOPRIGHT"
+        or tonumber(xOfs or 0) ~= 0
+        or tonumber(yOfs or 0) ~= 0
+
+    if not isDirty then
         return
     end
 
-    -- Canonical borrow anchor: one point only, pinned to scenarioFrame TOPRIGHT (0, 0).
-    -- Repair only when dirty to minimize churn, but strip immediately if Blizzard injects
-    -- extra points or wrong offsets.
-    pcall(function()
-        local parent = borrowedFrame:GetParent()
-        local numPoints = borrowedFrame.GetNumPoints and borrowedFrame:GetNumPoints() or 0
-        local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)
-        local isDirty =
-            parent ~= owner.scenarioFrame
-            or numPoints ~= 1
-            or point ~= "TOPRIGHT"
-            or relativeTo ~= owner.scenarioFrame
-            or relativePoint ~= "TOPRIGHT"
-            or tonumber(xOfs or 0) ~= 0
-            or tonumber(yOfs or 0) ~= 0
+    addon:LogAt("trace", "[SCN-ANCHOR-FIX] normalize parent=%s points=%d p=%s rp=%s x=%.1f y=%.1f",
+        tostring(parent), numPoints, tostring(point), tostring(relativePoint), tonumber(xOfs or 0), tonumber(yOfs or 0))
 
-        if not isDirty then
-            return
-        end
+    borrowedFrame:ClearAllPoints()
+    borrowedFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
+end
 
-        if addon.LogAt then
-            addon:LogAt("trace", "[SCN-ANCHOR-FIX] normalize parent=%s points=%d p=%s rp=%s x=%.1f y=%.1f",
-                tostring(parent), tonumber(numPoints or 0), tostring(point), tostring(relativePoint), tonumber(xOfs or 0), tonumber(yOfs or 0))
-        end
+local function EnsureScenarioBorrowAnchor(owner, borrowedFrame)
+    pcall(NormalizeScenarioBorrowAnchor, owner.scenarioFrame, borrowedFrame)
+end
 
-        borrowedFrame:ClearAllPoints()
-        borrowedFrame:SetPoint("TOPRIGHT", owner.scenarioFrame, "TOPRIGHT", 0, 0)
-    end)
+-- Assert visibility: Blizzard's own stage-complete/criteria fade animations can
+-- leave the borrowed frame's alpha at 0, which would otherwise make this section
+-- report a valid height while rendering nothing.
+--
+-- Only written when actually wrong. Every write to a Blizzard frame spreads
+-- TrackerPlus taint into it, which later surfaces as errors inside Blizzard's own
+-- tracker update (e.g. protected aura lookups in the scenario module), so don't
+-- re-assert this on every render tick.
+local function SetOpaque(frame)
+    if frame:GetAlpha() ~= 1 then
+        frame:SetAlpha(1)
+    end
+end
+
+local function SetIgnoringParentAlpha(frame)
+    if frame.SetIgnoreParentAlpha
+        and not (frame.IsIgnoringParentAlpha and frame:IsIgnoringParentAlpha()) then
+        frame:SetIgnoreParentAlpha(true)
+    end
+end
+
+local function EnsureVisible(frame)
+    pcall(SetOpaque, frame)
+    pcall(SetIgnoringParentAlpha, frame)
 end
 
 local function InstallScenarioAnchorGuards(owner, borrowedFrame)
-    if not (owner and borrowedFrame and hooksecurefunc) then
-        return
-    end
     if borrowedFrame._trackerPlusAnchorGuardsInstalled then
         return
     end
@@ -73,29 +90,15 @@ local function InstallScenarioAnchorGuards(owner, borrowedFrame)
         frame._trackerPlusGuardApplying = nil
     end
 
-    hooksecurefunc(borrowedFrame, "SetPoint", function(frame)
-        normalizeFromGuard(frame)
-    end)
-
-    hooksecurefunc(borrowedFrame, "ClearAllPoints", function(frame)
-        normalizeFromGuard(frame)
-    end)
-
+    hooksecurefunc(borrowedFrame, "SetPoint", normalizeFromGuard)
+    hooksecurefunc(borrowedFrame, "ClearAllPoints", normalizeFromGuard)
     -- SetAllPoints is a distinct Frame API from SetPoint/ClearAllPoints and was
     -- previously unguarded, so Blizzard layout code using it could drift the anchor
     -- undetected until the next periodic render.
-    if borrowedFrame.SetAllPoints then
-        hooksecurefunc(borrowedFrame, "SetAllPoints", function(frame)
-            normalizeFromGuard(frame)
-        end)
-    end
+    hooksecurefunc(borrowedFrame, "SetAllPoints", normalizeFromGuard)
 end
 
 local function InstallScenarioSizeObservers(owner, trackerFrame, contentsFrame)
-    if not owner then
-        return
-    end
-
     local function install(frame)
         if not frame or frame._trackerPlusScenarioSizeObserverInstalled then
             return
@@ -113,8 +116,8 @@ local function InstallScenarioSizeObservers(owner, trackerFrame, contentsFrame)
                 return
             end
 
-            local height = observedFrame.GetHeight and (observedFrame:GetHeight() or 0) or 0
-            local shown = observedFrame.IsShown and observedFrame:IsShown() or false
+            local height = observedFrame:GetHeight() or 0
+            local shown = observedFrame:IsShown()
             if observedFrame._trackerPlusObservedHeight == height and observedFrame._trackerPlusObservedShown == shown then
                 return
             end
@@ -128,36 +131,27 @@ local function InstallScenarioSizeObservers(owner, trackerFrame, contentsFrame)
             owner:RequestUpdate("scenarios")
         end
 
-        frame:HookScript("OnSizeChanged", function(observedFrame)
-            notifyIfChanged(observedFrame)
-        end)
-        frame:HookScript("OnShow", function(observedFrame)
-            notifyIfChanged(observedFrame)
-        end)
-        frame:HookScript("OnHide", function(observedFrame)
-            notifyIfChanged(observedFrame)
-        end)
+        frame:HookScript("OnSizeChanged", notifyIfChanged)
+        frame:HookScript("OnShow", notifyIfChanged)
+        frame:HookScript("OnHide", notifyIfChanged)
     end
 
     install(trackerFrame)
     install(contentsFrame)
 end
 
+-- Trace-log description of a frame's anchor and geometry.
 local function DescribeAnchor(frame)
-    if not frame then
-        return "frame=nil"
-    end
-
     local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint(1)
     local relName = relativeTo and (relativeTo.GetName and relativeTo:GetName() or tostring(relativeTo)) or "nil"
-    local frameName = frame.GetName and frame:GetName() or "<unnamed>"
-    local top = frame.GetTop and (frame:GetTop() or 0) or 0
-    local bottom = frame.GetBottom and (frame:GetBottom() or 0) or 0
-    local height = frame.GetHeight and (frame:GetHeight() or 0) or 0
-    local shown = frame.IsShown and frame:IsShown() or false
-    local parent = frame.GetParent and frame:GetParent() or nil
+    local frameName = frame:GetName() or "<unnamed>"
+    local top = frame:GetTop() or 0
+    local bottom = frame:GetBottom() or 0
+    local height = frame:GetHeight() or 0
+    local shown = frame:IsShown()
+    local parent = frame:GetParent()
     local parentName = parent and (parent.GetName and parent:GetName() or tostring(parent)) or "nil"
-    local numPoints = frame.GetNumPoints and frame:GetNumPoints() or 0
+    local numPoints = frame:GetNumPoints()
 
     return format(
         "%s parent=%s p=%s rel=%s rp=%s x=%.1f y=%.1f top=%.1f bottom=%.1f h=%.1f shown=%s pts=%d",
@@ -192,37 +186,31 @@ end
 function addon:RenderScenarioSection()
     local scenarioTracker = nil
     local scenarioTrackerName = nil
+    -- This runs on every render (and every combat refresh), so trace diagnostics
+    -- only build their arguments when they will actually be logged.
+    local trace = self:ShouldLog("trace")
 
     -- C_Scenario.IsInScenario isn't present on every client this .toc targets, and
     -- gating solely on it meant the whole section silently never rendered there.
     -- addon:IsAnyScenarioTrackerActive() already falls back to inspecting the live
     -- tracker frames, which is the same evidence the borrow below relies on.
-    local scenarioAPI = _G and _G.C_Scenario
-    local inScenario = (scenarioAPI and scenarioAPI.IsInScenario and scenarioAPI.IsInScenario()) or false
+    local inScenario = (C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario()) or false
     if not inScenario then
         inScenario = self:IsAnyScenarioTrackerActive()
     end
 
     -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons)
-    local candidates = {
-        "DelvesObjectiveTracker",
-        "DelveObjectiveTracker", 
-        "ScenarioObjectiveTracker",
-    }
-    for _, name in ipairs(candidates) do
-        local tracker = _G and _G[name]
-        if tracker and tracker.ContentsFrame then
+    for _, name in ipairs(addon.SCENARIO_TRACKER_NAMES) do
+        local tracker = _G[name]
+        local contents = tracker and tracker.ContentsFrame
+        if contents then
             local trackerShown = tracker:IsShown()
-            local contentsShown = tracker.ContentsFrame:IsShown()
-            local trackerAlpha = tracker.GetAlpha and tracker:GetAlpha() or -1
-            local contentsAlpha = tracker.ContentsFrame.GetAlpha and tracker.ContentsFrame:GetAlpha() or -1
-            local trackerHeight = tracker:GetHeight() or 0
-            local contentsHeight = tracker.ContentsFrame:GetHeight() or 0
-            local contentsChildren = tracker.ContentsFrame.GetNumChildren and tracker.ContentsFrame:GetNumChildren() or 0
+            local contentsShown = contents:IsShown()
 
-            if addon.LogAt then
-                addon:LogAt("trace", "[SCN-BORROW] candidate=%s shown=%s cShown=%s alpha=%.2f cAlpha=%.2f h=%.1f cH=%.1f cChildren=%d",
-                    tostring(name), tostring(trackerShown), tostring(contentsShown), trackerAlpha, contentsAlpha, trackerHeight, contentsHeight, contentsChildren)
+            if trace then
+                self:LogAt("trace", "[SCN-BORROW] candidate=%s shown=%s cShown=%s alpha=%.2f cAlpha=%.2f h=%.1f cH=%.1f cChildren=%d",
+                    name, tostring(trackerShown), tostring(contentsShown), tracker:GetAlpha(), contents:GetAlpha(),
+                    tracker:GetHeight() or 0, contents:GetHeight() or 0, contents:GetNumChildren())
             end
 
             if trackerShown and contentsShown then
@@ -233,9 +221,9 @@ function addon:RenderScenarioSection()
         end
     end
     
-    if addon.LogAt then
-        addon:LogAt("trace", "[SCN-BORROW] selected=%s inScenario=%s scenarioCount=%d",
-            tostring(scenarioTrackerName), tostring(inScenario), tonumber((self.currentScenarios and #self.currentScenarios) or 0))
+    if trace then
+        self:LogAt("trace", "[SCN-BORROW] selected=%s inScenario=%s scenarioCount=%d",
+            tostring(scenarioTrackerName), tostring(inScenario), self.currentScenarios and #self.currentScenarios or 0)
     end
 
     local scenarioYOffset = 0
@@ -243,19 +231,19 @@ function addon:RenderScenarioSection()
     ---------------------------------------------------------------------------
     -- Scenario frame borrowing (borrow full tracker frame for stable lifetime)
     ---------------------------------------------------------------------------
-    if scenarioTracker and scenarioTracker.ContentsFrame and inScenario then
+    if scenarioTracker and inScenario then
         local contents = scenarioTracker.ContentsFrame
         local borrowedFrame = scenarioTracker
         local trackerChanged = self._activeScenarioBorrowedTracker ~= borrowedFrame
         
-        if addon.LogAt then
-            addon:LogAt("trace", "[SCN-BORROW] borrowing full tracker=%s trackerShown=%s trackerH=%.1f contentsShown=%s contentsH=%.1f",
-                tostring(scenarioTrackerName), tostring(scenarioTracker:IsShown()), tonumber(scenarioTracker:GetHeight() or 0),
-                tostring(contents:IsShown()), tonumber(contents:GetHeight() or 0))
+        if trace then
+            self:LogAt("trace", "[SCN-BORROW] borrowing full tracker=%s trackerShown=%s trackerH=%.1f contentsShown=%s contentsH=%.1f",
+                scenarioTrackerName, tostring(scenarioTracker:IsShown()), scenarioTracker:GetHeight() or 0,
+                tostring(contents:IsShown()), contents:GetHeight() or 0)
         end
 
         -- Borrow full tracker frame so its internal subtree remains coherent.
-        if borrowedFrame then
+        do
             if trackerChanged and self._activeScenarioBorrowedTracker then
                 -- addon:RestoreAllHijackedFrames (Core.lua) is the real restore
                 -- implementation; it walks the same candidate tracker names and
@@ -274,9 +262,9 @@ function addon:RenderScenarioSection()
                 borrowedFrame._trackerPlusOriginalX,
                 borrowedFrame._trackerPlusOriginalY = borrowedFrame:GetPoint(1)
 
-                if addon.LogAt then
-                    addon:LogAt("trace", "[SCN-BORROW] stored original parent, reparenting %s to scenarioFrame",
-                        tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"))
+                if trace then
+                    self:LogAt("trace", "[SCN-BORROW] stored original parent, reparenting %s to scenarioFrame",
+                        borrowedFrame:GetName() or "<unnamed>")
                 end
             end
             
@@ -293,30 +281,7 @@ function addon:RenderScenarioSection()
             -- Keep anchor stable without forcing a full re-anchor every frame.
             EnsureScenarioBorrowAnchor(self, borrowedFrame)
 
-            -- Assert visibility: Blizzard's own stage-complete/criteria fade
-            -- animations can leave the borrowed frame's alpha at 0, which would
-            -- otherwise make this section report a valid height while rendering
-            -- nothing.
-            --
-            -- Only written when actually wrong. Every write to a Blizzard frame
-            -- spreads TrackerPlus taint into it, which later surfaces as errors
-            -- inside Blizzard's own tracker update (e.g. protected aura lookups in
-            -- the scenario module), so don't re-assert this on every render tick.
-            local function EnsureVisible(frame)
-                if not frame then return end
-                pcall(function()
-                    if frame.GetAlpha and frame:GetAlpha() ~= 1 then
-                        frame:SetAlpha(1)
-                    end
-                end)
-                pcall(function()
-                    if frame.SetIgnoreParentAlpha
-                        and not (frame.IsIgnoringParentAlpha and frame:IsIgnoringParentAlpha()) then
-                        frame:SetIgnoreParentAlpha(true)
-                    end
-                end)
-            end
-
+            -- See EnsureVisible above.
             EnsureVisible(borrowedFrame)
             EnsureVisible(contents)
 
@@ -334,13 +299,13 @@ function addon:RenderScenarioSection()
             if widgetHeight < 40 then widgetHeight = 40 end
             scenarioYOffset = widgetHeight + 5
             
-            if addon.LogAt then
-                addon:LogAt("trace", "[SCN-BORROW] active frame=%s trackerChanged=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
-                    tostring(borrowedFrame.GetName and borrowedFrame:GetName() or "<unnamed>"),
-                    tostring(trackerChanged), tonumber(trackerHeight or 0), tonumber(contentsHeight or 0), tonumber(scenarioYOffset or 0))
-                addon:LogAt("trace", "[SCN-ANCHOR] scenario=%s", DescribeAnchor(self.scenarioFrame))
-                addon:LogAt("trace", "[SCN-ANCHOR] tracker=%s", DescribeAnchor(borrowedFrame))
-                addon:LogAt("trace", "[SCN-ANCHOR] contents=%s", DescribeAnchor(contents))
+            if trace then
+                self:LogAt("trace", "[SCN-BORROW] active frame=%s trackerChanged=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
+                    borrowedFrame:GetName() or "<unnamed>",
+                    tostring(trackerChanged), trackerHeight, contentsHeight, scenarioYOffset)
+                self:LogAt("trace", "[SCN-ANCHOR] scenario=%s", DescribeAnchor(self.scenarioFrame))
+                self:LogAt("trace", "[SCN-ANCHOR] tracker=%s", DescribeAnchor(borrowedFrame))
+                self:LogAt("trace", "[SCN-ANCHOR] contents=%s", DescribeAnchor(contents))
             end
         end
     end
@@ -351,17 +316,22 @@ function addon:RenderScenarioSection()
         self._activeScenarioBorrowedTracker = nil
     end
 
-    if not scenarioTracker and addon.LogAt then
-        addon:LogAt("trace", "[SCN-BORROW] no-active-tracker")
+    if not scenarioTracker and trace then
+        self:LogAt("trace", "[SCN-BORROW] no-active-tracker")
     end
 
     -- Re-assert suppression of the default tracker, except while the game's Edit
     -- Mode is open: the player needs it visible and draggable there, and this runs
-    -- every render tick so it would otherwise fight Edit Mode continuously.
-    if (not scenarioTracker or not inScenario) and ObjectiveTrackerFrame and addon.db and addon.db.enabled
-        and not addon._editModeActive and not InCombatLockdown() then
-        ObjectiveTrackerFrame:SetAlpha(0)
-        ObjectiveTrackerFrame:EnableMouse(false)
+    -- every render tick so it would otherwise fight Edit Mode continuously. Like
+    -- EnsureVisible, only written when actually wrong, to keep taint off the frame.
+    if (not scenarioTracker or not inScenario) and ObjectiveTrackerFrame and self.db.enabled
+        and not self._editModeActive and not InCombatLockdown() then
+        if ObjectiveTrackerFrame:GetAlpha() ~= 0 then
+            ObjectiveTrackerFrame:SetAlpha(0)
+        end
+        if ObjectiveTrackerFrame:IsMouseEnabled() then
+            ObjectiveTrackerFrame:EnableMouse(false)
+        end
     end
 
     return scenarioYOffset

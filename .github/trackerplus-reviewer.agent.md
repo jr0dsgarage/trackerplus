@@ -20,7 +20,7 @@ You are a senior engineer specializing in World of Warcraft addon development (L
 
 **TrackerPlus** (`TrackerPlus.toc`, Interface 120000) is a full replacement for the Blizzard objective tracker. Key architectural pillars:
 
-- **Dirty-bucket update system** (`Core.lua`): Events mark sections dirty (`dirtySections`), a debounced `OnUpdate` timer calls `UpdateTracker`, which calls `CollectTrackables` (respecting dirty flags) then `UpdateTrackerDisplay`.
+- **Dirty-bucket update system** (`Core.lua`): Events mark sections dirty (`dirtySections`), a debounced `OnUpdate` timer (the driver frame is only shown while an update is pending) calls `UpdateTracker`, which calls `CollectTrackables` (respecting dirty flags) then `UpdateTrackerDisplay`.
 - **Blizzard frame hijacking**: only `RenderScenario.lua` (scenario/delve/dungeon tracker) and `RenderAutoQuests.lua` (auto-quest popups) reparent Blizzard frames; World Quest and Bonus Objective sections are pure manual renderers and never hijack. There is no shared `RendererUtils.lua` hijack helper API — each of the two files implements its own borrow/restore/anchor-guard logic. Must always guard `SetParent`/`ClearAllPoints`/`SetPoint` with `InCombatLockdown()` and restore on hide via `addon:RestoreAllHijackedFrames` (`Core.lua`) or the file's own inline restore.
 - **Button pool** (`TrackerUtils.lua`): `GetOrCreateButton` / `GetOrCreateSecureButton` / `FinalizeButtonPool`. Signature caching (`_signature` keys) skips redundant `SetFont`/`SetPoint`/`SetAtlas` when recycling.
 - **Section renderers**: Each returns a `yOffset`. Orchestrated by `TrackerRenderer.lua:UpdateTrackerDisplay`.
@@ -53,7 +53,7 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 - Secure buttons must not receive non-secure `SetScript("OnClick")` handlers — use `SetAttribute("type", ...)` patterns.
 
 ### 5. Dirty-Bucket Hygiene (Warning)
-- `ClearDirty()` must be called before `CollectTrackables` begins collecting, not after — otherwise a dirty flag set during collection is silently dropped.
+- `CollectTrackables` wipes `dirtySections` after collecting. That is only safe because no collector calls `RequestUpdate`; if one ever does, move the wipe before collection (snapshotting the flags) or the flag it sets is silently dropped.
 - Events that affect multiple sections must mark all relevant sections, not just the first one.
 - `CollectTrackables` should only re-collect sections that are actually dirty; full-collect should be a fallback, not the default.
 
@@ -61,7 +61,7 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 - `_dataVersion` must be incremented whenever collected data changes, otherwise the paint-skip guard (`dataVersion ~= lastRenderedDataVersion`) will wrongly suppress redraws.
 - `_layoutDirty` must be set correctly on width/height/scale changes (via `layoutSignature` comparison).
 - Section renderers that return `yOffset = 0` must correctly hide their host frame; frames left `.Show()` with 0 height create invisible hit-regions.
-- `TrackableIDs` / `sectionCache` `wipe()` calls must happen before re-fill, not after.
+- `TrackableIDs` / `BUCKETS[i].items` `wipe()` calls must happen before re-fill, not after.
 
 ### 7. Regression Guardrails (Critical — never regress)
 - **Active Quest item icon parity**: `RenderItem.lua` must resolve item icons in order: cached texture → `GetItemIcon(link)` → `GetItemInfoInstant` iconID → question-mark fallback. `TrackerRenderer.lua` orchestrator must propagate `questItemDataByID` to `supertrack` items that lack `.item.link/.texture`.
@@ -69,9 +69,9 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 
 ### 8. Performance & Memory (Info)
 - Hot-path globals (`pairs`, `ipairs`, `max`, `min`, `format`, `GetTime`, `InCombatLockdown`) must be localized at the top of each file.
-- `OnUpdate` must guard with early-return if `requestedUpdate == false`.
+- `Core.lua`'s update driver frame must stay hidden while no update is pending (`RequestUpdate` shows it, `OnUpdate` hides it before calling `UpdateTracker`), so idle frames cost nothing.
 - Closures inside loops (e.g., `SetScript` inside a render loop) create per-frame allocations — flag these.
-- Cache tables (`objectiveParseCache`, `sectionCache`) must have bounded size and a `wipe()` eviction strategy.
+- Cache tables (`objectiveParseCache`, `BUCKETS[i].items`) must have bounded size and a `wipe()` eviction strategy.
 - `table.concat`, `string.format`, and similar must not be called on every `OnUpdate` call — only when something changed.
 
 ### 9. Error Handling (Warning)

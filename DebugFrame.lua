@@ -24,9 +24,21 @@ local function NormalizeLevel(level)
 end
 
 local function GetCurrentLevel()
-    local fromDb = addon and addon.db and addon.db.debugLevel
-    local normalized = NormalizeLevel(fromDb)
-    return normalized or "error"
+    return NormalizeLevel(addon.db and addon.db.debugLevel) or "error"
+end
+
+-- Writes the buffer into the window. Only done while the window is open; ShowDebug
+-- catches it up when it opens, so logging with the window closed costs no UI work.
+local function RenderBufferToFrame()
+    if not (debugFrame and debugFrame:IsShown()) then return end
+    if #debugLines == 0 then
+        debugEditBox:SetText(string.format(
+            "No log entries yet. Only messages at or above the Debug Log Level (currently %s) are recorded.",
+            GetCurrentLevel()))
+        return
+    end
+    debugEditBox:SetText(table.concat(debugLines, "\n"))
+    debugEditBox:SetCursorPosition(1000000)
 end
 
 local function AppendLine(line)
@@ -34,31 +46,19 @@ local function AppendLine(line)
     if #debugLines > MAX_DEBUG_LINES then
         table.remove(debugLines, 1)
     end
-
-    if debugFrame and debugEditBox then
-        debugEditBox:SetText(table.concat(debugLines, "\n"))
-        debugEditBox:SetCursorPosition(1000000)
-    end
+    RenderBufferToFrame()
 end
 
-local function RenderBufferToFrame()
-    if not (debugFrame and debugEditBox) then return end
-    debugEditBox:SetText(table.concat(debugLines, "\n"))
-    debugEditBox:SetCursorPosition(1000000)
-end
-
+-- Callers whose log arguments are costly to build can check this first.
 function addon:ShouldLog(level)
     if not (self.db and self.db.debugEnabled) then
         return false
     end
-    local normalized = NormalizeLevel(level) or "info"
-    local current = GetCurrentLevel()
-    return LEVELS[current] >= LEVELS[normalized]
+    return LEVELS[GetCurrentLevel()] >= LEVELS[NormalizeLevel(level) or "info"]
 end
 
 function addon:LogAt(level, fmt, ...)
-    local normalized = NormalizeLevel(level) or "info"
-    if not self:ShouldLog(normalized) then return end
+    if not self:ShouldLog(level) then return end
 
     local ok, msg = pcall(string.format, tostring(fmt or ""), ...)
     if not ok then
@@ -66,7 +66,7 @@ function addon:LogAt(level, fmt, ...)
     end
 
     local timeStamp = date("%H:%M:%S")
-    local line = string.format("[%s] [%s] %s", timeStamp, string.upper(normalized), tostring(msg))
+    local line = string.format("[%s] [%s] %s", timeStamp, string.upper(NormalizeLevel(level) or "info"), tostring(msg))
     AppendLine(line)
 end
 
@@ -111,8 +111,6 @@ function addon:CreateDebugFrame()
     scrollFrame:SetScrollChild(debugEditBox)
     
     debugFrame:Hide()
-
-    RenderBufferToFrame()
 end
 
 function addon:Log(...)
@@ -120,18 +118,14 @@ function addon:Log(...)
 end
 
 function addon:ShowDebug()
-    if not debugFrame then
-        self:CreateDebugFrame()
-    end
-    RenderBufferToFrame()
+    self:CreateDebugFrame()
     debugFrame:Show()
+    RenderBufferToFrame()
 end
 
 function addon:ClearDebug()
     wipe(debugLines)
-    if debugFrame and debugEditBox then
-        debugEditBox:SetText("")
-    end
+    RenderBufferToFrame()
 end
 
 local function ParseToggleArg(msg, current)
@@ -156,12 +150,8 @@ SlashCmdList["TPDEBUG"] = function(msg)
     local enabled = ParseToggleArg(msg, addon.db.debugEnabled == true)
     addon.db.debugEnabled = enabled
 
-    if addon.UpdateSectionDebugBoxes then
-        addon:UpdateSectionDebugBoxes()
-    end
-    if addon.RequestUpdate then
-        addon:RequestUpdate("full")
-    end
+    addon:UpdateSectionDebugBoxes()
+    addon:RequestUpdate("full")
 
     print("|cff00ff00TrackerPlus:|r Debugging " .. (enabled and "enabled" or "disabled") .. ".")
 end

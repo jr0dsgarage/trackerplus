@@ -117,7 +117,7 @@ local function ResolveStyle(db)
 end
 
 -- Layers are stacked copies of the same art, used to drive the glow past the opacity
--- a single draw can reach (see MAX_GLOW_OPACITY). Every layer stays below Blizzard's
+-- a single draw can reach (see GLOW_MAX_PASSES). Every layer stays below Blizzard's
 -- own Glow and LinkGlow, so the pin's artwork still wins over all of them.
 local function GetOutlineLayer(pin, index)
     local layers = outlines[pin]
@@ -312,7 +312,7 @@ mapEvents:SetScript("OnEvent", function(self, event, arg1)
         elseif arg1 == "Blizzard_WorldMap" then
             self:UnregisterEvent("ADDON_LOADED")
             addon:InitMapPOIColors()
-            if addon.InitQuestLogFocus then addon:InitQuestLogFocus() end
+            addon:InitQuestLogFocus()
         end
     elseif event == "PLAYER_LEVEL_UP" then
         -- Every pin's difficulty color shifts when the player's level does. Deferred

@@ -27,22 +27,31 @@ function Nameplates:UpdateHighlight()
     end
 end
 
+local function RunPendingUpdate()
+    Nameplates.pendingUpdate = false
+    Nameplates:UpdateHighlight()
+end
+
 function Nameplates:RequestUpdate()
     if self.pendingUpdate then
         return
     end
 
     self.pendingUpdate = true
-    C_Timer.After(0.05, function()
-        Nameplates.pendingUpdate = false
-        Nameplates:UpdateHighlight()
-    end)
+    C_Timer.After(0.05, RunPendingUpdate)
 end
 
 local eventHandlers = {}
 
+-- Objective progress and log changes: only the cheap quest log part is rebuilt.
 local function handleQuestDataChanged(self)
     self:ResetCaches()
+    self:RequestUpdate()
+end
+
+-- A quest entering or leaving the log can change which world quests/tasks apply.
+local function handleQuestSetChanged(self)
+    self:ResetCaches(true)
     self:RequestUpdate()
 end
 
@@ -84,9 +93,9 @@ eventHandlers.SUPER_TRACKING_CHANGED = function(self)
 end
 
 eventHandlers.QUEST_LOG_UPDATE = handleQuestDataChanged
-eventHandlers.QUEST_ACCEPTED = handleQuestDataChanged
-eventHandlers.QUEST_REMOVED = handleQuestDataChanged
-eventHandlers.QUEST_TURNED_IN = handleQuestDataChanged
+eventHandlers.QUEST_ACCEPTED = handleQuestSetChanged
+eventHandlers.QUEST_REMOVED = handleQuestSetChanged
+eventHandlers.QUEST_TURNED_IN = handleQuestSetChanged
 eventHandlers.QUEST_WATCH_LIST_CHANGED = handleQuestDataChanged
 eventHandlers.TASK_PROGRESS_UPDATE = handleQuestDataChanged
 eventHandlers.QUESTLINE_UPDATE = handleQuestDataChanged

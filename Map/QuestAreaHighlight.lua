@@ -212,7 +212,7 @@ end
 -- when a button is recycled.
 function addon:ApplyQuestAreaHighlight(button, questID)
     button._areaQuestID = questID
-    if questID and self.db and self.db.highlightQuestsInArea and inArea[questID] then
+    if questID and self.db.highlightQuestsInArea and inArea[questID] then
         ShowHighlight(button)
     elseif button._areaLit then
         HideHighlight(button)
@@ -222,15 +222,18 @@ end
 -- Re-applies every visible row's highlight from the current inArea set. Only touches
 -- rows whose state changed, unless forced (a color or style change has to reach lit
 -- rows too).
+local forceRefresh = false
+
+local function RefreshButton(button)
+    local questID = button._areaQuestID
+    if questID and (forceRefresh or (button._areaLit == true) ~= (inArea[questID] == true)) then
+        addon:ApplyQuestAreaHighlight(button, questID)
+    end
+end
+
 function addon:RefreshQuestAreaHighlights(force)
-    self:ForEachActiveButton(function(button)
-        local questID = button._areaQuestID
-        if questID then
-            if force or (button._areaLit == true) ~= (inArea[questID] == true) then
-                self:ApplyQuestAreaHighlight(button, questID)
-            end
-        end
-    end)
+    forceRefresh = force and true or false
+    self:ForEachActiveButton(RefreshButton)
 end
 
 -------------------------------------------------------------------------------
@@ -238,17 +241,19 @@ end
 -------------------------------------------------------------------------------
 local newInArea = {}
 
+local function CheckButton(button)
+    local questID = button._areaQuestID
+    if questID and newInArea[questID] == nil then
+        newInArea[questID] = IsInsideQuestBlob(questID) == true
+    end
+end
+
 local function Tick()
     local tracker = addon.trackerFrame
     wipe(newInArea)
 
     if tracker and tracker:IsShown() then
-        addon:ForEachActiveButton(function(button)
-            local questID = button._areaQuestID
-            if questID and newInArea[questID] == nil then
-                newInArea[questID] = IsInsideQuestBlob(questID) == true
-            end
-        end)
+        addon:ForEachActiveButton(CheckButton)
         -- Only the hits matter below; drop the misses so the set compares cleanly.
         for questID, inside in pairs(newInArea) do
             if not inside then newInArea[questID] = nil end
@@ -277,7 +282,7 @@ local ticker
 -- any highlight already showing is cleared. A client without the minimap API never
 -- starts it.
 function addon:UpdateQuestAreaWatcher()
-    local enabled = self.db and self.db.highlightQuestsInArea and IsInsideQuestBlob
+    local enabled = self.db.highlightQuestsInArea and IsInsideQuestBlob
     if enabled and not ticker then
         ticker = C_Timer.NewTicker(TICK_SECONDS, Tick)
         Tick()

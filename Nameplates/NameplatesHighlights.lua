@@ -298,22 +298,23 @@ local renderers = {
     glow = renderGlow,
 }
 
+-- Renderers read `geo` synchronously, so one scratch table serves every surface.
+local scratchGeo = { atlas = BLIZZARD_BORDER_ATLAS }
+
 local function barGeometry(bar)
-    return {
-        frame = bar,
-        native = usesNativeBorder(bar) and bar.selectedBorder or nil,
-        atlas = BLIZZARD_BORDER_ATLAS,
-    }
+    scratchGeo.frame = bar
+    scratchGeo.native = usesNativeBorder(bar) and bar.selectedBorder or nil
+    return scratchGeo
 end
 
 -- The level-difference badge beside the health bar (newer clients give it its own selectedBorder).
 local function badgeGeometry(badge)
-    return {
-        frame = badge,
-        native = badge.selectedBorder,
-        atlas = BLIZZARD_BORDER_ATLAS,
-    }
+    scratchGeo.frame = badge
+    scratchGeo.native = badge.selectedBorder
+    return scratchGeo
 end
+
+local NO_COLOR = {}
 
 local function renderSurface(host, key, style, geo)
     local parts = getParts(host, key)
@@ -322,7 +323,7 @@ local function renderSurface(host, key, style, geo)
         return
     end
 
-    local color = style.color or {}
+    local color = style.color or NO_COLOR
     local renderer = renderers[normalizeMode(style.mode)] or renderOutline
     renderer(host, parts, style, color.r or 1, color.g or 1, color.b or 1, color.a or 1, geo)
 end
@@ -334,17 +335,30 @@ end
 
 -- Nameplate bar state ---------------------------------------------------------
 
+-- One style table per highlight type ("currentTarget", "questObjective", ...), refreshed
+-- from the settings each time it's handed out. Styles are only ever read, and several
+-- bars can share one.
+local styleCache = {}
+
+local function buildStyle(prefix)
+    local style = styleCache[prefix]
+    if not style then
+        style = { origin = prefix }
+        styleCache[prefix] = style
+    end
+    local db = Nameplates.db
+    style.color = db[prefix .. "Color"]
+    style.thickness = db[prefix .. "Thickness"]
+    style.offset = db[prefix .. "Offset"]
+    style.mode = normalizeMode(db[prefix .. "Style"])
+    return style
+end
+
 local function currentTargetStyle()
     if not Nameplates.db.currentTargetEnabled then
         return nil
     end
-    return {
-        color = Nameplates.db.currentTargetColor,
-        thickness = Nameplates.db.currentTargetThickness,
-        offset = Nameplates.db.currentTargetOffset,
-        mode = normalizeMode(Nameplates.db.currentTargetStyle),
-        origin = "currentTarget",
-    }
+    return buildStyle("currentTarget")
 end
 
 -- "Fix Default border offset": Blizzard's own border redrawn by us with its atlas's uneven padding
@@ -392,42 +406,45 @@ local function findNeutralRoundedAtlas()
     return roundedNeutralAtlas or nil
 end
 
+local roundedStyle = { nativeInset = 0, nativeEdgeAdjust = ROUNDED_EDGE_ADJUST }
+
 local function renderRounded(host, parts, style, r, g, b, a, geo)
     local atlas, desaturate = findNeutralRoundedAtlas(), false
     if not atlas then
         atlas = (geo.native and nativeAtlas(geo.native)) or ROUNDED_FALLBACK_ATLAS
         desaturate = true
     end
-    local rounded = {
-        atlas = atlas,
-        desaturate = desaturate,
-        offset = style.offset,
-        nativeInset = 0,
-        nativeEdgeAdjust = ROUNDED_EDGE_ADJUST,
-    }
-    renderBlizzard(host, parts, rounded, r, g, b, a, geo)
+    roundedStyle.atlas = atlas
+    roundedStyle.desaturate = desaturate
+    roundedStyle.offset = style.offset
+    renderBlizzard(host, parts, roundedStyle, r, g, b, a, geo)
 end
 renderers.rounded = renderRounded
 
+local WHITE = { r = 1, g = 1, b = 1 }
+
 -- DEFAULT_BORDER_STYLE made to look exactly like `native`: its atlas, plus any tint Blizzard applied
 -- (untinted when Blizzard never calls SetVertexColor). Nil if the atlas can't be read, in which case
--- Blizzard's own border is left showing.
-local function nativeCopyStyle(style, native)
+-- Blizzard's own border is left showing. Filled into `into` (a scratch table the caller owns: the
+-- result is only used to draw immediately).
+local function nativeCopyStyle(style, native, into)
     local atlas = nativeAtlas(native)
     if not atlas then
         return nil
     end
-    local color = Nameplates.nativeColors[native] or { r = 1, g = 1, b = 1 }
-    return {
-        color = { r = color.r, g = color.g, b = color.b, a = 1 },
-        atlas = atlas,
-        offset = style.offset,
-        nativeInset = style.nativeInset,
-        nativeEdgeAdjust = style.nativeEdgeAdjust,
-        mode = style.mode,
-        origin = style.origin,
-    }
+    local color = Nameplates.nativeColors[native] or WHITE
+    into.color = into.color or {}
+    into.color.r, into.color.g, into.color.b, into.color.a = color.r, color.g, color.b, 1
+    into.atlas = atlas
+    into.offset = style.offset
+    into.nativeInset = style.nativeInset
+    into.nativeEdgeAdjust = style.nativeEdgeAdjust
+    into.mode = style.mode
+    into.origin = style.origin
+    return into
 end
+
+local barCopyStyle, badgeCopyStyle = {}, {}
 
 local function isSelectedBar(bar)
     return isBarForUnit(bar, "target") or isBarForUnit(bar, "focus")
@@ -485,7 +502,7 @@ local function renderBadgeBorder(badge, active, selected)
     local hideBadge = active and Nameplates.db.hideLevelBadgeBorder
     local badgeStyle
     if active and not hideBadge and Nameplates.db.fixDefaultBorderOffset and selected then
-        badgeStyle = nativeCopyStyle(DEFAULT_BORDER_STYLE, native)
+        badgeStyle = nativeCopyStyle(DEFAULT_BORDER_STYLE, native, badgeCopyStyle)
         if badgeStyle then
             badgeStyle.nativeEdgeAdjust = LEVEL_BADGE_EDGE_ADJUST
         end
@@ -511,7 +528,7 @@ local function refreshBar(bar, fromHook)
     refreshBadge(bar)
     if style and style.origin == "default" then
         -- If Blizzard's atlas can't be read we can't copy it faithfully; leave Blizzard's showing.
-        style = nativeCopyStyle(style, bar.selectedBorder)
+        style = nativeCopyStyle(style, bar.selectedBorder, barCopyStyle)
         if not style then
             hideNative = false
         end
@@ -574,16 +591,6 @@ local function syncBars(questStyles, barTokens)
     end
 end
 
-local function buildStyle(prefix)
-    return {
-        color = Nameplates.db[prefix .. "Color"],
-        thickness = Nameplates.db[prefix .. "Thickness"],
-        offset = Nameplates.db[prefix .. "Offset"],
-        mode = normalizeMode(Nameplates.db[prefix .. "Style"]),
-        origin = prefix,
-    }
-end
-
 -- True when the unit is an objective of the super-tracked quest. Checked per pass (not via the cached
 -- classification) since a unit can belong to several quests and the super-tracked one can change.
 local function isActiveQuestObjective(result)
@@ -604,15 +611,16 @@ local function isActiveQuestObjective(result)
     return not (issecretvalue and issecretvalue(related)) and related == true
 end
 
-local function determineStyle(result)
-    local configMap = {
-        ["Has Quest Item"] = "questItem",
-        ["Bonus Objective"] = "bonusObjective",
-        ["World Quest"] = "worldQuest",
-        ["Quest Objective"] = "questObjective",
-    }
+-- Classification reason -> settings prefix of the highlight it gets.
+local REASON_STYLE = {
+    ["Has Quest Item"] = "questItem",
+    ["Bonus Objective"] = "bonusObjective",
+    ["World Quest"] = "worldQuest",
+    ["Quest Objective"] = "questObjective",
+}
 
-    local prefix = configMap[result.reason]
+local function determineStyle(result)
+    local prefix = REASON_STYLE[result.reason]
     if not prefix or not Nameplates.db[prefix .. "Enabled"] then
         return nil
     end
@@ -644,11 +652,14 @@ function Nameplates:ReleaseNamePlateUnit(unitToken)
     refreshBar(bar)
 end
 
+-- Reused every pass. `results` is handed to the debug window, which reads it at once.
+local results, questStyles, barTokens = {}, {}, {}
+
 function Nameplates:CollectHighlights()
     local relevantUnits = self:GetRelevantUnits()
-    local results = {}
-    local questStyles = {}
-    local barTokens = {}
+    wipe(results)
+    wipe(questStyles)
+    wipe(barTokens)
 
     for _, unitData in ipairs(relevantUnits) do
         local classification = self:ClassifyUnit(unitData)

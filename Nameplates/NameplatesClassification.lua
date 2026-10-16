@@ -125,12 +125,25 @@ local QUEST_CACHE_SECONDS = 5 -- fallback TTL in case quest change events are mi
 local UNIT_CACHE_SECONDS = 1.25
 local UNIT_CACHE_PENDING_OBJECTIVE_SECONDS = 0.1
 
+-- Quests a unit can be matched against, gathered from two sources with different costs:
+--   logCache   - the quest log. Cheap; rebuilt after any quest log change.
+--   worldCache - active world quests/tasks on the player's map, its parents and their
+--                child zones. Many map queries, so rebuilt only when the player's map
+--                changes, a quest is accepted/removed/turned in, or the TTL lapses.
+-- questCache holds the two merged; its timestamp is the version unit results are
+-- checked against.
+local logCache = { timestamp = 0, entries = {}, added = {} }
+local worldCache = { timestamp = 0, entries = {}, added = {}, mapID = nil }
 local questCache = { timestamp = 0, entries = {} }
 local unitCache = {}
 
-local function resetCaches()
+-- includeWorldQuests: also drop the world quest scan (quest accepted/removed/turned in).
+local function resetCaches(includeWorldQuests)
+    logCache.timestamp = 0
+    if includeWorldQuests then
+        worldCache.timestamp = 0
+    end
     questCache.timestamp = 0
-    wipe(questCache.entries)
     wipe(unitCache)
 end
 
@@ -292,215 +305,211 @@ local function hasQuestItemIcon(unit)
     return false
 end
 
-local function refreshQuestCache()
-    local now = GetTime()
-    if now - questCache.timestamp < QUEST_CACHE_SECONDS then
-        return questCache.entries
+-- State for the cache rebuilds below; module-level so their helpers aren't recreated
+-- per rebuild. `building`/`buildingAdded` point at the cache currently being filled.
+local building, buildingAdded, processedMaps = nil, nil, {}
+
+local function determineWorldQuestFlag(questID, seedFlag)
+    if seedFlag then
+        return true
+    end
+    if C_QuestLog.IsWorldQuest and C_QuestLog.IsWorldQuest(questID) then
+        return true
+    end
+    if questUtilsIsWorldQuest and questUtilsIsWorldQuest(questID) then
+        return true
+    end
+    return false
+end
+
+-- seedQuestInfo: the quest's C_QuestLog.GetInfo table when the caller has it.
+local function buildQuestEntry(questID, seedQuestInfo, seedIsWorldQuest, seedIsBonusObjective, seedHasQuestItem)
+    if not questID or buildingAdded[questID] then
+        return nil
     end
 
-    if not C_QuestLog or not C_QuestLog.GetNumQuestLogEntries then
-        return questCache.entries
+    if C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID) then
+        buildingAdded[questID] = true
+        return nil
     end
 
-    -- Build new cache in local table to prevent race conditions
-    local newEntries = {}
-    local addedQuestIDs = {}
+    local entry = {
+        questID = questID,
+        questName = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(questID) or "Unknown Quest",
+        isWorldQuest = determineWorldQuestFlag(questID, seedIsWorldQuest),
+        isBonusObjective = seedIsBonusObjective and true or false,
+        normalizedQuestName = nil,
+        hasQuestItem = seedHasQuestItem,
+    }
 
-    local function determineWorldQuestFlag(questID, seedFlag)
-        if seedFlag then
-            return true
-        end
+    entry.normalizedQuestName = normalizeText(entry.questName)
 
-        if not questID then
-            return false
-        end
-
-        if C_QuestLog and C_QuestLog.IsWorldQuest and C_QuestLog.IsWorldQuest(questID) then
-            return true
-        end
-
-        if questUtilsIsWorldQuest and questUtilsIsWorldQuest(questID) then
-            return true
-        end
-
-        return false
+    if questUtilsIsBonusObjective and questUtilsIsBonusObjective(questID) then
+        entry.isBonusObjective = true
     end
 
-    local function addEntry(entry)
-        if not entry or not entry.questID then
-            return
-        end
-        addedQuestIDs[entry.questID] = true
-        newEntries[#newEntries + 1] = entry
-    end
-
-    local function buildQuestEntry(questID, seed)
-        seed = seed or {}
-        if not questID or addedQuestIDs[questID] then
-            return nil
-        end
-
-        if C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID) then
-            addedQuestIDs[questID] = true
-            return nil
-        end
-
-        local entry = {
-            questID = questID,
-            questName = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(questID) or "Unknown Quest",
-            isWorldQuest = false,
-            isBonusObjective = false,
-            normalizedQuestName = nil,
-            hasQuestItem = seed.hasQuestItem,
-        }
-
-        entry.isWorldQuest = determineWorldQuestFlag(questID, seed.isWorldQuest)
-
-        entry.normalizedQuestName = normalizeText(entry.questName)
-
-        if seed.isBonusObjective then
+    if not entry.isBonusObjective and C_QuestLog.IsBonusObjective then
+        local ok, isBonus = pcall(C_QuestLog.IsBonusObjective, questID)
+        if ok and isBonus then
             entry.isBonusObjective = true
         end
+    end
 
-        if questUtilsIsBonusObjective and questUtilsIsBonusObjective(questID) then
-            entry.isBonusObjective = true
-        end
-
-        if not entry.isBonusObjective and C_QuestLog and C_QuestLog.IsBonusObjective then
-            local ok, isBonus = pcall(C_QuestLog.IsBonusObjective, questID)
-            if ok and isBonus then
-                entry.isBonusObjective = true
+    if not entry.isBonusObjective then
+        local questInfo = seedQuestInfo
+        if not questInfo then
+            local infoIndex = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
+            if infoIndex then
+                questInfo = C_QuestLog.GetInfo(infoIndex)
             end
         end
+        if questInfo and questInfo.isBonusObjective then
+            entry.isBonusObjective = true
+        end
+    end
 
-        if not entry.isBonusObjective and C_QuestLog and C_QuestLog.GetInfo then
-            local questInfo = seed.questInfo
-            if not questInfo then
-                local infoIndex = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
-                if infoIndex then
-                    questInfo = C_QuestLog.GetInfo(infoIndex)
+    if not entry.isBonusObjective and C_QuestLog.GetQuestTagInfo and Enum and Enum.QuestTagType and Enum.QuestTagType.BonusObjective then
+        local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
+        local tagID
+        if type(tagInfo) == "table" then
+            tagID = tagInfo.tagID or tagInfo.tagId
+        else
+            tagID = tagInfo
+        end
+        if tagID and tagID == Enum.QuestTagType.BonusObjective then
+            entry.isBonusObjective = true
+        end
+    end
+
+    if not entry.isBonusObjective and entry.questName then
+        if safeContains(safeLower(entry.questName), "bonus objective") then
+            entry.isBonusObjective = true
+        end
+    end
+
+    buildingAdded[questID] = true
+    return entry
+end
+
+local function addEntry(entry)
+    if entry then
+        buildingAdded[entry.questID] = true
+        building[#building + 1] = entry
+    end
+end
+
+-- Active world quests/tasks on a map and, recursively, its child zones.
+local function processMap(mapID)
+    if not mapID or processedMaps[mapID] then
+        return
+    end
+    processedMaps[mapID] = true
+
+    local tasks = C_TaskQuest.GetQuestsForPlayerByMapID(mapID)
+    if tasks then
+        for _, taskInfo in ipairs(tasks) do
+            local questID = taskInfo.questId
+            if questID then
+                local isActive
+                if C_TaskQuest.IsActive then
+                    isActive = C_TaskQuest.IsActive(questID)
+                else
+                    isActive = taskInfo.inProgress ~= false
+                end
+                if isActive then
+                    addEntry(buildQuestEntry(questID, nil, true, taskInfo.isBonusObjective, nil))
                 end
             end
-            if questInfo and questInfo.isBonusObjective then
-                entry.isBonusObjective = true
-            end
         end
-
-        if not entry.isBonusObjective and C_QuestLog and C_QuestLog.GetQuestTagInfo and Enum and Enum.QuestTagType and Enum.QuestTagType.BonusObjective then
-            local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
-            local tagID = nil
-            if type(tagInfo) == "table" then
-                tagID = tagInfo.tagID or tagInfo.tagId
-            else
-                tagID = tagInfo
-            end
-            if tagID and tagID == Enum.QuestTagType.BonusObjective then
-                entry.isBonusObjective = true
-            end
-        end
-
-        if not entry.isBonusObjective and entry.questName then
-            local nameLower = safeLower(entry.questName)
-            if safeContains(nameLower, "bonus objective") then
-                entry.isBonusObjective = true
-            end
-        end
-
-        addedQuestIDs[questID] = true
-        return entry
     end
 
-    local numEntries = C_QuestLog.GetNumQuestLogEntries()
-    for index = 1, numEntries do
+    if C_Map.GetMapChildrenInfo and Enum and Enum.UIMapType then
+        local children = C_Map.GetMapChildrenInfo(mapID, Enum.UIMapType.Zone, false)
+        if children then
+            for _, child in ipairs(children) do
+                if child.mapID then
+                    processMap(child.mapID)
+                end
+            end
+        end
+    end
+end
+
+local function rebuildLogCache(now)
+    building, buildingAdded = {}, logCache.added
+    wipe(buildingAdded)
+
+    for index = 1, C_QuestLog.GetNumQuestLogEntries() do
         local info = C_QuestLog.GetInfo(index)
         if info and not info.isHeader and info.questID then
-            local questID = info.questID
-
-            local hasQuestItem = false
-            if getQuestLogSpecialItemInfo then
-                local itemID = getQuestLogSpecialItemInfo(index)
-                if itemID then
-                    hasQuestItem = true
-                end
-            end
-
-            local entry = buildQuestEntry(questID, {
-                questInfo = info,
-                isBonusObjective = info and info.isBonusObjective,
-                isWorldQuest = info and info.isWorldQuest,
-                hasQuestItem = hasQuestItem,
-            })
-            addEntry(entry)
+            local hasQuestItem = getQuestLogSpecialItemInfo and getQuestLogSpecialItemInfo(index) ~= nil or false
+            addEntry(buildQuestEntry(info.questID, info, info.isWorldQuest, info.isBonusObjective, hasQuestItem))
         end
     end
 
-    if C_TaskQuest and C_TaskQuest.GetQuestsForPlayerByMapID and C_Map and C_Map.GetBestMapForUnit then
-        local processedMaps = {}
+    logCache.entries = building
+    logCache.timestamp = now
+    building, buildingAdded = nil, nil
+end
 
-        local function addWorldQuest(questID, seed)
-            local entry = buildQuestEntry(questID, seed)
-            addEntry(entry)
-        end
+local function rebuildWorldCache(now, mapID)
+    building, buildingAdded = {}, worldCache.added
+    wipe(buildingAdded)
+    wipe(processedMaps)
 
-        local function processMap(mapID)
-            if not mapID or processedMaps[mapID] then
-                return
-            end
-            processedMaps[mapID] = true
-
-            local tasks = C_TaskQuest.GetQuestsForPlayerByMapID(mapID)
-            if tasks then
-                for _, taskInfo in ipairs(tasks) do
-                    local questID = taskInfo and taskInfo.questId
-                    if questID then
-                        local isActive
-                        if C_TaskQuest.IsActive then
-                            isActive = C_TaskQuest.IsActive(questID)
-                        else
-                            isActive = taskInfo.inProgress ~= false
-                        end
-                        if isActive then
-                            local seed = { isWorldQuest = true }
-                            if taskInfo and taskInfo.isBonusObjective then
-                                seed.isBonusObjective = true
-                            end
-                            addWorldQuest(questID, seed)
-                        end
-                    end
-                end
-            end
-
-            if C_Map.GetMapChildrenInfo and Enum and Enum.UIMapType then
-                local children = C_Map.GetMapChildrenInfo(mapID, Enum.UIMapType.Zone, false)
-                if children then
-                    for _, child in ipairs(children) do
-                        if child and child.mapID then
-                            processMap(child.mapID)
-                        end
-                    end
-                end
-            end
-        end
-
-        local currentMap = C_Map.GetBestMapForUnit("player")
+    if C_TaskQuest and C_TaskQuest.GetQuestsForPlayerByMapID then
+        -- The player's map and its parents (up to 6 levels), each with its child zones.
+        local currentMap = mapID
         local depth = 0
         while currentMap and depth < 6 do
             processMap(currentMap)
             local mapInfo = C_Map.GetMapInfo and C_Map.GetMapInfo(currentMap)
-            if mapInfo and mapInfo.parentMapID then
-                currentMap = mapInfo.parentMapID
-            else
-                currentMap = nil
-            end
+            currentMap = mapInfo and mapInfo.parentMapID or nil
             depth = depth + 1
         end
     end
 
-    -- Atomic update: assign new entries and timestamp together
-    questCache.entries = newEntries
+    worldCache.entries = building
+    worldCache.timestamp = now
+    worldCache.mapID = mapID
+    building, buildingAdded = nil, nil
+end
+
+local function refreshQuestCache()
+    if not C_QuestLog.GetNumQuestLogEntries then
+        return questCache.entries
+    end
+
+    local now = GetTime()
+    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+    local logStale = now - logCache.timestamp >= QUEST_CACHE_SECONDS
+    local worldStale = now - worldCache.timestamp >= QUEST_CACHE_SECONDS or worldCache.mapID ~= mapID
+    if not (logStale or worldStale) then
+        return questCache.entries
+    end
+
+    if logStale then
+        rebuildLogCache(now)
+    end
+    if worldStale then
+        rebuildWorldCache(now, mapID)
+    end
+
+    -- Log entries first; a world quest also in the log (including a completed one,
+    -- which the log pass records but leaves out) keeps its log entry.
+    local merged = {}
+    for _, entry in ipairs(logCache.entries) do
+        merged[#merged + 1] = entry
+    end
+    for _, entry in ipairs(worldCache.entries) do
+        if not logCache.added[entry.questID] then
+            merged[#merged + 1] = entry
+        end
+    end
+
+    questCache.entries = merged
     questCache.timestamp = now
-    
-    return questCache.entries
+    return merged
 end
 
 local function matchQuestFromTooltip(unit, tooltipInfo, questEntries)
@@ -508,7 +517,7 @@ local function matchQuestFromTooltip(unit, tooltipInfo, questEntries)
         return nil, nil
     end
 
-    local unitIsRelatedToQuest = C_QuestLog and C_QuestLog.UnitIsRelatedToQuest
+    local unitIsRelatedToQuest = C_QuestLog.UnitIsRelatedToQuest
     if unit and unitIsRelatedToQuest then
         for _, entry in ipairs(questEntries) do
             if entry.questID then
@@ -669,33 +678,39 @@ local function classifyUnit(unitData)
     return result
 end
 
-local function addUnit(target, unitToken, frame)
+-- Reused every pass; entries are only read during that pass.
+local units = {}
+
+local function isRelevantUnit(unitToken)
     if not unitToken or not UnitExists(unitToken) then
-        return
+        return false
     end
     if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unitToken) then
-        return
+        return false
     end
-
     local reaction = UnitReaction and UnitReaction(unitToken, "player")
-    if reaction and reaction > 4 then
-        return
-    end
-
-    target[#target + 1] = {
-        unit = unitToken,
-        frame = frame,
-    }
+    return not (reaction and reaction > 4)
 end
 
 local function getRelevantUnits()
     -- Only units with a nameplate: without one there is no health bar to highlight.
-    local units = {}
+    local count = 0
     if C_NamePlate and C_NamePlate.GetNamePlates then
         for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
             local token = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.displayedUnit)
-            addUnit(units, token, plate)
+            if isRelevantUnit(token) then
+                count = count + 1
+                local entry = units[count]
+                if not entry then
+                    entry = {}
+                    units[count] = entry
+                end
+                entry.unit, entry.frame = token, plate
+            end
         end
+    end
+    for i = count + 1, #units do
+        units[i] = nil
     end
 
     return units
@@ -709,6 +724,7 @@ function Nameplates:ClassifyUnit(unitData)
     return classifyUnit(unitData)
 end
 
-function Nameplates:ResetCaches()
-    resetCaches()
+-- includeWorldQuests: also rescan world quests (see resetCaches).
+function Nameplates:ResetCaches(includeWorldQuests)
+    resetCaches(includeWorldQuests)
 end

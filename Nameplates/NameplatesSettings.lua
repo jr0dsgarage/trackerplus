@@ -21,9 +21,9 @@ bgFrame:SetBackdrop({
 bgFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
 bgFrame:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
 
-local scrollFrame = CreateFrame("ScrollFrame", "TrackerPlusNameplatesScrollFrame", bgFrame, "UIPanelScrollFrameTemplate")
+local scrollFrame = TrackerPlus.SettingsWidgets.CreateScrollFrame(bgFrame, "TrackerPlusNameplatesScrollFrame")
 scrollFrame:SetPoint("TOPLEFT", 0, -4)
-scrollFrame:SetPoint("BOTTOMRIGHT", -26, 4)
+scrollFrame:SetPoint("BOTTOMRIGHT", -18, 4)
 
 local content = CreateFrame("Frame", nil, scrollFrame)
 content:SetSize(620, 640)
@@ -37,7 +37,9 @@ local ui = {
 
 local highlightOptions = {
     { key = "currentTarget", label = "Current Target" },
-    { key = "activeQuest", label = "Active Quest Target" },
+    { key = "activeQuest", label = "Active Quest Target",
+      tooltip = "Objectives of your Active (super-tracked) quest. Replaces the other quest highlights on those"
+          .. " mobs, but never the Current Target highlight.\n\nThis highlight doesn't show inside instances." },
     { key = "questObjective", label = "Quest Objective Target" },
     { key = "questItem", label = "Quest Item Target" },
     { key = "worldQuest", label = "World Quest Objective Target" },
@@ -45,20 +47,11 @@ local highlightOptions = {
 }
 
 local highlightStyleChoices = {
-    { value = "outline", label = "Outline" },
-    { value = "blizzard", label = "Blizzard" },
-    { value = "glow", label = "Glow" },
-    { value = "rounded", label = "Rounded" },
+    { value = "outline", text = "Outline" },
+    { value = "blizzard", text = "Blizzard" },
+    { value = "glow", text = "Glow" },
+    { value = "rounded", text = "Rounded" },
 }
-
-local function styleLabelFor(value)
-    for _, choice in ipairs(highlightStyleChoices) do
-        if choice.value == value then
-            return choice.label
-        end
-    end
-    return value or "Outline"
-end
 
 local WHITE_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
 local previewClickSound = SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
@@ -150,16 +143,32 @@ end
 
 -- Only the outline style has a thickness.
 local function setThicknessEnabled(row, enabled)
-    local slider = row.thickness
-    local shade = enabled and 1 or 0.5
-    slider:SetEnabled(enabled)
-    slider.Text:SetTextColor(shade, shade, shade)
-    slider.Low:SetTextColor(shade, shade, shade)
-    slider.High:SetTextColor(shade, shade, shade)
+    row.thickness:SetEnabled(enabled)
 end
 
 local function updateSwatch(button, color)
     button.swatch:SetColorTexture(color.r or 1, color.g or 1, color.b or 1, color.a or 1)
+end
+
+local function refreshPreviewFor(option)
+    if ui.preview.activeKey == option.key then
+        updatePreview(option.key)
+    end
+end
+
+-- A highlight row's style dropdown picked `value`.
+local function onStyleSelected(option, value)
+    Nameplates.db[option.key .. "Style"] = value
+    setThicknessEnabled(ui.highlightRows[option.key], value == "outline")
+    applySettings()
+    refreshPreviewFor(option)
+end
+
+-- A highlight row's Thickness or Offset slider moved.
+local function onRowSliderChanged(option, dbKey, value)
+    Nameplates.db[dbKey] = value
+    applySettings()
+    refreshPreviewFor(option)
 end
 
 local function createHighlightRow(anchor, option, index)
@@ -175,14 +184,14 @@ local function createHighlightRow(anchor, option, index)
     -- All controls on second line, below the label
     local controlY = rowOffset - 18
 
-    local checkbox = CreateFrame("CheckButton", nil, content, "InterfaceOptionsCheckButtonTemplate")
+    local checkbox = TrackerPlus.SettingsWidgets.CreateCheckbox(content) -- no text, label is above
     checkbox:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, controlY)
-    checkbox.Text:SetText("")  -- Remove text, label is above
 
-    local dropdown = CreateFrame("Frame", nil, content, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("LEFT", checkbox, "RIGHT", -12, -2)
-    UIDropDownMenu_SetWidth(dropdown, 120)
-    UIDropDownMenu_JustifyText(dropdown, "LEFT")
+    local styleKey = option.key .. "Style"
+    local dropdown = TrackerPlus.SettingsWidgets.CreateChoiceDropdown(content, 100, highlightStyleChoices,
+        function() return Nameplates.db[styleKey] end,
+        function(value) onStyleSelected(option, value) end)
+    dropdown:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
 
     local colorButton = CreateFrame("Button", nil, content)
     colorButton:SetPoint("LEFT", dropdown, "RIGHT", 4, 0)
@@ -197,29 +206,21 @@ local function createHighlightRow(anchor, option, index)
     swatch:SetPoint("BOTTOMRIGHT", -1, 1)
     colorButton.swatch = swatch
 
-    local thickness = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
-    thickness:SetPoint("LEFT", colorButton, "RIGHT", 12, 0)
-    thickness:SetMinMaxValues(1, 5)
-    thickness:SetValueStep(1)
-    thickness:SetObeyStepOnDrag(true)
-    thickness:SetWidth(100)
-    thickness.Low:SetText("1")
-    thickness.High:SetText("5")
-    thickness.Text:ClearAllPoints()
-    thickness.Text:SetPoint("BOTTOM", thickness, "TOP", 0, 2)
-    thickness.Text:SetJustifyH("CENTER")
+    -- The value is shown in each slider's label, so no value beside the arrows.
+    local function createRowSlider(labelText, dbKey, minVal, maxVal)
+        return TrackerPlus.SettingsWidgets.CreateSlider(content, {
+            min = minVal, max = maxVal, step = 1, width = 70, showValue = false,
+            value = Nameplates.db[dbKey],
+            labelFormat = function(value) return string.format("%s: %d", labelText, value) end,
+            onChange = function(value) onRowSliderChanged(option, dbKey, value) end,
+        })
+    end
 
-    local offset = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
+    local thickness = createRowSlider("Thickness", option.key .. "Thickness", 1, 5)
+    thickness:SetPoint("LEFT", colorButton, "RIGHT", 12, 0)
+
+    local offset = createRowSlider("Offset", option.key .. "Offset", 0, 5)
     offset:SetPoint("LEFT", thickness, "RIGHT", 12, 0)
-    offset:SetMinMaxValues(0, 5)
-    offset:SetValueStep(1)
-    offset:SetObeyStepOnDrag(true)
-    offset:SetWidth(100)
-    offset.Low:SetText("0")
-    offset.High:SetText("5")
-    offset.Text:ClearAllPoints()
-    offset.Text:SetPoint("BOTTOM", offset, "TOP", 0, 2)
-    offset.Text:SetJustifyH("CENTER")
 
     local previewButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     previewButton:SetPoint("LEFT", offset, "RIGHT", 12, 0)
@@ -258,6 +259,17 @@ local function createHighlightRow(anchor, option, index)
     indicator:Hide()
     tintButtonTextures(indicator, { r = 0.65, g = 0.1, b = 0.1 }, { r = 0.9, g = 0.2, b = 0.2 }, { r = 0.35, g = 0.08, b = 0.08 })
 
+    -- One hover row for the label and every control on the line below it; the optional
+    -- explanation shows beside the preview button. (That button keeps its own tooltip.)
+    TrackerPlus.SettingsWidgets.AttachHover(checkbox, {
+        title = option.label, body = option.tooltip, top = label, anchor = previewButton,
+        frames = {
+            dropdown.Dropdown, dropdown.DecrementButton, dropdown.IncrementButton, colorButton,
+            thickness.Slider, thickness.Back, thickness.Forward,
+            offset.Slider, offset.Back, offset.Forward,
+        },
+    })
+
     return {
         label = label,
         checkbox = checkbox,
@@ -273,9 +285,6 @@ end
 local function bindHighlightRow(option, row)
     local enabledKey = option.key .. "Enabled"
     local colorKey = option.key .. "Color"
-    local thicknessKey = option.key .. "Thickness"
-    local offsetKey = option.key .. "Offset"
-    local styleKey = option.key .. "Style"
 
     row.checkbox:SetScript("OnClick", function(self)
         Nameplates.db[enabledKey] = self:GetChecked()
@@ -296,56 +305,6 @@ local function bindHighlightRow(option, row)
                 updatePreview(option.key)
             end
         end)
-    end)
-
-    row.thickness:SetScript("OnValueChanged", function(self, value)
-        if self.isUpdating then
-            return
-        end
-        local rounded = math.floor(value + 0.5)
-        Nameplates.db[thicknessKey] = rounded
-        self.Text:SetText(string.format("Thickness: %d", rounded))
-        applySettings()
-        if ui.preview.activeKey == option.key then
-            updatePreview(option.key)
-        end
-    end)
-
-    row.offset:SetScript("OnValueChanged", function(self, value)
-        if self.isUpdating then
-            return
-        end
-        local rounded = math.floor(value + 0.5)
-        Nameplates.db[offsetKey] = rounded
-        self.Text:SetText(string.format("Offset: %d", rounded))
-        applySettings()
-        if ui.preview.activeKey == option.key then
-            updatePreview(option.key)
-        end
-    end)
-
-    UIDropDownMenu_Initialize(row.dropdown, function(_, level)
-        if level ~= 1 then
-            return
-        end
-        local current = Nameplates.db[styleKey]
-        for _, choice in ipairs(highlightStyleChoices) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = choice.label
-            info.value = choice.value
-            info.func = function()
-                Nameplates.db[styleKey] = choice.value
-                UIDropDownMenu_SetSelectedValue(row.dropdown, choice.value)
-                UIDropDownMenu_SetText(row.dropdown, choice.label)
-                setThicknessEnabled(row, choice.value == "outline")
-                applySettings()
-                if ui.preview.activeKey == option.key then
-                    updatePreview(option.key)
-                end
-            end
-            info.checked = (current == choice.value)
-            UIDropDownMenu_AddButton(info, level)
-        end
     end)
 
     row.previewButton:SetScript("OnClick", function()
@@ -369,18 +328,10 @@ local function refreshHighlightRow(option, row)
     row.checkbox:SetChecked(style.enabled)
     updateSwatch(row.colorButton, style.color)
 
-    row.thickness.isUpdating = true
-    row.thickness:SetValue(style.thickness)
-    row.thickness.Text:SetText(string.format("Thickness: %d", style.thickness))
-    row.thickness.isUpdating = false
+    row.thickness:SetValue(style.thickness, true)
+    row.offset:SetValue(style.offset, true)
 
-    row.offset.isUpdating = true
-    row.offset:SetValue(style.offset)
-    row.offset.Text:SetText(string.format("Offset: %d", style.offset))
-    row.offset.isUpdating = false
-
-    UIDropDownMenu_SetSelectedValue(row.dropdown, style.mode)
-    UIDropDownMenu_SetText(row.dropdown, styleLabelFor(style.mode))
+    row.dropdown:Refresh()
     setThicknessEnabled(row, style.mode == "outline")
 end
 
@@ -555,30 +506,27 @@ local function buildSettingsUI()
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
     subtitle:SetText("Highlight nameplates of quest targets")
 
-    local enable = CreateFrame("CheckButton", nil, content, "InterfaceOptionsCheckButtonTemplate")
+    local W = TrackerPlus.SettingsWidgets
+
+    -- Rows end at their label, clear of the preview box in the top right corner
+    local function addHover(checkbox, body)
+        W.AttachHover(checkbox, { body = body, right = checkbox.Text })
+    end
+
+    local enable = W.CreateCheckbox(content)
     enable:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -14)
     enable.Text:SetText("Enable Nameplate Highlights")
     enable:SetScript("OnClick", function(self)
         Nameplates.db.enabled = self:GetChecked() and true or false
         applySettings()
     end)
+    addHover(enable, "Outline the nameplates of your target and of quest targets, in the styles set below.")
     ui.enable = enable
-
-    local function addTooltip(button, heading, text)
-        button:SetMotionScriptsWhileDisabled(true)
-        button:SetScript("OnEnter", function(self)
-            local tooltip = TrackerPlus:AcquireTooltip(self, "ANCHOR_RIGHT")
-            tooltip:SetText(heading)
-            tooltip:AddLine(text, 1, 1, 1, true)
-            tooltip:Show()
-        end)
-        button:SetScript("OnLeave", function() TrackerPlus:HideSharedTooltip() end)
-    end
 
     -- Each option checkbox stacks below the previous one.
     local lastOption = enable
     local function addOption(label, tooltip, onClick)
-        local checkbox = CreateFrame("CheckButton", nil, content, "InterfaceOptionsCheckButtonTemplate")
+        local checkbox = W.CreateCheckbox(content)
         checkbox:SetPoint("TOPLEFT", lastOption, "BOTTOMLEFT", 0, -4)
         checkbox.Text:SetText(label)
         checkbox:SetScript("OnClick", function(self)
@@ -588,7 +536,7 @@ local function buildSettingsUI()
                 updatePreview(ui.preview.activeKey)
             end
         end)
-        addTooltip(checkbox, label, tooltip)
+        addHover(checkbox, tooltip)
         lastOption = checkbox
         return checkbox
     end
@@ -637,7 +585,7 @@ local function fitContentHeight()
     end
 
     local bottom
-    for _, region in ipairs({ row.checkbox, row.dropdown, row.thickness.Low, row.offset.Low, row.previewButton }) do
+    for _, region in ipairs({ row.checkbox, row.dropdown, row.thickness, row.offset, row.previewButton }) do
         local regionBottom = region:GetBottom()
         if regionBottom and (not bottom or regionBottom < bottom) then
             bottom = regionBottom
@@ -684,7 +632,5 @@ panel.parent = "TrackerPlus"
 Nameplates.settingsPanel = panel
 
 function Nameplates:OpenSettings()
-    if TrackerPlus.OpenSettings then
-        TrackerPlus.OpenSettings("Nameplates")
-    end
+    TrackerPlus.OpenSettings("Nameplates")
 end

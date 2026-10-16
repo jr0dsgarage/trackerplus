@@ -104,17 +104,21 @@ local function FormatTimeLeft(seconds)
     return format("%02d:%02d", floor(seconds / 60), seconds % 60)
 end
 
+-- The countdown ticks every TICK_INTERVAL but its text only changes once a second,
+-- so the string is rebuilt only when the whole second (or the title shown) changes.
 local function UpdateRowTexts(now)
     local showTitles = #timers > 1
     for i, timer in ipairs(timers) do
         local row = rows[i]
-        local text = "Quest Timer: " .. FormatTimeLeft(timer.expiresAt - now)
-        if showTitles and timer.title then
-            text = text .. " |cffaaaaaa- " .. timer.title .. "|r"
-        end
-        if row._tpText ~= text then
+        local secondsLeft = max(0, floor(timer.expiresAt - now))
+        local title = showTitles and timer.title or nil
+        if row._tpSeconds ~= secondsLeft or row._tpTitle ~= title then
+            local text = "Quest Timer: " .. FormatTimeLeft(secondsLeft)
+            if title then
+                text = text .. " |cffaaaaaa- " .. title .. "|r"
+            end
             row.text:SetText(text)
-            row._tpText = text
+            row._tpSeconds, row._tpTitle = secondsLeft, title
         end
     end
 end
@@ -182,7 +186,7 @@ function addon:RefreshQuestTimers()
     end
     for i = count + 1, #rows do
         rows[i]:Hide()
-        rows[i]._tpText = nil
+        rows[i]._tpSeconds, rows[i]._tpTitle = nil, nil
         rows[i].questID = nil
     end
 

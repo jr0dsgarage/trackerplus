@@ -1,270 +1,263 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
+local W = addon.SettingsWidgets
 
 -- Settings panel using manual frame construction for maximum control
 local panel = CreateFrame("Frame", "TrackerPlusOptionsPanel")
 panel.name = "TrackerPlus"
-local refreshDebugControlsUI = nil
 
--- Helper: Create Header
-local function CreateHeader(parent, text, yOffset)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    header:SetPoint("TOPLEFT", 16, yOffset)
-    header:SetText(text)
-    return yOffset - 30  -- Return updated offset
+-------------------------------------------------------------------------------
+-- What each setting needs refreshed when it changes. Settings not listed take
+-- effect on their own (read on the next interaction or render).
+-------------------------------------------------------------------------------
+-- Collected data (colors, grouping, sorting, what's included) is built at collection
+-- time, so these need a full recollect rather than just a repaint.
+local function Recollect() addon:RequestUpdate("full") end
+-- Style changes (fonts, sizes, spacing) only need the current data repainted.
+local function Repaint() addon:RefreshDisplay() end
+local function UpdateAppearance() addon:UpdateTrackerAppearance() end
+-- The tracker's own title uses the header font, and bars are drawn by rows.
+local function UpdateAppearanceAndRepaint()
+    addon:UpdateTrackerAppearance()
+    addon:RefreshDisplay()
 end
+-- Map pins are Blizzard's, outside our render pass entirely.
+local function RefreshMapPins() addon:RefreshMapPOIOutlines() end
+local function RefreshDebugBoxes()
+    addon:UpdateSectionDebugBoxes()
+    addon:RequestUpdate("full")
+end
+
+local SETTING_EFFECTS = {
+    enabled = function(enabled)
+        addon:SetTrackerVisible(enabled)
+        addon:UpdateDefaultTrackerVisibility()
+    end,
+    locked = function() addon:UpdateTrackerLock() end,
+    -- Re-checking it should snap back onto the game's tracker immediately.
+    matchBlizzardTracker = function(enabled)
+        if enabled then addon:SyncWithBlizzardTracker() end
+    end,
+    hideInInstance = function() addon:RequestUpdate() end,
+    hideInCombat = function() addon:RequestUpdate() end,
+
+    frameAnchor = function() addon:ApplyTrackerAnchor() end, -- the frame doesn't move
+    frameWidth = UpdateAppearance,
+    frameHeight = UpdateAppearance,
+    frameScale = UpdateAppearance,
+    borderEnabled = UpdateAppearance,
+    barBorderSize = UpdateAppearanceAndRepaint,
+    barTexture = UpdateAppearanceAndRepaint,
+    headerFontSize = UpdateAppearanceAndRepaint,
+    fontSize = Repaint,
+    objectiveFontSize = Repaint,
+    headerIconStyle = Repaint,
+    headerIconPosition = Repaint,
+    headerBackgroundStyle = Repaint,
+
+    fadeWhenEmpty = Recollect,
+    showQuestLevel = Recollect,
+    sortMethod = Recollect,
+    colorQuestsByDifficulty = Recollect,
+    includeCampaignQuestInActiveQuest = Recollect,
+    includeFTAQuests = Recollect,
+    showQuests = Recollect,
+    showWorldQuests = Recollect,
+    showAchievements = Recollect,
+    showBonusObjectives = Recollect,
+    showScenarios = Recollect,
+    showProfessions = Recollect,
+    showMonthlyActivities = Recollect,
+    showEndeavors = Recollect,
+
+    colorMapPOIsByDifficulty = RefreshMapPins,
+    mapPOIOutlineStyle = RefreshMapPins,
+    mapPOIOutlineThickness = RefreshMapPins,
+    mapPOIGlowOpacity = RefreshMapPins,
+    -- Starts or stops the area watcher; the highlight is an overlay on existing rows.
+    highlightQuestsInArea = function() addon:UpdateQuestAreaWatcher() end,
+    questAreaHighlightStyle = function() addon:RefreshQuestAreaHighlights(true) end,
+
+    debugEnabled = function(enabled)
+        RefreshDebugBoxes()
+        addon.Print("Debugging " .. (enabled and "enabled" or "disabled") .. ".")
+    end,
+    debugSectionBoxes = RefreshDebugBoxes,
+    debugLevel = function(level) addon:LogAt("info", "Debug level set to %s", tostring(level)) end,
+    layoutDebug = function(enabled) addon:LogAt("info", "Layout debug %s", enabled and "enabled" or "disabled") end,
+}
+for _, key in ipairs({
+    "spacingMajorHeaderIndent", "spacingMinorHeaderIndent", "spacingTrackableIndent",
+    "spacingPOIButton", "spacingObjectiveIndent",
+    "spacingProgressBarInset", "spacingProgressBarPadding",
+    "spacingItemVertical", "spacingMajorHeaderAfter", "spacingMinorHeaderAfter",
+}) do
+    SETTING_EFFECTS[key] = Repaint
+end
+
+-------------------------------------------------------------------------------
+-- Dependent controls: greyed out while a setting they depend on makes them moot.
+-------------------------------------------------------------------------------
+local dependencies = {}
+
+-- isEnabled(db) decides, on every settings change and whenever a page opens, whether
+-- the given widgets (as returned by the Create* helpers) are usable.
+local function AddDependency(isEnabled, ...)
+    dependencies[#dependencies + 1] = { isEnabled = isEnabled, widgets = { ... } }
+end
+
+local DISABLED_SHADE = 0.5
+
+local function SetWidgetEnabled(widget, enabled)
+    local shade = enabled and 1 or DISABLED_SHADE
+    local kind = widget.tpKind
+    if kind == "slider" then
+        widget:SetEnabled(enabled) -- greys its own label and value
+        return
+    elseif kind == "colorPicker" then
+        widget:SetEnabled(enabled)
+        widget:SetAlpha(enabled and 1 or DISABLED_SHADE)
+    else -- checkbox, button, dropdown
+        widget:SetEnabled(enabled)
+    end
+    if widget.tpLabel then
+        widget.tpLabel:SetTextColor(shade, shade, shade)
+    end
+end
+
+local function RefreshDependencies()
+    local db = addon.db
+    for _, dependency in ipairs(dependencies) do
+        local enabled = dependency.isEnabled(db) and true or false
+        for _, widget in ipairs(dependency.widgets) do
+            SetWidgetEnabled(widget, enabled)
+        end
+    end
+end
+
+-- Saves a setting and applies whatever it needs refreshed.
+local function ChangeSetting(dbKey, value)
+    addon:SetSetting(dbKey, value)
+    local effect = SETTING_EFFECTS[dbKey]
+    if effect then effect(value) end
+    RefreshDependencies()
+end
+
+-- Lights up `control`'s row while hovered and shows `title` and the wrapped `body`,
+-- like a row of the game's Settings list. `top` is a label above the control, if any.
+local function AttachTooltip(control, title, body, top)
+    W.AttachHover(control, { title = title, body = body, top = top })
+end
+
+-------------------------------------------------------------------------------
+-- Widgets. Each takes the running y offset inside its section and returns the
+-- next offset plus the widget, so dependent controls can be wired up.
+-------------------------------------------------------------------------------
 
 -- Helper: Create Checkbox
 local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
-    local cb = CreateFrame("CheckButton", addonName .. dbKey .. "Check", parent, "InterfaceOptionsCheckButtonTemplate")
+    local cb = W.CreateCheckbox(parent, addonName .. dbKey .. "Check")
     cb:SetPoint("TOPLEFT", 16, yOffset)
-    _G[cb:GetName() .. "Text"]:SetText(text)
+    cb.tpKind = "checkbox"
+    cb.tpLabel = cb.Text
+    cb.tpLabel:SetText(text)
     
-    -- Load saved state
+    -- Load saved state, and re-read it whenever the page opens: slash commands
+    -- (/tpdebug, /tp lock, /tp toggle) change settings while the panel is closed.
     cb:SetChecked(addon.db[dbKey])
-    
+    cb:HookScript("OnShow", function(self)
+        self:SetChecked(addon.db[dbKey] and true or false)
+    end)
+
     cb:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        addon:SetSetting(dbKey, checked)
-        
-        -- Trigger immediate updates based on setting
-        if dbKey == "enabled" then
-            addon:SetTrackerVisible(checked)
-        elseif dbKey == "locked" then
-            addon:UpdateTrackerLock()
-        elseif dbKey == "borderEnabled" then
-            addon:UpdateTrackerAppearance()
-        elseif dbKey == "matchBlizzardTracker" then
-            -- Re-checking it should snap back onto the game's tracker immediately.
-            if checked and addon.SyncWithBlizzardTracker then
-                addon:SyncWithBlizzardTracker()
-            end
-        elseif dbKey == "colorMapPOIsByDifficulty" then
-            -- Map pins are Blizzard's, outside our render pass entirely, so this only
-            -- needs the outlines repainted.
-            addon:RefreshMapPOIOutlines()
-        elseif dbKey == "highlightQuestsInArea" then
-            -- Starts or stops the area watcher; the stripe is an overlay on the
-            -- existing rows, so no recollect or repaint is needed.
-            addon:UpdateQuestAreaWatcher()
-        elseif dbKey:find("show") or dbKey:find("fade") or dbKey:find("Group") or dbKey == "includeCampaignQuestInActiveQuest" or dbKey == "includeFTAQuests" or dbKey == "colorQuestsByDifficulty" then
-            -- Colors (and quest inclusion/grouping) are computed in GetQuestData/
-            -- CollectQuests at collection time, not at render time, so these need a
-            -- full recollect rather than just a repaint.
-            addon:RequestUpdate("full")
-        elseif dbKey == "hideInInstance" or dbKey == "hideInCombat" then
-            addon:RequestUpdate()
-        elseif dbKey == "layoutDebug" then
-            if addon.LogAt then
-                addon:LogAt("info", "Layout debug %s", checked and "enabled" or "disabled")
-            end
-        elseif dbKey == "debugEnabled" then
-            if addon.UpdateSectionDebugBoxes then
-                addon:UpdateSectionDebugBoxes()
-            end
-            addon:RequestUpdate("full")
-            if refreshDebugControlsUI then
-                refreshDebugControlsUI()
-            end
-            print("|cff00ff00TrackerPlus:|r Debugging " .. (checked and "enabled" or "disabled") .. ".")
-        elseif dbKey == "debugSectionBoxes" then
-            if addon.UpdateSectionDebugBoxes then
-                addon:UpdateSectionDebugBoxes()
-            end
-            addon:RequestUpdate("full")
-        elseif dbKey == "showTooltips" then
-            -- These take effect on next interaction
-        end
+        ChangeSetting(dbKey, self:GetChecked())
     end)
+    AttachTooltip(cb, text, tooltip)
     
-    if tooltip then
-        cb:SetScript("OnEnter", function(self)
-            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-            tooltipFrame:SetText(text)
-            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
-            tooltipFrame:Show()
-        end)
-        cb:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
-    end
-    
-    return yOffset - 30
+    return yOffset - 30, cb
 end
 
--- Helper: Create Slider (value shown in an editable box so an exact number can be typed).
+-- Sliders by setting key, for syncing ones the addon changes itself (UpdateSlider).
+local sliders = {}
+
+-- Track length of every slider. Leaves room in a half-width column for the arrows
+-- and the value beside them.
+local SLIDER_WIDTH = 160
+
+-- Helper: Create Slider, with the Settings panel's stepper arrows and the value to its
+-- right; clicking the value lets an exact number be typed (see SettingsWidgets.lua).
 local function CreateSlider(parent, text, dbKey, minVal, maxVal, step, tooltip, yOffset)
-    local slider = CreateFrame("Slider", addonName .. dbKey .. "Slider", parent, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", 20, yOffset - 10) -- Give some room for label
-    slider:SetWidth(200)
-    slider:SetHeight(17)
-    slider:SetOrientation("HORIZONTAL")
+    local slider = W.CreateSlider(parent, {
+        label = text, min = minVal, max = maxVal, step = step, width = SLIDER_WIDTH,
+        decimals = step >= 1 and 0 or 2,
+        value = addon.db[dbKey] or minVal,
+        onChange = function(value) ChangeSetting(dbKey, value) end,
+    })
+    -- The label sits above, so this puts its top where a checkbox's would be
+    slider:SetPoint("TOPLEFT", 16, yOffset - 18)
+    slider.tpKind = "slider"
+    sliders[dbKey] = slider
+    AttachTooltip(slider, text, tooltip)
 
-    local label = _G[slider:GetName() .. "Text"]
-    local low = _G[slider:GetName() .. "Low"]
-    local high = _G[slider:GetName() .. "High"]
-
-    local function FormatValue(v)
-        if step >= 1 then return tostring(v) end
-        return string.format("%.2f", v)
-    end
-
-    label:SetText(text)
-
-    local input = CreateFrame("EditBox", addonName .. dbKey .. "Input", slider, "InputBoxTemplate")
-    input:SetSize(50, 20)
-    input:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", 0, 0)
-    input:SetAutoFocus(false)
-    input:SetJustifyH("CENTER")
-    input:SetMaxLetters(6)
-    slider.valueInput = input
-    slider.formatValue = FormatValue
-
-    -- Label flush left and value box flush right, both above the track.
-    label:ClearAllPoints()
-    label:SetPoint("BOTTOMLEFT", slider, "TOPLEFT", 0, 4)
-    label:SetPoint("RIGHT", input, "LEFT", -10, 0)
-    label:SetJustifyH("LEFT")
-    label:SetWordWrap(false)
-
-    local function Commit(self)
-        local num = tonumber(self:GetText())
-        if num then
-            num = math.max(minVal, math.min(maxVal, num))
-            slider:SetValue(num)
-        end
-        -- Re-show the stored value: covers invalid input, clamping, and rounding.
-        self:SetText(FormatValue(addon.db[dbKey] or minVal))
-    end
-
-    input:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    input:SetScript("OnEscapePressed", function(self)
-        self:SetText(FormatValue(addon.db[dbKey] or minVal))
-        self:ClearFocus()
-    end)
-    input:SetScript("OnEditFocusLost", Commit)
-
-    local val = addon.db[dbKey] or minVal
-    input:SetText(FormatValue(val))
-    input:SetCursorPosition(0)
-    low:SetText(minVal)
-    high:SetText(maxVal)
-
-    slider:SetMinMaxValues(minVal, maxVal)
-    slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
-    slider:SetValue(val)
-
-    slider:SetScript("OnValueChanged", function(self, value)
-        -- Round value if step >= 1
-        if step >= 1 then
-            value = math.floor(value + 0.5)
-        else
-            value = math.floor(value * 100 + 0.5) / 100
-        end
-
-        addon:SetSetting(dbKey, value)
-        if not input:HasFocus() then
-            input:SetText(FormatValue(value))
-        end
-        
-        -- Immediate updates
-        if dbKey == "frameWidth" or dbKey == "frameHeight" or dbKey == "frameScale" or dbKey == "barBorderSize" then
-            addon:UpdateTrackerAppearance()
-            if dbKey == "barBorderSize" then addon:RefreshDisplay() end
-        elseif dbKey == "headerFontSize" then
-            -- The tracker's own title uses the header font too.
-            addon:UpdateTrackerAppearance()
-            addon:RefreshDisplay()
-        elseif dbKey == "fontSize" or dbKey == "objectiveFontSize" or dbKey:find("^spacing") then
-            addon:RefreshDisplay()
-        elseif dbKey == "mapPOIOutlineThickness" or dbKey == "mapPOIGlowOpacity" then
-            -- Map pins are Blizzard's, outside our render pass entirely.
-            addon:RefreshMapPOIOutlines()
-        end
-    end)
-    
-    if tooltip then
-        slider:SetScript("OnEnter", function(self)
-            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-            tooltipFrame:SetText(text)
-            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
-            tooltipFrame:Show()
-        end)
-        slider:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
-    end
-    
-    return yOffset - 50 -- Sliders need more vertical space
+    return yOffset - 50, slider -- Sliders need more vertical space
 end
 
--- Helper: Create Dropdown
-local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
+-- Width of every dropdown's box; its previous / next buttons add ~60px around it.
+local DROPDOWN_WIDTH = 180
+
+-- The label above every dropdown. Returns the dropdown's y offset.
+local function CreateDropdownLabel(parent, text, yOffset)
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     label:SetPoint("TOPLEFT", 16, yOffset - 5)
     label:SetText(text)
+    return label, yOffset - 20
+end
 
-    -- Sits under its label. The template has ~16px of padding on its left, so x=0
-    -- lines its box up with the label text.
-    local dropdown = CreateFrame("Frame", addonName .. dbKey .. "Dropdown", parent, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("TOPLEFT", 0, yOffset - 20)
-    UIDropDownMenu_SetWidth(dropdown, 180)
-    
-    local function init(self, level)
-        local info = UIDropDownMenu_CreateInfo()
-        for _, opt in ipairs(options) do
-            info.text = opt.text
-            info.value = opt.value
-            info.func = function(self)
-                addon:SetSetting(dbKey, self.value)
-                UIDropDownMenu_SetSelectedValue(dropdown, self.value)
-                
-                -- Trigger updates
-                if dbKey == "frameAnchor" then
-                    -- Only changes which point is pinned; the frame doesn't move.
-                    addon:ApplyTrackerAnchor()
-                elseif dbKey == "headerIconStyle" or dbKey == "headerIconPosition" or dbKey == "headerBackgroundStyle" then
-                    addon:RefreshDisplay()
-                elseif dbKey == "sortMethod" then
-                    -- Sorting happens in CollectTrackables, so this needs a full
-                    -- recollect rather than just a repaint.
-                    addon:RequestUpdate("full")
-                elseif dbKey == "mapPOIOutlineStyle" then
-                    -- Map pins are Blizzard's, outside our render pass entirely.
-                    addon:RefreshMapPOIOutlines()
-                elseif dbKey == "questAreaHighlightStyle" then
-                    -- An overlay on the existing rows; restyle the lit ones in place.
-                    addon:RefreshQuestAreaHighlights(true)
-                elseif dbKey == "debugLevel" then
-                    if addon.LogAt then
-                        addon:LogAt("info", "Debug level set to %s", tostring(self.value))
-                    end
-                end
-            end
-            info.checked = (addon.db[dbKey] == opt.value)
-            UIDropDownMenu_AddButton(info, level)
-        end
+local function FinishDropdown(dropdown, label, text, tooltip)
+    dropdown.tpKind = "dropdown"
+    dropdown.tpLabel = label
+    AttachTooltip(dropdown, text, tooltip, label)
+end
+
+-- Helper: Create Dropdown. `options` is a list of { text, value }, or a function
+-- returning one (re-read each time the menu opens).
+local function CreateDropdown(parent, text, dbKey, options, tooltip, yOffset)
+    local label, dropdownY = CreateDropdownLabel(parent, text, yOffset)
+    local dropdown = W.CreateChoiceDropdown(parent, DROPDOWN_WIDTH, options,
+        function() return addon.db[dbKey] end,
+        function(value) ChangeSetting(dbKey, value) end)
+    dropdown:SetPoint("TOPLEFT", 16, dropdownY)
+    FinishDropdown(dropdown, label, text, tooltip)
+
+    return yOffset - 55, dropdown
+end
+
+-- LibSharedMedia status bar textures, plus the built-in "Blizzard" one.
+local function GetBarTextureOptions()
+    local lsm = LibStub and LibStub("LibSharedMedia-3.0", true)
+    -- Copied: LSM hands out its own list, which must not be re-sorted or added to.
+    local names = {}
+    for _, name in ipairs(lsm and lsm:List("statusbar") or {}) do
+        names[#names + 1] = name
     end
-    
-    UIDropDownMenu_Initialize(dropdown, init)
-    
-    -- Set Initial Selection
-    UIDropDownMenu_SetSelectedValue(dropdown, addon.db[dbKey])
-    -- Force text update explicitly just in case
-    local currentText = "Unknown"
-    for _, opt in ipairs(options) do
-        if opt.value == addon.db[dbKey] then currentText = opt.text break end
+    table.sort(names)
+    if not tContains(names, "Blizzard") then
+        table.insert(names, 1, "Blizzard")
     end
-    UIDropDownMenu_SetText(dropdown, currentText)
-    
-    if tooltip then
-        dropdown:SetScript("OnEnter", function(self)
-               local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-               tooltipFrame:SetText(text)
-               tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
-               tooltipFrame:Show()
-        end)
-           dropdown:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
+
+    local options = {}
+    for i, name in ipairs(names) do
+        options[i] = { text = name, value = name }
     end
-    
-    return yOffset - 55
+    return options
+end
+
+-- A small gold heading inside a section, for a group of controls.
+local function CreateSubheader(parent, text, yOffset)
+    local heading = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    heading:SetPoint("TOPLEFT", 16, yOffset - 6)
+    heading:SetText(text)
+    return yOffset - 26
 end
 
 -- Fonts every client ships, so the list is never empty without LibSharedMedia.
@@ -354,10 +347,6 @@ local function GetFontDisplayName(path, fonts)
     return path:match("([^\\/]+)%.%w+$") or path
 end
 
--- Long lists are split into alphabetical submenus so the menu stays on screen.
-local FONT_MENU_FLAT_LIMIT = 25
-local FONT_MENU_CHUNK = 20
-
 local function ApplyFontChange(dbKey)
     if dbKey == "headerFontFace" then
         -- The tracker's own title uses the header font too.
@@ -366,22 +355,10 @@ local function ApplyFontChange(dbKey)
     addon:RefreshDisplay()
 end
 
--- One per font dropdown; run when the menu closes so a hover preview never outlives it.
-local fontPreviewEnders = {}
-local fontMenuHooked = false
-
--- Helper: Create Font Dropdown (lists every available font, shown in that font).
--- Hovering an entry previews it on the tracker; leaving or closing puts it back.
+-- Helper: Create Font Dropdown (lists every available font, shown in that font; long
+-- lists scroll). Hovering an entry previews it on the tracker; leaving or closing puts it back.
 local function CreateFontDropdown(parent, text, dbKey, tooltip, yOffset)
-    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    label:SetPoint("TOPLEFT", 16, yOffset - 5)
-    label:SetText(text)
-
-    local dropdown = CreateFrame("Frame", addonName .. dbKey .. "Dropdown", parent, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("TOPLEFT", 0, yOffset - 20)
-    UIDropDownMenu_SetWidth(dropdown, 180)
-
-    local fonts -- rebuilt each time the menu opens
+    local label, dropdownY = CreateDropdownLabel(parent, text, yOffset)
 
     -- The saved font while a hovered one is temporarily in the db; nil when not previewing.
     local previewOriginal
@@ -391,83 +368,50 @@ local function CreateFontDropdown(parent, text, dbKey, tooltip, yOffset)
         previewOriginal = nil
         ApplyFontChange(dbKey)
     end
-    table.insert(fontPreviewEnders, EndPreview)
-    if not fontMenuHooked and DropDownList1 then
-        fontMenuHooked = true
-        DropDownList1:HookScript("OnHide", function()
-            for _, endPreview in ipairs(fontPreviewEnders) do endPreview() end
-        end)
+
+    local function StartPreview(path)
+        if previewOriginal == nil then previewOriginal = addon.db[dbKey] end
+        addon.db[dbKey] = path
+        ApplyFontChange(dbKey)
     end
 
-    local function AddFontButton(font, level)
-        local info = UIDropDownMenu_CreateInfo()
-        info.text = font.name
-        info.value = font.path
-        info.fontObject = GetFontPreviewObject(font.path)
-        -- Checked against the saved font, not one being previewed.
+    -- Checked against the saved font, not one being previewed.
+    local function IsSelected(path)
         local current = previewOriginal or addon.db[dbKey]
-        info.checked = type(current) == "string"
-            and NormalizeFontPath(current) == NormalizeFontPath(font.path)
-        info.funcOnEnter = function()
-            if previewOriginal == nil then previewOriginal = addon.db[dbKey] end
-            addon.db[dbKey] = font.path
-            ApplyFontChange(dbKey)
-        end
-        info.funcOnLeave = EndPreview
-        info.func = function()
-            previewOriginal = nil -- keep it: this is now the saved font
-            addon:SetSetting(dbKey, font.path)
-            UIDropDownMenu_SetText(dropdown, font.name)
-            CloseDropDownMenus()
-            ApplyFontChange(dbKey)
-        end
-        UIDropDownMenu_AddButton(info, level)
+        return type(current) == "string" and NormalizeFontPath(current) == NormalizeFontPath(path)
     end
 
-    UIDropDownMenu_Initialize(dropdown, function(self, level, menuList)
-        level = level or 1
-        if level == 1 then
-            fonts = GetAvailableFonts()
-            if #fonts <= FONT_MENU_FLAT_LIMIT then
-                for _, font in ipairs(fonts) do AddFontButton(font, level) end
-                return
-            end
-            for first = 1, #fonts, FONT_MENU_CHUNK do
-                local last = math.min(first + FONT_MENU_CHUNK - 1, #fonts)
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = fonts[first].name .. "  -  " .. fonts[last].name
-                info.hasArrow = true
-                info.notCheckable = true
-                info.menuList = first
-                UIDropDownMenu_AddButton(info, level)
-            end
-        elseif menuList and fonts then
-            for i = menuList, math.min(menuList + FONT_MENU_CHUNK - 1, #fonts) do
-                AddFontButton(fonts[i], level)
-            end
+    local function SetSelected(path)
+        previewOriginal = nil -- keep it: this is now the saved font
+        addon:SetSetting(dbKey, path)
+        ApplyFontChange(dbKey)
+    end
+
+    local dropdown = W.CreateDropdown(parent, DROPDOWN_WIDTH, function(owner, rootDescription)
+        local fonts = GetAvailableFonts()
+        -- Shown when the saved font isn't in the list
+        owner:SetDefaultText(GetFontDisplayName(previewOriginal or addon.db[dbKey], fonts))
+        for _, font in ipairs(fonts) do
+            local radio = W.CreateFontRadio(rootDescription, font.name, GetFontPreviewObject(font.path), IsSelected, SetSelected, font.path)
+            radio:SetOnEnter(function() StartPreview(font.path) end)
+            radio:SetOnLeave(EndPreview)
         end
+        W.LimitMenuHeight(rootDescription, #fonts)
     end)
+    dropdown.Dropdown:RegisterCallback(DropdownButtonMixin.Event.OnMenuClose, EndPreview, dropdown)
+    dropdown:SetPoint("TOPLEFT", 16, dropdownY)
+    FinishDropdown(dropdown, label, text, tooltip)
 
-    UIDropDownMenu_SetText(dropdown, GetFontDisplayName(addon.db[dbKey]))
-
-    if tooltip then
-        dropdown:SetScript("OnEnter", function(self)
-            local tooltipFrame = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-            tooltipFrame:SetText(text)
-            tooltipFrame:AddLine(tooltip, nil, nil, nil, true)
-            tooltipFrame:Show()
-        end)
-        dropdown:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
-    end
-
-    return yOffset - 55
+    return yOffset - 55, dropdown
 end
 
--- Helper: Create Color Picker
-local function CreateColorPicker(parent, text, dbKey, callback, yOffset)
+-- Helper: Create Color Picker. `width` is the clickable area (swatch + label); keep it
+-- inside the column so neighbouring pickers don't overlap.
+local function CreateColorPicker(parent, text, dbKey, callback, yOffset, width)
     local container = CreateFrame("Button", nil, parent)
-    container:SetSize(300, 24)
+    container:SetSize(width or 300, 24)
     container:SetPoint("TOPLEFT", 16, yOffset)
+    container.tpKind = "colorPicker"
     
     -- Color swatch
     local swatch = CreateFrame("Frame", nil, container)
@@ -505,8 +449,11 @@ local function CreateColorPicker(parent, text, dbKey, callback, yOffset)
             if callback then callback() end
         end)
     end)
-    
-    return yOffset - 30
+    -- Reset or another source can change the color while the panel is closed.
+    container:SetScript("OnShow", UpdateSwatch)
+    W.AttachHover(container) -- after SetScript("OnShow"), which would drop its hook
+
+    return yOffset - 30, container
 end
 
 -- Helper: Create Button
@@ -515,9 +462,8 @@ local function CreateButton(parent, text, width, onClick, yOffset)
     btn:SetSize(width or 150, 25)
     btn:SetPoint("TOPLEFT", 16, yOffset)
     btn:SetText(text)
-    btn:SetScript("OnClick", function()
-        if onClick then onClick() end
-    end)
+    btn:SetScript("OnClick", onClick)
+    btn.tpKind = "button"
     return yOffset - 35, btn
 end
 
@@ -573,67 +519,36 @@ local function EndColumnRow(left, leftInnerY, right, rightInnerY)
     return consumed
 end
 
--- External update function to sync UI with DB changes (e.g. from resizing)
+-- Settings widgets the addon can change while the panel is open.
+local function UpdateSlider(dbKey)
+    local slider = sliders[dbKey]
+    if slider and addon.db[dbKey] then
+        slider:SetValue(addon.db[dbKey], true) -- silent: the setting is already saved
+    end
+end
+
+local function UpdateCheckbox(dbKey)
+    local check = _G[addonName .. dbKey .. "Check"]
+    if check then
+        check:SetChecked(addon.db[dbKey] and true or false)
+    end
+end
+
+-- Syncs the widgets with settings the addon changed itself: drag-resizing, and
+-- "Match Game Tracker" clearing itself once the player moves the tracker.
 function addon:UpdateSettingWidgets()
-    -- Helpers to update specific types if needed
-    local function UpdateSlider(dbKey)
-        local slider = _G[addonName .. dbKey .. "Slider"]
-        if slider and addon.db[dbKey] then
-            -- Temporarily disable script to prevent feedback loop
-            local oldScript = slider:GetScript("OnValueChanged")
-            slider:SetScript("OnValueChanged", nil)
-            slider:SetValue(addon.db[dbKey])
-            slider:SetScript("OnValueChanged", oldScript)
-
-            if not slider.valueInput:HasFocus() then
-                slider.valueInput:SetText(slider.formatValue(addon.db[dbKey]))
-            end
-        end
-    end
-    
-    -- Checkboxes that the addon can flip on its own (e.g. "Match Game Tracker"
-    -- clears itself once the player drags or resizes the tracker).
-    local function UpdateCheckbox(dbKey)
-        local check = _G[addonName .. dbKey .. "Check"]
-        if check then
-            check:SetChecked(addon.db[dbKey] and true or false)
-        end
-    end
-
     UpdateSlider("frameWidth")
     UpdateSlider("frameHeight")
     UpdateSlider("frameScale")
     UpdateCheckbox("matchBlizzardTracker")
+    RefreshDependencies()
 end
 
 -- Initialize the Settings UI
 local function InitUI()
-    -- Title info
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("TrackerPlus")
-    
-    local version = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 8, 2)
-    -- Read from the .toc rather than hardcoding, so it can't drift out of date.
-    local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-    local addonVersion = getMetadata and getMetadata(addonName, "Version")
-    version:SetText(addonVersion and ("v" .. addonVersion) or "")
-
-    -- Global Settings (Parent page)
-    local globalFrame, gY = StartSection(panel, "Global Settings", -45)
-    gY = CreateCheckbox(globalFrame, "Enable TrackerPlus", "enabled", "Enable or disable the tracker", gY)
-    gY = CreateCheckbox(globalFrame, "Lock Panel", "locked", "Lock the tracker frame position", gY)
-    EndSection(globalFrame, gY)
-
-    local overview = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    overview:SetPoint("TOPLEFT", globalFrame, "BOTTOMLEFT", 8, -8)
-    overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
-    overview:SetJustifyH("LEFT")
-    overview:SetText("Expand TrackerPlus in the Settings list to open General, Tracking, Nameplates, Appearance, Layout, and Debug pages.")
-
     local orderedPages = {}
 
+    -- A subpage under TrackerPlus in the Settings list, with a scrolling content frame.
     local function CreateSettingsPage(id, pageTitle, pageDescription)
         local page = CreateFrame("Frame", "TrackerPlusOptionsPage" .. id)
         page.name = pageTitle
@@ -649,9 +564,9 @@ local function InitUI()
         descText:SetJustifyH("LEFT")
         descText:SetText(pageDescription or "")
 
-        local scrollFrame = CreateFrame("ScrollFrame", addonName .. "SettingsScrollFrame" .. id, page, "UIPanelScrollFrameTemplate")
+        local scrollFrame = W.CreateScrollFrame(page, addonName .. "SettingsScrollFrame" .. id)
         scrollFrame:SetPoint("TOPLEFT", 5, -55)
-        scrollFrame:SetPoint("BOTTOMRIGHT", -27, 4)
+        scrollFrame:SetPoint("BOTTOMRIGHT", -18, 4)
 
         local content = CreateFrame("Frame", nil, scrollFrame)
         content:SetSize(600, 100)
@@ -660,52 +575,140 @@ local function InitUI()
         scrollFrame:SetScript("OnShow", function(self)
             self:SetVerticalScroll(0)
         end)
+        page:HookScript("OnShow", RefreshDependencies)
 
-        local pageInfo = {
-            id = id,
-            name = pageTitle,
-            frame = page,
-            content = content,
-        }
-
-        table.insert(orderedPages, pageInfo)
-        return pageInfo
+        orderedPages[#orderedPages + 1] = { id = id, name = pageTitle, frame = page, content = content }
+        return content
     end
-    
-    -- Page: General (Advanced)
-    local generalPageInfo = CreateSettingsPage("General", "General", "Visibility and baseline behavior options.")
-    local p1 = generalPageInfo.content
-    local y = -5
-    local s, sy
-    
-    s, sy = StartSection(p1, "Visibility & Behavior", y)
-    sy = CreateCheckbox(s, "Hide in Instance", "hideInInstance", "Hide tracker when inside a dungeon/raid", sy)
-    sy = CreateCheckbox(s, "Hide in Combat", "hideInCombat", "Hide tracker during combat", sy)
-    sy = CreateCheckbox(s, "Fade When Empty", "fadeWhenEmpty", "Hide frame if no quests tracked", sy)
-    sy = CreateCheckbox(s, "Show Tooltips", "showTooltips", "Show quest details on hover", sy)
-    y = y - EndSection(s, sy)
 
-    s, sy = StartSection(p1, "Data Management", y)
-    -- Manual reset button creation since helper is specific
-    local resetBtn = CreateFrame("Button", nil, s, "UIPanelButtonTemplate")
+    local s, sy, left, leftY
+    local y
+
+    ---------------------------------------------------------------------------
+    -- TrackerPlus (top-level page): general behavior
+    ---------------------------------------------------------------------------
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("TrackerPlus")
+    
+    local version = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 8, 2)
+    -- Read from the .toc rather than hardcoding, so it can't drift out of date.
+    local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    local addonVersion = getMetadata and getMetadata(addonName, "Version")
+    version:SetText(addonVersion and ("v" .. addonVersion) or "")
+    panel:HookScript("OnShow", RefreshDependencies)
+
+    y = -45
+    left, leftY = StartColumnSection(panel, "Tracker", y, 1)
+    leftY = CreateCheckbox(left, "Enable TrackerPlus", "enabled", "Replace the game's objective tracker with TrackerPlus.", leftY)
+    leftY = CreateCheckbox(left, "Lock Panel", "locked", "Stop the tracker from being dragged or resized.", leftY)
+    leftY = CreateCheckbox(left, "Show Tooltips", "showTooltips", "Show quest details when hovering a tracker row.", leftY)
+
+    s, sy = StartColumnSection(panel, "Visibility", y, 2)
+    sy = CreateCheckbox(s, "Hide in Instances", "hideInInstance", "Hide the tracker inside dungeons and raids.", sy)
+    sy = CreateCheckbox(s, "Hide in Combat", "hideInCombat", "Hide the tracker during combat.", sy)
+    sy = CreateCheckbox(s, "Hide When Empty", "fadeWhenEmpty", "Hide the tracker while nothing is tracked (only while it's locked).", sy)
+    y = y - EndColumnRow(left, leftY, s, sy)
+
+    local overview = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    overview:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, y)
+    overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
+    overview:SetJustifyH("LEFT")
+    overview:SetText("More settings are on the pages under TrackerPlus in the list on the left: Tracking, Nameplates, Appearance, Layout and Debug.")
+    y = y - 30
+
+    local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     resetBtn:SetSize(150, 25)
-    resetBtn:SetPoint("TOPLEFT", 16, sy)
+    resetBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, y)
     resetBtn:SetText("Reset All Settings")
     resetBtn:SetScript("OnClick", function() StaticPopup_Show("TRACKERPLUS_RESET_CONFIRM") end)
-    sy = sy - 35
-    y = y - EndSection(s, sy)
-    
-    p1:SetHeight(math.abs(y) + 20)
-    
-    -- Page: Appearance
-    local appearancePageInfo = CreateSettingsPage("Appearance", "Appearance", "Frame dimensions, styling, fonts, and colors.")
-    local p2 = appearancePageInfo.content
+
+    ---------------------------------------------------------------------------
+    -- Tracking
+    ---------------------------------------------------------------------------
+    local tracking = CreateSettingsPage("Tracking", "Tracking", "What the tracker shows, how quests are colored and sorted, and quest markers on the world map.")
     y = -5
-    
-    -- Dimensions | Styling side by side
-    local dimSection, dimY = StartColumnSection(p2, "Dimensions", y, 1)
-    dimY = CreateCheckbox(dimSection, "Match Game Tracker", "matchBlizzardTracker", "Place and size the tracker exactly over the game's own objective tracker, following any changes you make to it in the game's Edit Mode. Turns itself off as soon as you drag or resize TrackerPlus yourself; re-check it to snap back.", dimY)
-    dimY = CreateDropdown(dimSection, "Anchor", "frameAnchor", {
+
+    left, leftY = StartColumnSection(tracking, "Quest Display", y, 1)
+    leftY = CreateCheckbox(left, "Show Quest Level", "showQuestLevel", "Show each quest's level before its name, e.g. [28+] for a group quest.", leftY)
+    leftY = CreateCheckbox(left, "Color by Difficulty", "colorQuestsByDifficulty", "Color quest names by how hard each quest is for you, matching the default quest log (grey, green, yellow, orange, red). Turn off to use the flat Quest Text color from Appearance instead.", leftY)
+    leftY = CreateDropdown(left, "Sort Order", "sortMethod", {
+        {text = "Difficulty (Easiest First)", value = "difficulty_asc"},
+        {text = "Difficulty (Hardest First)", value = "difficulty_desc"},
+        {text = "Proximity", value = "proximity"},
+        {text = "Alphabetical", value = "alphabetical"}
+    }, "Order entries within each zone. Difficulty compares each quest's level to yours: Easiest First puts trivial quests at the top, Hardest First puts them at the bottom. Proximity puts the closest objective first. Alphabetical sorts by name.", leftY)
+
+    s, sy = StartColumnSection(tracking, "Pinned Sections", y, 2)
+    sy = CreateCheckbox(s, "Campaign in Active Quest", "includeCampaignQuestInActiveQuest", "When a campaign quest is your Active (super-tracked) quest, also show it in the Active Quest section instead of only under Campaign Quests.", sy)
+    sy = CreateCheckbox(s, "Follow the Arrow", "includeFTAQuests", "Show a Follow the Arrow guide section between Active Quest and Campaign Quests. Requires the FollowTheArrow addon.", sy)
+    y = y - EndColumnRow(left, leftY, s, sy)
+
+    local mapPinsEnabled, mapPinStyle, mapPinThickness, mapPinOpacity
+    left, leftY = StartColumnSection(tracking, "World Map Pins", y, 1)
+    leftY = CreateCheckbox(left, "Color by Difficulty", "colorMapPOIsByDifficulty", "Ring the game's quest pins on the world map in the same color that quest's name has in the tracker.", leftY)
+    leftY, mapPinStyle = CreateDropdown(left, "Style", "mapPOIOutlineStyle", {
+        {text = "Glow", value = "glow"},
+        {text = "Circle", value = "circle"}
+    }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", leftY)
+    leftY, mapPinThickness = CreateSlider(left, "Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", leftY)
+    leftY, mapPinOpacity = CreateSlider(left, "Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", leftY)
+    mapPinsEnabled = function(db) return db.colorMapPOIsByDifficulty end
+    AddDependency(mapPinsEnabled, mapPinStyle, mapPinThickness)
+    AddDependency(function(db) return db.colorMapPOIsByDifficulty and db.mapPOIOutlineStyle ~= "circle" end, mapPinOpacity)
+
+    local areaStyle, areaColor
+    s, sy = StartColumnSection(tracking, "Quest Area Highlight", y, 2)
+    sy = CreateCheckbox(s, "Mark Quests You're In", "highlightQuestsInArea", "Highlight a quest's tracker row while you are inside the area the map shades for it.", sy)
+    sy, areaStyle = CreateDropdown(s, "Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable.", sy)
+    sy, areaColor = CreateColorPicker(s, "Color", "questAreaHighlightColor", function()
+        addon:RefreshQuestAreaHighlights(true)
+    end, sy, 250)
+    AddDependency(function(db) return db.highlightQuestsInArea end, areaStyle, areaColor)
+    y = y - EndColumnRow(left, leftY, s, sy)
+
+    -- Two columns of checkboxes inside one full-width section.
+    s, sy = StartSection(tracking, "Trackable Types", y)
+    local typesLeft = CreateFrame("Frame", nil, s)
+    typesLeft:SetPoint("TOPLEFT", s, "TOPLEFT", 0, 0)
+    typesLeft:SetSize(290, 1)
+    local typesRight = CreateFrame("Frame", nil, s)
+    typesRight:SetPoint("TOPLEFT", s, "TOPLEFT", 295, 0)
+    typesRight:SetSize(290, 1)
+    local TRACKABLE_TYPES = {
+        { "Quests", "showQuests", "Track regular quests." },
+        { "World Quests", "showWorldQuests", "Track world quests." },
+        { "Bonus Objectives", "showBonusObjectives", "Track bonus objectives." },
+        { "Scenarios", "showScenarios", "Track scenarios, delves and dungeons." },
+        { "Achievements", "showAchievements", "Track achievements." },
+        { "Professions", "showProfessions", "Track profession recipes." },
+        { "Monthly Activities", "showMonthlyActivities", "Track Trading Post / Traveler's Log activities." },
+        { "Endeavors", "showEndeavors", "Track housing endeavors." },
+    }
+    local typesY = sy
+    for i, entry in ipairs(TRACKABLE_TYPES) do
+        local column = i <= 4 and typesLeft or typesRight
+        CreateCheckbox(column, entry[1], entry[2], entry[3], typesY - ((i - 1) % 4) * 30)
+    end
+    sy = sy - 4 * 30
+    y = y - EndSection(s, sy)
+
+    tracking:SetHeight(math.abs(y) + 20)
+
+    -- Page: Nameplates. Built by NameplatesSettings.lua; added here so it registers with the rest.
+    orderedPages[#orderedPages + 1] = { id = "Nameplates", name = "Nameplates", frame = addon.Nameplates.settingsPanel }
+
+    ---------------------------------------------------------------------------
+    -- Appearance
+    ---------------------------------------------------------------------------
+    local appearance = CreateSettingsPage("Appearance", "Appearance", "Frame size and position, styling, fonts and colors.")
+    y = -5
+
+    local frameWidthSlider, frameHeightSlider
+    left, leftY = StartColumnSection(appearance, "Dimensions", y, 1)
+    leftY = CreateCheckbox(left, "Match Game Tracker", "matchBlizzardTracker", "Place and size the tracker exactly over the game's own objective tracker, following any changes you make to it in the game's Edit Mode. Turns itself off as soon as you drag or resize TrackerPlus yourself; re-check it to snap back.", leftY)
+    leftY = CreateDropdown(left, "Anchor", "frameAnchor", {
         {text = "Top Left", value = "TOPLEFT"},
         {text = "Top", value = "TOP"},
         {text = "Top Right", value = "TOPRIGHT"},
@@ -715,108 +718,37 @@ local function InitUI()
         {text = "Bottom Left", value = "BOTTOMLEFT"},
         {text = "Bottom", value = "BOTTOM"},
         {text = "Bottom Right", value = "BOTTOMRIGHT"},
-    }, "The point of the tracker that stays in place when it's resized. Top Right grows down and to the left; Bottom Left grows up and to the right.", dimY)
-    dimY = CreateSlider(dimSection, "Frame Width", "frameWidth", 150, 500, 1, "Width of the tracker frame", dimY)
-    dimY = CreateSlider(dimSection, "Frame Height", "frameHeight", 200, 800, 1, "Height of the tracker frame", dimY)
-    dimY = CreateSlider(dimSection, "Frame Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame", dimY)
+    }, "The point of the tracker that stays in place when it's resized. Top Right grows down and to the left; Bottom Left grows up and to the right.", leftY)
+    leftY, frameWidthSlider = CreateSlider(left, "Width", "frameWidth", 150, 500, 1, "Width of the tracker frame. Set by the game's tracker while Match Game Tracker is on.", leftY)
+    leftY, frameHeightSlider = CreateSlider(left, "Height", "frameHeight", 200, 800, 1, "Height of the tracker frame. Set by the game's tracker while Match Game Tracker is on.", leftY)
+    leftY = CreateSlider(left, "Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame.", leftY)
+    AddDependency(function(db) return not db.matchBlizzardTracker end, frameWidthSlider, frameHeightSlider)
 
-    s, sy = StartColumnSection(p2, "Styling", y, 2)
-    sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker", sy)
+    s, sy = StartColumnSection(appearance, "Styling", y, 2)
+    sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker.", sy)
     sy = CreateDropdown(s, "Expand/Collapse Icon", "headerIconStyle", {
         {text = "None", value = "none"},
         {text = "Standard (Gold)", value = "standard"},
         {text = "Square (Check)", value = "square"},
         {text = "Text [+/-]", value = "text_brackets"},
         {text = "Quest Log (+/-)", value = "questlog"}
-    }, "Style of the expand/collapse header icons", sy)
-    
+    }, "Style of the expand/collapse icons on headers.", sy)
     sy = CreateDropdown(s, "Icon Position", "headerIconPosition", {
         {text = "Left (Start)", value = "left"},
         {text = "Right (End)", value = "right"}
-    }, "Position of the expand/collapse icon on the header", sy)
-
+    }, "Which side of the header the expand/collapse icon sits on.", sy)
     sy = CreateDropdown(s, "Header Background", "headerBackgroundStyle", {
         {text = "None", value = "none"},
         {text = "Quest Log Background", value = "questlog"},
         {text = "Tracker Background (Custom)", value = "tracker"}
-    }, "Style of the header background", sy)
-
-    -- Progress Bar Settings
-    local barHeader = s:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    barHeader:SetPoint("TOPLEFT", 16, sy - 10)
-    barHeader:SetText("Progress Bars")
-    sy = sy - 30
-
-    sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides border)", sy)
-
-    -- Media Dropdown for Bar Texture
-    local function CreateMediaDropdown(section, label, key, description, y)
-        local frame = CreateFrame("Frame", nil, section, "UIDropDownMenuTemplate")
-        frame:SetPoint("TOPLEFT", 0, y - 20)
-        
-        local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        text:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 16, 5)
-        text:SetText(label)
-        
-        -- Tooltip
-        local hitRect = CreateFrame("Frame", nil, frame)
-        hitRect:SetAllPoints(text)
-        hitRect:SetScript("OnEnter", function()
-            local tooltipFrame = addon:AcquireTooltip(frame, "ANCHOR_RIGHT")
-            tooltipFrame:SetText(description)
-            tooltipFrame:Show()
-        end)
-        hitRect:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
-        
-        UIDropDownMenu_SetWidth(frame, 150)
-        
-        local function Initialize(self, level)
-            local selected = addon.db[key]
-            
-            -- Get textures from LSM
-            local lsmRef = LibStub and LibStub("LibSharedMedia-3.0", true)
-            local textureList = lsmRef and lsmRef:List("statusbar") or {}
-            
-            -- Sort textures
-            table.sort(textureList)
-            
-            -- Add Blizzard default if missing
-            local found = false
-            for _, v in ipairs(textureList) do if v == "Blizzard" then found = true break end end
-            if not found then table.insert(textureList, 1, "Blizzard") end
-            
-            for _, name in ipairs(textureList) do
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = name
-                info.value = name
-                info.checked = (name == selected)
-                info.func = function(self)
-                    addon.db[key] = self.value
-                    UIDropDownMenu_SetText(frame, self.value)
-                    addon:UpdateTrackerAppearance()
-                    addon:RefreshDisplay()
-                end
-                UIDropDownMenu_AddButton(info, level)
-            end
-        end
-        
-        UIDropDownMenu_Initialize(frame, Initialize)
-        -- Set initial text safely
-        if addon.db[key] then
-            UIDropDownMenu_SetText(frame, addon.db[key])
-        else
-            UIDropDownMenu_SetText(frame, "Blizzard")
-        end
-        
-        return y - 50
-    end
-    
-    sy = CreateMediaDropdown(s, "Bar Texture", "barTexture", "Texture used for progress bars", sy)
-
-    y = y - EndColumnRow(dimSection, dimY, s, sy)
+    }, "Background behind section and zone headers.", sy)
+    sy = CreateSubheader(s, "Progress Bars", sy)
+    sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides it).", sy)
+    sy = CreateDropdown(s, "Texture", "barTexture", GetBarTextureOptions, "Texture used for progress bars. Lists the textures other addons registered with LibSharedMedia.", sy)
+    y = y - EndColumnRow(left, leftY, s, sy)
     
     -- Fonts: one row per text type, font picker on the left and its size on the right
-    s, sy = StartSection(p2, "Fonts", y)
+    s, sy = StartSection(appearance, "Fonts", y)
     local fontLeft = CreateFrame("Frame", nil, s)
     fontLeft:SetPoint("TOPLEFT", s, "TOPLEFT", 0, 0)
     fontLeft:SetSize(290, 1)
@@ -831,202 +763,116 @@ local function InitUI()
     }
     for _, row in ipairs(FONT_ROWS) do
         CreateFontDropdown(fontLeft, row[1], row[2], "Font used for " .. row[7] .. ". Lists every font available, including ones installed by other addons.", sy)
-        -- Nudged down so the slider's label lines up with the dropdown's label.
-        CreateSlider(fontRight, row[3], row[4], row[5], row[6], 1, "Size of " .. row[7], sy - 8)
+        CreateSlider(fontRight, row[3], row[4], row[5], row[6], 1, "Size of " .. row[7] .. ".", sy)
         sy = sy - 60
     end
     y = y - EndSection(s, sy)
     
-    s, sy = StartSection(p2, "Colors", y)
+    -- Colors: three labeled columns inside one section.
+    s, sy = StartSection(appearance, "Colors", y)
+    local COLOR_COLUMN_WIDTH = 190
+    local function ColorColumn(index)
+        local column = CreateFrame("Frame", nil, s)
+        column:SetPoint("TOPLEFT", s, "TOPLEFT", (index - 1) * COLOR_COLUMN_WIDTH, 0)
+        column:SetSize(COLOR_COLUMN_WIDTH, 1)
+        return column
+    end
     local updateAppearance = function() addon:UpdateTrackerAppearance() end
     local updateDisplay = function() addon:RefreshDisplay() end
-    sy = CreateColorPicker(s, "Background Color", "backgroundColor", updateAppearance, sy)
-    sy = CreateColorPicker(s, "Border Color", "borderColor", updateAppearance, sy)
-    sy = CreateColorPicker(s, "Header Text", "headerColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Quest Text", "questColor", updateDisplay, sy)
-    
-    sy = CreateColorPicker(s, "Bar Background", "barBackgroundColor", updateDisplay, sy)
-    
-    sy = CreateColorPicker(s, "Achievements", "achievementColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Professions", "professionColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Monthly Activities", "monthlyColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Endeavors", "endeavorColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Scenarios", "scenarioColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Bonus Objectives", "bonusColor", updateDisplay, sy)
-    
-    sy = CreateColorPicker(s, "Objective Text", "objectiveColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Completed Color", "completeColor", updateDisplay, sy)
-    sy = CreateColorPicker(s, "Failed Color", "failedColor", updateDisplay, sy)
-    y = y - EndSection(s, sy)
-    
-    p2:SetHeight(math.abs(y) + 20)
-    
-    -- Page: Layout & Spacing
-    local layoutPageInfo = CreateSettingsPage("Layout", "Layout", "Fine-tune horizontal and vertical spacing rules.")
-    local p3 = layoutPageInfo.content
-    y = -5
-    
-    -- Horizontal | Vertical side by side
-    local hSection, hY = StartColumnSection(p3, "Horizontal Spacing", y, 1)
-    s, sy = hSection, hY
-    sy = CreateSlider(s, "Major Header Indent", "spacingMajorHeaderIndent", 0, 50, 1, "Left indent for major category headers (Quests, Achievements)", sy)
-    sy = CreateSlider(s, "Minor Header Indent", "spacingMinorHeaderIndent", 0, 50, 1, "Left indent for zone/subgroup headers", sy)
-    sy = CreateSlider(s, "Quest/Item Indent", "spacingTrackableIndent", 0, 50, 1, "Left indent for individual quests and trackables", sy)
-    sy = CreateSlider(s, "POI Button Padding", "spacingPOIButton", 0, 50, 1, "Left padding for text when POI button is shown", sy)
-    sy = CreateSlider(s, "Item Button Spacing", "spacingItemButton", 0, 50, 1, "Additional space when item/action button exists", sy)
-    sy = CreateSlider(s, "Objective Indent", "spacingObjectiveIndent", 0, 50, 1, "Extra indent for objective lines (relative to quest)", sy)
-    sy = CreateSlider(s, "Progress Bar Inset", "spacingProgressBarInset", 0, 50, 1, "Horizontal margin for progress bars from edges", sy)
-    sy = CreateSlider(s, "Progress Bar Padding", "spacingProgressBarPadding", 0, 20, 1, "Vertical padding between text and progress bar", sy)
-    hY = sy
-
-    s, sy = StartColumnSection(p3, "Vertical Spacing", y, 2)
-    sy = CreateSlider(s, "Item Spacing", "spacingItemVertical", 0, 20, 1, "Vertical gap between trackable items", sy)
-    sy = CreateSlider(s, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers", sy)
-    sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers", sy)
-    y = y - EndColumnRow(hSection, hY, s, sy)
-    
-    p3:SetHeight(math.abs(y) + 20)
-    
-    -- Page: Tracking
-    local trackingPageInfo = CreateSettingsPage("Tracking", "Tracking", "Choose which content types are tracked and how they are grouped.")
-    local p4 = trackingPageInfo.content
-    y = -5
-    
-    s, sy = StartSection(p4, "Display Options", y)
-    sy = CreateCheckbox(s, "Show Quest Level", "showQuestLevel", "Show the level of the quest", sy)
-    sy = CreateCheckbox(s, "Color Quests by Difficulty", "colorQuestsByDifficulty", "Color quest name/level using the same difficulty colors as the default quest log (gray/green/yellow/orange/red based on your level vs. the quest's level), via the game's own GetQuestDifficultyColor. Disable to use the flat 'Quest Text' color below instead.", sy)
-    sy = CreateCheckbox(s, "Color Map POIs by Difficulty", "colorMapPOIsByDifficulty", "Mark the game's quest pins on the world map with the same color that quest's name has in the tracker.", sy)
-    sy = CreateDropdown(s, "Map POI Style", "mapPOIOutlineStyle", {
-        {text = "Glow", value = "glow"},
-        {text = "Circle", value = "circle"}
-    }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", sy)
-    sy = CreateSlider(s, "Map POI Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", sy)
-    sy = CreateSlider(s, "Map POI Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", sy)
-    sy = CreateCheckbox(s, "Mark Quests You're Standing In", "highlightQuestsInArea", "Highlight a quest while you are inside the area the map shades for it.", sy)
-    sy = CreateDropdown(s, "Quest Area Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable.", sy)
-    sy = CreateColorPicker(s, "Quest Area Highlight Color", "questAreaHighlightColor", function()
-        addon:RefreshQuestAreaHighlights(true)
-    end, sy)
-    sy = CreateCheckbox(s, "Show Zone Headers", "showZoneHeaders", "Group quests under zone headers", sy)
-    sy = CreateCheckbox(s, "Include Campaign Quest in Active Quest", "includeCampaignQuestInActiveQuest", "When enabled, a pinned campaign quest also appears in the Active Quest section instead of only in Campaign Quests.", sy)
-    sy = CreateCheckbox(s, "Group by Zone", "groupByZone", "Sort quests into zone groups", sy)
-    sy = CreateDropdown(s, "Sort Order", "sortMethod", {
-        {text = "Difficulty (Easiest First)", value = "difficulty_asc"},
-        {text = "Difficulty (Hardest First)", value = "difficulty_desc"},
-        {text = "Proximity", value = "proximity"},
-        {text = "Alphabetical", value = "alphabetical"}
-    }, "Order entries within each group. Difficulty compares each quest's level to yours: Easiest First puts trivial quests at the top, Hardest First puts them at the bottom. Proximity puts the closest objective first. Alphabetical sorts by name.", sy)
-    sy = CreateCheckbox(s, "Include FollowTheArrow Quests", "includeFTAQuests", "Show a Follow the Arrow guide section between Active Quest and Campaign Quests. Requires the FollowTheArrow addon.", sy)
-    y = y - EndSection(s, sy)
-    
-    s, sy = StartSection(p4, "Trackable Types", y)
-    sy = CreateCheckbox(s, "Quests", "showQuests", "Track regular quests", sy)
-    sy = CreateCheckbox(s, "World Quests", "showWorldQuests", "Track world quests", sy)
-    sy = CreateCheckbox(s, "Achievements", "showAchievements", "Track achievements", sy)
-    sy = CreateCheckbox(s, "Bonus Objectives", "showBonusObjectives", "Track bonus objectives", sy)
-    sy = CreateCheckbox(s, "Scenarios", "showScenarios", "Track scenarios and dungeons", sy)
-    sy = CreateCheckbox(s, "Professions", "showProfessions", "Track profession recipes/quests", sy)
-    sy = CreateCheckbox(s, "Monthly Activities", "showMonthlyActivities", "Track Trading Post / Traveler's Log activities", sy)
-    sy = CreateCheckbox(s, "Endeavors", "showEndeavors", "Track housing endeavors", sy)
-    y = y - EndSection(s, sy)
-    
-    p4:SetHeight(math.abs(y) + 20)
-
-    -- Page: Nameplates. Built by Nameplates/Settings.lua; added here so it registers with the rest.
-    local nameplatesPanel = addon.Nameplates and addon.Nameplates.settingsPanel
-    if nameplatesPanel then
-        table.insert(orderedPages, { id = "Nameplates", name = "Nameplates", frame = nameplatesPanel })
+    local COLOR_COLUMNS = {
+        { "Frame", {
+            { "Background", "backgroundColor", updateAppearance },
+            { "Border", "borderColor", updateAppearance },
+            { "Bar Background", "barBackgroundColor", updateDisplay },
+        } },
+        { "Text", {
+            { "Headers", "headerColor", updateDisplay },
+            { "Quest Names", "questColor", updateDisplay },
+            { "Objectives", "objectiveColor", updateDisplay },
+            { "Completed", "completeColor", updateDisplay },
+            { "Failed", "failedColor", updateDisplay },
+        } },
+        { "Trackable Types", {
+            { "Achievements", "achievementColor", updateDisplay },
+            { "Professions", "professionColor", updateDisplay },
+            { "Monthly Activities", "monthlyColor", updateDisplay },
+            { "Endeavors", "endeavorColor", updateDisplay },
+            { "Scenarios", "scenarioColor", updateDisplay },
+            { "Bonus Objectives", "bonusColor", updateDisplay },
+        } },
+    }
+    local colorsBottom = sy
+    for index, columnInfo in ipairs(COLOR_COLUMNS) do
+        local column = ColorColumn(index)
+        local columnY = CreateSubheader(column, columnInfo[1], sy)
+        for _, picker in ipairs(columnInfo[2]) do
+            local widget
+            columnY, widget = CreateColorPicker(column, picker[1], picker[2], picker[3], columnY, COLOR_COLUMN_WIDTH - 24)
+            if picker[2] == "borderColor" then
+                AddDependency(function(db) return db.borderEnabled end, widget)
+            end
+        end
+        colorsBottom = math.min(colorsBottom, columnY)
     end
+    sy = colorsBottom
+    y = y - EndSection(s, sy)
+    
+    appearance:SetHeight(math.abs(y) + 20)
+    
+    ---------------------------------------------------------------------------
+    -- Layout
+    ---------------------------------------------------------------------------
+    local layout = CreateSettingsPage("Layout", "Layout", "Fine-tune horizontal and vertical spacing.")
+    y = -5
+    
+    left, leftY = StartColumnSection(layout, "Horizontal Spacing", y, 1)
+    leftY = CreateSlider(left, "Major Header Indent", "spacingMajorHeaderIndent", 0, 50, 1, "Left indent for major category headers (Quests, Achievements).", leftY)
+    leftY = CreateSlider(left, "Minor Header Indent", "spacingMinorHeaderIndent", 0, 50, 1, "Left indent for zone/subgroup headers.", leftY)
+    leftY = CreateSlider(left, "Quest/Item Indent", "spacingTrackableIndent", 0, 50, 1, "Left indent for individual quests and trackables.", leftY)
+    leftY = CreateSlider(left, "POI Button Padding", "spacingPOIButton", 0, 50, 1, "Left padding for text when the POI button is shown.", leftY)
+    leftY = CreateSlider(left, "Objective Indent", "spacingObjectiveIndent", 0, 50, 1, "Extra indent for objective lines (relative to the quest).", leftY)
+    leftY = CreateSlider(left, "Progress Bar Inset", "spacingProgressBarInset", 0, 50, 1, "Horizontal margin for progress bars from the edges.", leftY)
+    leftY = CreateSlider(left, "Progress Bar Padding", "spacingProgressBarPadding", 0, 20, 1, "Vertical padding between text and a progress bar.", leftY)
 
-    -- Page: Debug
-    local debugPageInfo = CreateSettingsPage("Debug", "Debug", "Diagnostic logging and debug overlay controls.")
-    local p5 = debugPageInfo.content
+    s, sy = StartColumnSection(layout, "Vertical Spacing", y, 2)
+    sy = CreateSlider(s, "Item Spacing", "spacingItemVertical", 0, 20, 1, "Vertical gap between trackable items.", sy)
+    sy = CreateSlider(s, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers.", sy)
+    sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers.", sy)
+    y = y - EndColumnRow(left, leftY, s, sy)
+    
+    layout:SetHeight(math.abs(y) + 20)
+
+    ---------------------------------------------------------------------------
+    -- Debug
+    ---------------------------------------------------------------------------
+    local debugPage = CreateSettingsPage("Debug", "Debug", "Diagnostic logging and debug overlay controls.")
     y = -5
 
-    s, sy = StartSection(p5, "Debug Options", y)
+    local debugLevel, layoutDebug, sectionBoxes, openDebugBtn, clearDebugBtn
+    s, sy = StartSection(debugPage, "Debug Options", y)
     sy = CreateCheckbox(s, "Enable Debugging", "debugEnabled", "Master switch for all TrackerPlus debugging features.", sy)
-    local debugEnabledCheck = _G[addonName .. "debugEnabledCheck"]
-
-    sy = CreateDropdown(s, "Debug Log Level", "debugLevel", {
+    sy, debugLevel = CreateDropdown(s, "Debug Log Level", "debugLevel", {
         {text = "Off", value = "off"},
         {text = "Errors", value = "error"},
         {text = "Warnings", value = "warn"},
         {text = "Info", value = "info"},
         {text = "Trace", value = "trace"},
     }, "Controls verbosity for TrackerPlus debug logging.", sy)
-    local debugLevelDropdown = _G[addonName .. "debugLevelDropdown"]
-
-    sy = CreateCheckbox(s, "Layout Debug Logging", "layoutDebug", "Logs detailed layout snapshots (use with Trace level).", sy)
-    local layoutDebugCheck = _G[addonName .. "layoutDebugCheck"]
-    sy = CreateCheckbox(s, "Section Box Overlays", "debugSectionBoxes", "Draw labeled rectangles around tracker sections.", sy)
-    local sectionBoxesCheck = _G[addonName .. "debugSectionBoxesCheck"]
-
-    local openDebugBtn
+    sy, layoutDebug = CreateCheckbox(s, "Layout Debug Logging", "layoutDebug", "Logs detailed layout snapshots (use with Trace level).", sy)
+    sy, sectionBoxes = CreateCheckbox(s, "Section Box Overlays", "debugSectionBoxes", "Draw labeled rectangles around tracker sections.", sy)
     sy, openDebugBtn = CreateButton(s, "Open Debug Window", 170, function()
-        if addon.ShowDebug then
-            addon:ShowDebug()
-        else
-            print("|cff00ff00TrackerPlus:|r Debug window is not available yet.")
-        end
+        addon:ShowDebug()
     end, sy)
-
-    local clearDebugBtn
     sy, clearDebugBtn = CreateButton(s, "Clear Debug Log", 170, function()
-        if addon.ClearDebug then
-            addon:ClearDebug()
-            print("|cff00ff00TrackerPlus:|r Debug log cleared.")
-        end
+        addon:ClearDebug()
+        addon.Print("Debug log cleared.")
     end, sy)
-
-    local function SetCheckEnabled(check, enabled)
-        if not check then return end
-        if enabled then
-            check:Enable()
-        else
-            check:Disable()
-        end
-        local text = _G[check:GetName() .. "Text"]
-        if text then
-            if enabled then
-                text:SetTextColor(1, 1, 1, 1)
-            else
-                text:SetTextColor(0.55, 0.55, 0.55, 1)
-            end
-        end
-    end
-
-    refreshDebugControlsUI = function()
-        local enabled = addon.db and addon.db.debugEnabled == true
-
-        if debugLevelDropdown then
-            if enabled then
-                UIDropDownMenu_EnableDropDown(debugLevelDropdown)
-            else
-                UIDropDownMenu_DisableDropDown(debugLevelDropdown)
-            end
-        end
-
-        SetCheckEnabled(layoutDebugCheck, enabled)
-        SetCheckEnabled(sectionBoxesCheck, enabled)
-
-        if openDebugBtn then
-            if enabled then openDebugBtn:Enable() else openDebugBtn:Disable() end
-        end
-        if clearDebugBtn then
-            if enabled then clearDebugBtn:Enable() else clearDebugBtn:Disable() end
-        end
-
-        -- Master toggle remains enabled.
-        SetCheckEnabled(debugEnabledCheck, true)
-    end
-
-    refreshDebugControlsUI()
-
+    AddDependency(function(db) return db.debugEnabled end, debugLevel, layoutDebug, sectionBoxes, openDebugBtn, clearDebugBtn)
     y = y - EndSection(s, sy)
-    p5:SetHeight(math.abs(y) + 20)
+    debugPage:SetHeight(math.abs(y) + 20)
 
     -- The order pages appear under TrackerPlus in the Settings list, independent of build order.
-    local PAGE_ORDER = { General = 1, Tracking = 2, Nameplates = 3, Appearance = 4, Layout = 5, Debug = 6 }
+    local PAGE_ORDER = { Tracking = 1, Nameplates = 2, Appearance = 3, Layout = 4, Debug = 5 }
     table.sort(orderedPages, function(a, b)
         return (PAGE_ORDER[a.id] or 99) < (PAGE_ORDER[b.id] or 99)
     end)
@@ -1036,6 +882,8 @@ local function InitUI()
     for _, page in ipairs(orderedPages) do
         addon.settingsPages[page.id] = page
     end
+
+    RefreshDependencies()
 end
 
 -- Confirmation dialog
@@ -1044,9 +892,8 @@ StaticPopupDialogs["TRACKERPLUS_RESET_CONFIRM"] = {
     button1 = "Yes",
     button2 = "No",
     OnAccept = function()
+        -- Reloading rebuilds the tracker and this panel from the fresh defaults.
         addon:ResetDatabase()
-        addon:UpdateTrackerAppearance()
-        addon:RefreshDisplay()
         ReloadUI()
     end,
     timeout = 0,
@@ -1055,22 +902,19 @@ StaticPopupDialogs["TRACKERPLUS_RESET_CONFIRM"] = {
 }
 
 -- Register settings
-local settingsLoaded = false
 addon.settingsCategory = nil
-addon.settingsSubcategories = addon.settingsSubcategories or {}
+addon.settingsSubcategories = {}
 local settingsFrame = CreateFrame("Frame")
 settingsFrame:RegisterEvent("PLAYER_LOGIN")
-settingsFrame:SetScript("OnEvent", function(self, event)
-    if event == "PLAYER_LOGIN" then
-        if settingsLoaded then return end
-        settingsLoaded = true
-        
-        -- Ensure database is initialized before building UI
-        if not addon.db and addon.InitDatabase then
+settingsFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    do
+        -- Core.lua's Initialize runs a moment after login; the panel needs the
+        -- settings now. (InitDatabase is safe to run twice.)
+        if not addon.db then
             addon:InitDatabase()
         end
         
-        -- Build the UI
         InitUI() 
         
         -- Register with modern Settings API (parent + subpages)
@@ -1092,22 +936,18 @@ settingsFrame:SetScript("OnEvent", function(self, event)
             end
         end
         
-        -- Opens a settings page by id (default "General"); used by /tp and /tp nameplates.
+        -- Opens a settings page by id ("Tracking", "Nameplates", ...), or the top-level
+        -- TrackerPlus page when nil; used by /tp and /tp nameplates.
         addon.OpenSettings = function(pageID)
-            pageID = pageID or "General"
-
             if Settings and Settings.OpenToCategory then
-                local targetCategory = addon.settingsSubcategories and addon.settingsSubcategories[pageID]
-                if not targetCategory then
-                    targetCategory = addon.settingsCategory
-                end
+                local targetCategory = (pageID and addon.settingsSubcategories[pageID]) or addon.settingsCategory
 
                 local id = targetCategory and targetCategory:GetID()
                 if id then
                     Settings.OpenToCategory(id)
                 end
             elseif InterfaceOptionsFrame_OpenToCategory then
-                local targetPanel = (addon.settingsPages and addon.settingsPages[pageID] and addon.settingsPages[pageID].frame) or panel
+                local targetPanel = (pageID and addon.settingsPages[pageID] and addon.settingsPages[pageID].frame) or panel
                 InterfaceOptionsFrame_OpenToCategory(targetPanel)
                 InterfaceOptionsFrame_OpenToCategory(targetPanel)
             end

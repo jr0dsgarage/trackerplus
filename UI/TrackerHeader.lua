@@ -29,16 +29,43 @@ function addon:IsFollowTheArrowAvailable()
 end
 
 function addon:UpdateFTAToggleVisibility()
-    if not (addon.trackerFrame and addon.trackerFrame.ftaToggleBtn) then return end
-
+    local btn = self.trackerFrame.ftaToggleBtn
     if self.db.minimized or not self:IsFollowTheArrowAvailable() then
-        addon.trackerFrame.ftaToggleBtn:Hide()
+        btn:Hide()
         return
     end
 
-    addon.trackerFrame.ftaToggleBtn:Show()
-    if addon.trackerFrame.ftaToggleBtn.UpdateColor then
-        addon.trackerFrame.ftaToggleBtn.UpdateColor()
+    btn:Show()
+    btn.UpdateColor()
+end
+
+local function HideTooltip()
+    addon:HideSharedTooltip()
+end
+
+-- A 16x16 header button anchored `offsetX` from the header's right edge.
+-- tooltipText(button) returns the tooltip title, plus an optional body line.
+local function CreateChromeButton(trackerFrame, offsetX, tooltipText)
+    local btn = CreateFrame("Button", nil, trackerFrame)
+    btn:SetSize(16, 16)
+    btn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", offsetX, 0)
+    btn:SetScript("OnEnter", function(self)
+        local title, body = tooltipText(self)
+        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+        tooltip:SetText(title)
+        if body then
+            tooltip:AddLine(body, 1, 1, 1, true)
+        end
+        tooltip:Show()
+    end)
+    btn:SetScript("OnLeave", HideTooltip)
+    return btn
+end
+
+-- Re-shows the tooltip after a click changed what it says.
+local function RefreshTooltip(btn)
+    if btn:IsMouseOver() then
+        btn:GetScript("OnEnter")(btn)
     end
 end
 
@@ -53,9 +80,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     -- Title Header (Left aligned)
     trackerFrame.title = trackerFrame:CreateFontString(nil, "OVERLAY")
     trackerFrame.title:SetPoint("LEFT", trackerFrame.headerBg, "LEFT", 8, 0)
-    local titleFont = self.db.headerFontFace or "Fonts\\FRIZQT__.TTF"
-    local titleSize = self.db.headerFontSize or 14
-    trackerFrame.title:SetFont(titleFont, titleSize, self.db.headerFontOutline)
+    trackerFrame.title:SetFont(self.db.headerFontFace, self.db.headerFontSize, self.db.headerFontOutline)
     trackerFrame.title:SetTextColor(
         self.db.headerColor.r,
         self.db.headerColor.g,
@@ -64,124 +89,83 @@ function addon:CreateTrackerHeader(trackerFrame)
     )
     trackerFrame.title:SetText("Tracker Plus")
 
-    -- FTA Toggle Button (arrow icon, to the left of the auto-minimize button)
-    trackerFrame.ftaToggleBtn = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.ftaToggleBtn:SetSize(16, 16)
-    trackerFrame.ftaToggleBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -94, 0)
-    local ftaArrowTex = trackerFrame.ftaToggleBtn:CreateTexture(nil, "ARTWORK")
+    -- Chrome buttons, right to left from the minimize button: settings (-34),
+    -- lock (-54), auto-minimize (-74), Follow the Arrow (-94).
+
+    -- FTA Toggle Button (arrow icon). Gold when enabled, grey when disabled.
+    local ftaBtn = CreateChromeButton(trackerFrame, -94, function()
+        return addon.db.includeFTAQuests and "Disable Follow the Arrow" or "Enable Follow the Arrow"
+    end)
+    trackerFrame.ftaToggleBtn = ftaBtn
+    local ftaArrowTex = ftaBtn:CreateTexture(nil, "ARTWORK")
     ftaArrowTex:SetAllPoints()
     ftaArrowTex:SetTexture("Interface\\Minimap\\MinimapArrow")
-    trackerFrame.ftaToggleBtn._arrowTex = ftaArrowTex
-    local function UpdateFTAToggleColor()
-        if addon.db and addon.db.includeFTAQuests then
-            ftaArrowTex:SetVertexColor(1, 0.82, 0, 1)   -- gold when enabled
+    ftaBtn.UpdateColor = function()
+        if addon.db.includeFTAQuests then
+            ftaArrowTex:SetVertexColor(1, 0.82, 0, 1)
         else
-            ftaArrowTex:SetVertexColor(0.5, 0.5, 0.5, 1) -- grey when disabled
+            ftaArrowTex:SetVertexColor(0.5, 0.5, 0.5, 1)
         end
     end
-    trackerFrame.ftaToggleBtn.UpdateColor = UpdateFTAToggleColor
-    UpdateFTAToggleColor()
     -- Hidden unless FollowTheArrow is actually loaded.
     self:UpdateFTAToggleVisibility()
-    trackerFrame.ftaToggleBtn:SetScript("OnClick", function()
+    ftaBtn:SetScript("OnClick", function()
         addon.db.includeFTAQuests = not addon.db.includeFTAQuests
-        UpdateFTAToggleColor()
+        ftaBtn.UpdateColor()
         addon:RequestUpdate()
     end)
-    trackerFrame.ftaToggleBtn:SetScript("OnEnter", function(self)
-        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-        tooltip:SetText(addon.db.includeFTAQuests and "Disable Follow the Arrow" or "Enable Follow the Arrow")
-        tooltip:Show()
-    end)
-    trackerFrame.ftaToggleBtn:SetScript("OnLeave", function()
-        addon:HideSharedTooltip()
-    end)
 
-    -- Auto-minimize Toggle Button ("A", to the left of the lock button). Gold when
-    -- on, grey when off -- including when a manual header toggle switched it off.
-    trackerFrame.autoMinBtn = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.autoMinBtn:SetSize(16, 16)
-    trackerFrame.autoMinBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -74, 0)
-    local autoMinText = trackerFrame.autoMinBtn:CreateFontString(nil, "ARTWORK")
+    -- Auto-minimize Toggle Button ("A"). Gold when on, grey when off -- including
+    -- when a manual header toggle switched it off.
+    local autoMinBtn = CreateChromeButton(trackerFrame, -74, function()
+        return addon.db.autoMinimizeHeaders and "Auto-minimize Zones: On" or "Auto-minimize Zones: Off",
+            "Keeps only your current zone and any quest area you're standing in expanded. Toggling a zone header by hand turns this off."
+    end)
+    trackerFrame.autoMinBtn = autoMinBtn
+    local autoMinText = autoMinBtn:CreateFontString(nil, "ARTWORK")
     autoMinText:SetPoint("CENTER", 0, 0)
-    autoMinText:SetFont(self.db.headerFontFace or "Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    autoMinText:SetFont(self.db.headerFontFace, 14, "OUTLINE")
     autoMinText:SetText("A")
-    trackerFrame.autoMinBtn._text = autoMinText
-    trackerFrame.autoMinBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
-    local function UpdateAutoMinColor()
-        if addon.db and addon.db.autoMinimizeHeaders then
-            autoMinText:SetTextColor(1, 0.82, 0, 1)   -- gold when enabled
+    autoMinBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    autoMinBtn.UpdateColor = function()
+        if addon.db.autoMinimizeHeaders then
+            autoMinText:SetTextColor(1, 0.82, 0, 1)
         else
-            autoMinText:SetTextColor(0.5, 0.5, 0.5, 1) -- grey when disabled
+            autoMinText:SetTextColor(0.5, 0.5, 0.5, 1)
         end
     end
-    trackerFrame.autoMinBtn.UpdateColor = UpdateAutoMinColor
-    UpdateAutoMinColor()
-    trackerFrame.autoMinBtn:SetScript("OnClick", function(self)
+    autoMinBtn.UpdateColor()
+    autoMinBtn:SetScript("OnClick", function(self)
         addon:SetAutoMinimize(not addon.db.autoMinimizeHeaders)
-        if self:IsMouseOver() then
-            self:GetScript("OnEnter")(self)
-        end
-    end)
-    trackerFrame.autoMinBtn:SetScript("OnEnter", function(self)
-        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-        tooltip:SetText(addon.db.autoMinimizeHeaders and "Auto-minimize Zones: On" or "Auto-minimize Zones: Off")
-        tooltip:AddLine("Keeps only your current zone and any quest area you're standing in expanded. Toggling a zone header by hand turns this off.", 1, 1, 1, true)
-        tooltip:Show()
-    end)
-    trackerFrame.autoMinBtn:SetScript("OnLeave", function()
-        addon:HideSharedTooltip()
+        RefreshTooltip(self)
     end)
 
-    -- Lock Toggle Button (padlock icon, to the left of the settings button).
-    -- Gold when locked, grey when unlocked. The tint is applied by
-    -- UpdateTrackerLock so it also follows /tp lock, /tp unlock and the Lock Panel
-    -- checkbox.
-    trackerFrame.lockBtn = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.lockBtn:SetSize(16, 16)
-    trackerFrame.lockBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -54, 0)
-    local lockTex = trackerFrame.lockBtn:CreateTexture(nil, "ARTWORK")
+    -- Lock Toggle Button (padlock icon). Its tint is applied by UpdateTrackerLock
+    -- so it also follows /tp lock, /tp unlock and the Lock Panel checkbox.
+    local lockBtn = CreateChromeButton(trackerFrame, -54, function()
+        return addon.db.locked and "Unlock Panel" or "Lock Panel"
+    end)
+    trackerFrame.lockBtn = lockBtn
+    local lockTex = lockBtn:CreateTexture(nil, "ARTWORK")
     lockTex:SetAllPoints()
     lockTex:SetTexture("Interface\\PetBattles\\PetBattle-LockIcon")
-    trackerFrame.lockBtn._lockTex = lockTex
-    trackerFrame.lockBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
-    trackerFrame.lockBtn:SetScript("OnClick", function(self)
+    lockBtn._lockTex = lockTex
+    lockBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    lockBtn:SetScript("OnClick", function(self)
         addon:SetSetting("locked", not addon.db.locked)
         addon:UpdateTrackerLock()
-        if self:IsMouseOver() then
-            self:GetScript("OnEnter")(self)
-        end
-    end)
-    trackerFrame.lockBtn:SetScript("OnEnter", function(self)
-        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-        tooltip:SetText(addon.db.locked and "Unlock Panel" or "Lock Panel")
-        tooltip:Show()
-    end)
-    trackerFrame.lockBtn:SetScript("OnLeave", function()
-        addon:HideSharedTooltip()
+        RefreshTooltip(self)
     end)
 
     -- Settings Button (Gear icon)
-    trackerFrame.settingsParam = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.settingsParam:SetSize(16, 16)
-    -- Center vertically relative to header (-34 ensures it sits to left of minmax button)
-    trackerFrame.settingsParam:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -34, 0)
-    trackerFrame.settingsParam:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
-    trackerFrame.settingsParam:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
-    trackerFrame.settingsParam:SetScript("OnClick", function()
-        if addon.OpenSettings then
-            addon.OpenSettings()
-        else
-            print("|cff00ff00TrackerPlus:|r Settings not loaded.")
-        end
+    local settingsBtn = CreateChromeButton(trackerFrame, -34, function()
+        return "Open Settings"
     end)
-    trackerFrame.settingsParam:SetScript("OnEnter", function(self)
-        local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-        tooltip:SetText("Open Settings")
-        tooltip:Show()
-    end)
-    trackerFrame.settingsParam:SetScript("OnLeave", function()
-        addon:HideSharedTooltip()
+    trackerFrame.settingsParam = settingsBtn
+    settingsBtn:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
+    settingsBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    settingsBtn:SetScript("OnClick", function()
+        addon.OpenSettings()
     end)
 
     -- Minimize/Maximize Button
@@ -198,7 +182,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     -- row's quest-item icon is raised 25px up into this header strip at row level
     -- +10 and escapes its row via SetClipsChildren(false) -- which left it sitting
     -- on top of the gear and swallowing its clicks.
-    local chromeLevel = (trackerFrame:GetFrameLevel() or 1) + 50
+    local chromeLevel = trackerFrame:GetFrameLevel() + 50
     trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
     trackerFrame.autoMinBtn:SetFrameLevel(chromeLevel)
     trackerFrame.lockBtn:SetFrameLevel(chromeLevel)
@@ -263,24 +247,24 @@ function addon:CreateTrackerHeader(trackerFrame)
             trackerFrame.settingsParam:Hide()
             trackerFrame.lockBtn:Hide()
             trackerFrame.autoMinBtn:Hide()
-            if trackerFrame.ftaToggleBtn then trackerFrame.ftaToggleBtn:Hide() end
+            trackerFrame.ftaToggleBtn:Hide()
             trackerFrame.title:Hide()
             trackerFrame.headerBg:Hide()
             trackerFrame.bg:Hide()
             if trackerFrame.border then trackerFrame.border:Hide() end
-            if trackerFrame.resizeBR then trackerFrame.resizeBR:Hide() end
-            if trackerFrame.resizeBL then trackerFrame.resizeBL:Hide() end
-            if self.scrollFrame then self.scrollFrame:Hide() end
-            if self.scrollShadowTop then self.scrollShadowTop:Hide() end
-            if self.scrollShadowBottom then self.scrollShadowBottom:Hide() end
-            if self.scenarioFrame then self.scenarioFrame:Hide() end
-            if self.activeQuestFrame then self.activeQuestFrame:Hide() end
-            if self.campaignFrame then self.campaignFrame:Hide() end
-            if self.autoQuestFrame then self.autoQuestFrame:Hide() end
-            if self.completedQuestFrame then self.completedQuestFrame:Hide() end
-            if self.bonusFrame then self.bonusFrame:Hide() end
-            if self.worldQuestFrame then self.worldQuestFrame:Hide() end
-            if self.questTimerFrame then self.questTimerFrame:Hide() end
+            trackerFrame.resizeBR:Hide()
+            trackerFrame.resizeBL:Hide()
+            self.scrollFrame:Hide()
+            self.scrollShadowTop:Hide()
+            self.scrollShadowBottom:Hide()
+            self.scenarioFrame:Hide()
+            self.activeQuestFrame:Hide()
+            self.campaignFrame:Hide()
+            self.autoQuestFrame:Hide()
+            self.completedQuestFrame:Hide()
+            self.bonusFrame:Hide()
+            self.worldQuestFrame:Hide()
+            self.questTimerFrame:Hide()
             
             -- Center button
             trackerFrame.minMaxBtn:ClearAllPoints()
@@ -314,16 +298,16 @@ function addon:CreateTrackerHeader(trackerFrame)
             trackerFrame.headerBg:Show()
             trackerFrame.bg:Show()
             if trackerFrame.border then trackerFrame.border:Show() end
-            if self.scrollFrame then self.scrollFrame:Show() end
-            if self.scrollShadowTop then self.scrollShadowTop:Show() end
-            if self.scrollShadowBottom then self.scrollShadowBottom:Show() end
-            if self.scenarioFrame then self.scenarioFrame:Show() end
-            if self.activeQuestFrame and self.activeQuestFrame:GetHeight() > 1 then self.activeQuestFrame:Show() end
-            if self.campaignFrame and self.campaignFrame:GetHeight() > 1 then self.campaignFrame:Show() end
-            if self.autoQuestFrame and self.autoQuestFrame:GetHeight() > 1 then self.autoQuestFrame:Show() end
-            if self.completedQuestFrame and self.completedQuestFrame:GetHeight() > 1 then self.completedQuestFrame:Show() end
-            if self.bonusFrame and self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
-            if self.worldQuestFrame and self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
+            self.scrollFrame:Show()
+            self.scrollShadowTop:Show()
+            self.scrollShadowBottom:Show()
+            self.scenarioFrame:Show()
+            if self.activeQuestFrame:GetHeight() > 1 then self.activeQuestFrame:Show() end
+            if self.campaignFrame:GetHeight() > 1 then self.campaignFrame:Show() end
+            if self.autoQuestFrame:GetHeight() > 1 then self.autoQuestFrame:Show() end
+            if self.completedQuestFrame:GetHeight() > 1 then self.completedQuestFrame:Show() end
+            if self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
+            if self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
             
             -- Always right-aligned, matching where the button is first anchored and
             -- keeping it in the same chrome row as the settings, lock, auto-minimize and
@@ -336,7 +320,7 @@ function addon:CreateTrackerHeader(trackerFrame)
             trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
             
             addon:RequestUpdate()
-            if addon.RefreshQuestTimers then addon:RefreshQuestTimers() end
+            addon:RefreshQuestTimers()
             
             -- Restore lock state (handles resize buttons)
             addon:UpdateTrackerLock()
@@ -351,13 +335,7 @@ function addon:CreateTrackerHeader(trackerFrame)
         addon.db.minimized = not addon.db.minimized
         UpdateMinMaxState()
     end)
-    
-    -- Update tracker frame button state on demand
-    function addon:UpdateMinMaxState()
-        UpdateMinMaxState()
-    end
 
     -- Initialize state
     UpdateMinMaxState()
-    
 end

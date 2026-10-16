@@ -2,8 +2,8 @@ local addonName, addon = ...
 local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Localize hot-path globals
-local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
-local format, match = string.format, string.match
+local ipairs, type, tostring = ipairs, type, tostring
+local format = string.format
 local max, floor = math.max, math.floor
 local InCombatLockdown = InCombatLockdown
 
@@ -18,9 +18,60 @@ local GetItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
 local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
 local GetItemIconByID = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
 
--- Local aliases for addon utilities (populated after load)
-local ParseObjectiveDisplay = function(...) return addon.ParseObjectiveDisplay(...) end
-local ResolveTrackableItemData = function(...) return addon.ResolveTrackableItemData(...) end
+-- ObjectiveParser.lua loads before this file.
+local ParseObjectiveDisplay = addon.ParseObjectiveDisplay
+local ResolveTrackableItemData = addon.ResolveTrackableItemData
+
+local DEFAULT_BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
+
+local function OnRowClick(self, mouseButton)
+    addon:OnTrackableClick(self.trackableData, mouseButton)
+end
+
+local function OnRowEnter(self)
+    if addon.db.showTooltips then
+        addon:ShowTrackableTooltip(self, self.trackableData)
+    end
+end
+
+local function OnRowLeave()
+    addon:HideSharedTooltip()
+end
+
+local function OnPOIClick(self)
+    if self.questID then
+        -- Toggle super tracking
+        if C_SuperTrack.GetSuperTrackedQuestID() == self.questID then
+            C_SuperTrack.SetSuperTrackedQuestID(0)
+        else
+            C_SuperTrack.SetSuperTrackedQuestID(self.questID)
+        end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end
+end
+
+local function OnItemEnter(self)
+    if not self.itemLink then return end
+    local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+    local itemName
+    if GetItemInfo then
+        local ok, name = pcall(GetItemInfo, self.itemLink)
+        if ok then itemName = name end
+    end
+    tooltip:SetText(itemName or self.itemLink)
+    tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
+    tooltip:Show()
+end
+
+local function OnGroupClick(self)
+    LFGListUtil_FindQuestGroup(self.questID)
+end
+
+local function OnGroupEnter(self)
+    local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+    tooltip:SetText(OBJECTIVES_FIND_GROUP)
+    tooltip:Show()
+end
 
 local function NormalizeHeaderText(value)
     if not value or value == "" then return "" end
@@ -81,63 +132,21 @@ end
 -------------------------------------------------------------------------------
 function addon:RenderTrackableItem(parent, item, yOffset, indent)
     local db = self.db
+    -- Returned with every recycled child (objective lines, bars, POI/item/group
+    -- buttons) already hidden.
     local button = self:GetOrCreateButton(parent)
-    if button.expandBtn then button.expandBtn:Hide() end -- Hide expand button if recycled
-    
-    -- Cleanup recycled elements (use numeric for loops - faster than ipairs)
-    if button.objectiveBullets then
-        local arr = button.objectiveBullets
-        for i = 1, #arr do arr[i]:Hide() end
-    end
-    if button.objectives then
-        local arr = button.objectives
-        for i = 1, #arr do arr[i]:Hide() end
-    end
-    if button.objectivePrefixes then
-        local arr = button.objectivePrefixes
-        for i = 1, #arr do arr[i]:Hide() end
-    end
-    if button.objectiveProgresses then
-        local arr = button.objectiveProgresses
-        for i = 1, #arr do arr[i]:Hide() end
-    end
-    if button.progressBars then
-        local arr = button.progressBars
-        for _, frame in pairs(arr) do
-            if frame then frame:Hide() end
-        end
-    end
+    if button.expandBtn then button.expandBtn:Hide() end -- Left over from a header
 
-    button:Show()
-    
-    -- Reset button point completely to avoid previous anchor persistence
-    button:ClearAllPoints()
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", indent, -yOffset)
     button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -5, -yOffset)
-    
-    -- POI Button logic
-    local leftPadding = db.spacingPOIButton  -- Internal padding within the button for the icon check
 
-     -- POI Button (Using Blizzard Template for authenticity)
+    -- POI Button (Using Blizzard Template for authenticity)
     if not button.poiButton then
-        -- Use POIButtonTemplate to get exact Blizzard look/behavior
         button.poiButton = CreateFrame("Button", nil, button, "POIButtonTemplate")
         button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, 0) -- Nudged left
         button.poiButton:SetScale(0.75) -- Slightly smaller
-        
         -- Override click handling to our logic
-        button.poiButton:SetScript("OnClick", function(self)
-             if self.questID then
-                 -- Toggle super tracking
-                 if C_SuperTrack.GetSuperTrackedQuestID() == self.questID then
-                     C_SuperTrack.SetSuperTrackedQuestID(0)
-                 else
-                     C_SuperTrack.SetSuperTrackedQuestID(self.questID)
-                 end
-                 PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-             end
-        end)
-        
+        button.poiButton:SetScript("OnClick", OnPOIClick)
         button.poiButton:RegisterForClicks("LeftButtonUp")
     end
     
@@ -178,21 +187,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         secureBtn.itemLink = itemData.link
 
         if not secureBtn._handlersBound then
-            secureBtn:SetScript("OnEnter", function(self)
-                if not self.itemLink then return end
-                local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-                local itemName
-                if GetItemInfo then
-                    local ok, name = pcall(GetItemInfo, self.itemLink)
-                    if ok then itemName = name end
-                end
-                tooltip:SetText(itemName or self.itemLink)
-                tooltip:AddLine("Click to use this item", 0.85, 0.85, 0.85)
-                tooltip:Show()
-            end)
-            secureBtn:SetScript("OnLeave", function()
-                addon:HideSharedTooltip()
-            end)
+            secureBtn:SetScript("OnEnter", OnItemEnter)
+            secureBtn:SetScript("OnLeave", OnRowLeave)
             secureBtn._handlersBound = true
         end
 
@@ -225,7 +221,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         button.itemButton = secureBtn
         
         -- Update Cooldown
-        if secureBtn.cooldown then
+        do
             local start, duration, enable
             -- Try specific quest log cooldown first
             local logIndex = item.logIndex or C_QuestLog.GetLogIndexForQuestID(item.id)
@@ -254,8 +250,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 secureBtn.cooldown:Hide()
             end
         end
-        
-        -- leftPadding is handled separately now as item is on the right
     elseif itemData then
         -- Item exists but we're in combat lockdown: leave whatever is already shown
         -- (if anything) untouched rather than hiding/reconfiguring a secure button.
@@ -273,7 +267,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     
     if isQuest and POIButtonUtil then
         button.poiButton:Show()
-        if button.icon then button.icon:Hide() end
 
         -- Keep the button level with the title's first line as the quest name font
         -- grows or shrinks. Its position was tuned at size 12, and the line's middle
@@ -316,12 +309,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         if button.poiButton.UpdateButtonStyle then
             button.poiButton:UpdateButtonStyle()
         end
-
-         if leftPadding < db.spacingPOIButton then leftPadding = db.spacingPOIButton end
-
-    else
-        button.poiButton:Hide()
-        if button.icon then button.icon:Hide() end
     end
     
     -- Group Finder Button
@@ -336,29 +323,17 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             button.groupButton:SetHighlightAtlas("socialqueuing-icon-eye")
             button.groupButton:GetHighlightTexture():SetAlpha(0.5)
             
-            button.groupButton:SetScript("OnClick", function(self)
-                LFGListUtil_FindQuestGroup(self.questID)
-            end)
-            
-            button.groupButton:SetScript("OnEnter", function(self)
-                local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
-                tooltip:SetText(OBJECTIVES_FIND_GROUP)
-                tooltip:Show()
-            end)
-            button.groupButton:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
+            button.groupButton:SetScript("OnClick", OnGroupClick)
+            button.groupButton:SetScript("OnEnter", OnGroupEnter)
+            button.groupButton:SetScript("OnLeave", OnRowLeave)
         end
         
         button.groupButton.questID = item.id
         button.groupButton:Show()
-    else
-        if button.groupButton then button.groupButton:Hide() end
     end
 
-    if not isQuest then
-         leftPadding = db.spacingMinorHeaderIndent
-    else
-         leftPadding = db.spacingPOIButton
-    end
+    -- Quest rows leave room for the POI button on the left.
+    local leftPadding = isQuest and db.spacingPOIButton or db.spacingMinorHeaderIndent
     
     local rightPadding = -2
     if itemData then
@@ -450,12 +425,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- Objectives
     if not item.collapsed and item.objectives and #item.objectives > 0 then
         local currentY = -(textHeight + 2)
+        local isAchievementObjective = (item.type == "achievement")
         
         for objIndex, obj in ipairs(item.objectives) do
             local parsed = ParseObjectiveDisplay(item, obj, objIndex)
             local prefixText = parsed.prefixText
             local bodyText = parsed.bodyText
-            local isAchievementObjective = (item.type == "achievement")
             local achievementBodyText = bodyText
             if isAchievementObjective then
                 achievementBodyText = ResolveAchievementObjectiveText(item, obj.text, bodyText)
@@ -533,7 +508,6 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             -- Anchor to right of prefix (or bullet if no prefix)
             objLine:SetPoint("TOPLEFT", button, "TOPLEFT", bodyIndent, currentY)
             objLine:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
-            --local objColor = obj.finished and db.completeColor or db.objectiveColor -- Already set above
             objLine:SetTextColor(objColor.r, objColor.g, objColor.b, objColor.a)
             objLine:SetText(isAchievementObjective and achievementBodyText or bodyText)
             objLine:SetJustifyH("LEFT")
@@ -588,37 +562,19 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 local padding = db.spacingProgressBarPadding or 0
 
                 if not bar then
-                    -- Use Blizzard Template (QuestProgressBarTemplate or QuestObjectiveProgressBarTemplate)
-                    -- Check for standard templates implicitly by using them
-                    -- We'll try "QuestObjectiveProgressBarTemplate" which is common in modern WoW
-                    -- Fallback logic embedded within the object use
+                    -- Prefer Blizzard's own objective bar; fall back to building one.
                     local pcallStatus, newBar = pcall(CreateFrame, "Frame", nil, button, "QuestObjectiveProgressBarTemplate")
                     
                     if pcallStatus and newBar then
                          bar = newBar
                          bar.isTemplate = true
                     else
-                         -- Fallback to manual creation
+                         -- Texture, background color and border are applied by the
+                         -- style check below on first use.
                          bar = CreateFrame("StatusBar", nil, button)
                          bar:SetSize(1, 15)
-                         
-                         local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
-                         if LSM and db.barTexture then
-                              barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
-                         end
-                         bar:SetStatusBarTexture(barTex)
-                         
                          bar.bg = bar:CreateTexture(nil, "BACKGROUND")
                          bar.bg:SetAllPoints()
-                        local bgC = db.barBackgroundColor
-                        local bgR = bgC and bgC.r or 0
-                        local bgG = bgC and bgC.g or 0
-                        local bgB = bgC and bgC.b or 0
-                        local bgA = bgC and bgC.a or 0.5
-                        bar.bg:SetColorTexture(bgR, bgG, bgB, bgA)
-                         
-                         addon:CreateBorderLines(bar, db.barBorderSize)
-     
                          bar.value = bar:CreateFontString(nil, "OVERLAY") 
                          bar.value:SetFont(db.fontFace, 9, "OUTLINE")
                          bar.value:SetPoint("CENTER")
@@ -643,12 +599,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                         or bar._barBgG ~= bgG
                         or bar._barBgB ~= bgB
                         or bar._barBgA ~= bgA then
-                        local barTex = "Interface\\TargetingFrame\\UI-StatusBar"
+                        local barTex = DEFAULT_BAR_TEXTURE
                         if LSM and db.barTexture then
                             barTex = LSM:Fetch("statusbar", db.barTexture) or barTex
                         end
-                         bar:SetStatusBarTexture(barTex)
-                        if bar.bg then bar.bg:SetColorTexture(bgR, bgG, bgB, bgA) end
+                        bar:SetStatusBarTexture(barTex)
+                        bar.bg:SetColorTexture(bgR, bgG, bgB, bgA)
                         addon:CreateBorderLines(bar, borderSize)
                         bar._barTextureKey = barTextureKey
                         bar._barBorderSize = borderSize
@@ -668,12 +624,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 local barLeft = leftPadding + db.spacingObjectiveIndent
                 local barTop = currentY - padding
                 local barRightInset = db.spacingProgressBarInset
-                local anchorKey = format("%d|%d|%d", barLeft, barTop, barRightInset)
-                if bar._anchorKey ~= anchorKey then
+                if bar._anchorLeft ~= barLeft or bar._anchorTop ~= barTop or bar._anchorInset ~= barRightInset then
                     bar:ClearAllPoints()
                     bar:SetPoint("TOPLEFT", button, "TOPLEFT", barLeft, barTop)
                     bar:SetPoint("TOPRIGHT", button, "TOPRIGHT", -barRightInset, barTop)
-                    bar._anchorKey = anchorKey
+                    bar._anchorLeft, bar._anchorTop, bar._anchorInset = barLeft, barTop, barRightInset
                 end
                 
                 local percent = 0
@@ -709,26 +664,17 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         end
     end
     
-    if button.distance then button.distance:Hide() end
-    
     button:SetHeight(height)
-    button:Show()
     button.trackableData = item
 
     -- Stripe beside quests the player is standing in; it spans the row's full height.
     self:ApplyQuestAreaHighlight(button, isQuest and item.id or nil)
 
     if button._scriptMode ~= "trackable" then
-        button:SetScript("OnClick", function(self, mouseButton)
-            addon:OnTrackableClick(self.trackableData, mouseButton)
-        end)
+        button:SetScript("OnClick", OnRowClick)
         button:SetScript("OnMouseUp", nil)
-        button:SetScript("OnEnter", function(self)
-            if addon.db and addon.db.showTooltips then
-                addon:ShowTrackableTooltip(self, self.trackableData)
-            end
-        end)
-        button:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
+        button:SetScript("OnEnter", OnRowEnter)
+        button:SetScript("OnLeave", OnRowLeave)
         button._scriptMode = "trackable"
     end
     

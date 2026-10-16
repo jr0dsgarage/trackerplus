@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
-local format = string.format
+local ipairs, wipe = ipairs, wipe
 local max, min, floor = math.max, math.min, math.floor
 
 -- Tracker frame UI with scrollable content (no visible scrollbar)
@@ -44,9 +44,11 @@ local function UpdateScrollShadowAnchors(owner)
     local topOffset = (scrollTop - trackerTop) + SHADOW_SEAM_OFFSET
     local bottomOffset = (scrollBottom - trackerBottom) + SHADOW_SEAM_OFFSET - SHADOW_BOTTOM_EXTRA_DROP
 
-    local sig = format("%.1f|%.1f", topOffset, bottomOffset)
-    if owner._scrollShadowAnchorSig == sig then return end
-    owner._scrollShadowAnchorSig = sig
+    -- Compared at 0.1px, the precision that matters on screen.
+    topOffset = floor(topOffset * 10 + 0.5) / 10
+    bottomOffset = floor(bottomOffset * 10 + 0.5) / 10
+    if owner._scrollShadowTopOffset == topOffset and owner._scrollShadowBottomOffset == bottomOffset then return end
+    owner._scrollShadowTopOffset, owner._scrollShadowBottomOffset = topOffset, bottomOffset
 
     owner.scrollShadowTop:ClearAllPoints()
     owner.scrollShadowTop:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, topOffset)
@@ -66,7 +68,7 @@ function addon:UpdateScrollShadows()
     -- Nothing to shade when the scroll area isn't on screen. A hidden scroll frame
     -- still reports its last scroll range, so without this the gradients would be
     -- driven visible again over the minimized 34x34 button box.
-    if (self.db and self.db.minimized) or not scrollFrame:IsShown() then
+    if self.db.minimized or not scrollFrame:IsShown() then
         self.scrollShadowTop:SetAlpha(0)
         self.scrollShadowBottom:SetAlpha(0)
         return
@@ -167,6 +169,57 @@ function addon:MatchBlizzardTrackerStrata()
     end
 end
 
+-- A frame for a top-pinned section. The placeholder horizontal anchors are not
+-- cosmetic: UpdateLayoutAnchors runs *after* the section renderers, so a section
+-- carrying no anchors at all has width 0 the first time it is rendered. Everything
+-- RenderTrackableItem measures is derived from its parent's width, and a font
+-- string with no room reports a string height of 0 -- which puts the first
+-- objective line on top of the quest title. Because painting only happens when the
+-- collected data version changes, that bad first pass then stays on screen until
+-- the quest's data next changes. UpdateLayoutAnchors replaces these anchors in the
+-- same render pass, so they only ever supply a sane width to measure against.
+local function CreatePinnedSection(parent, hidden)
+    local section = CreateFrame("Frame", nil, parent)
+    section:SetFrameLevel(parent:GetFrameLevel() + 1)
+    section:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -HEADER_H)
+    section:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -5, -HEADER_H)
+    section:SetHeight(1) -- Dynamic, set by renderer + layout
+    if hidden then section:Hide() end
+    return section
+end
+
+local function OnResizeGripUp()
+    trackerFrame:StopMovingOrSizing()
+    SaveDraggedSize()
+    addon:ApplyTrackerAnchor()
+    addon:ClaimManualGeometry()
+    addon:UpdateContentWidth()
+    addon:RequestUpdate()
+    addon:UpdateSettingWidgets()
+end
+
+-- A corner drag-to-resize grip. `flip` mirrors the art for the left corner.
+local function CreateResizeGrip(corner, flip)
+    local grip = CreateFrame("Button", nil, trackerFrame)
+    grip:SetSize(16, 16)
+    grip:SetPoint(corner)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    if flip then
+        grip:GetNormalTexture():SetTexCoord(1, 0, 0, 1)
+        grip:GetHighlightTexture():SetTexCoord(1, 0, 0, 1)
+        grip:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
+    end
+    grip:SetScript("OnMouseDown", function()
+        if not addon.db.locked then
+            trackerFrame:StartSizing(corner)
+        end
+    end)
+    grip:SetScript("OnMouseUp", OnResizeGripUp)
+    return grip
+end
+
 function addon:CreateTrackerFrame()
     if trackerFrame then
         return trackerFrame
@@ -192,11 +245,8 @@ function addon:CreateTrackerFrame()
     -- Ensure position is managed by addon, not layout cache
     trackerFrame:SetUserPlaced(false)
     
-    -- Set position
-    -- Function to restore position
+    -- Restore position (also re-run on every PLAYER_ENTERING_WORLD)
     addon.RestorePosition = function()
-        if not trackerFrame then return end
-
         -- Until the player positions the tracker themselves, sit exactly on top of
         -- the game's own tracker so this is a drop-in replacement on first load.
         if addon:SyncWithBlizzardTracker() then
@@ -226,23 +276,8 @@ function addon:CreateTrackerFrame()
         self.db.backgroundColor.a
     )
     
-    -- Border (optional)
-    if self.db.borderEnabled then
-        trackerFrame.border = CreateFrame("Frame", nil, trackerFrame, "BackdropTemplate")
-        trackerFrame.border:SetAllPoints()
-        trackerFrame.border:SetBackdrop({
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = self.db.borderSize,
-        })
-        trackerFrame.border:SetBackdropBorderColor(
-            self.db.borderColor.r,
-            self.db.borderColor.g,
-            self.db.borderColor.b,
-            self.db.borderColor.a
-        )
-    end
-    
-    -- Make draggable & resizable
+    -- The optional border is created by UpdateTrackerAppearance on the first render.
+
     trackerFrame:EnableMouse(true)
     
     -- Dragging
@@ -263,53 +298,8 @@ function addon:CreateTrackerFrame()
     end)
     
     -- Resizing Handles (Triangles)
-    -- Bottom Right
-    trackerFrame.resizeBR = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.resizeBR:SetSize(16, 16)
-    trackerFrame.resizeBR:SetPoint("BOTTOMRIGHT")
-    trackerFrame.resizeBR:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-    trackerFrame.resizeBR:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-    trackerFrame.resizeBR:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    trackerFrame.resizeBR:SetScript("OnMouseDown", function()
-        if not addon.db.locked then
-            trackerFrame:StartSizing("BOTTOMRIGHT")
-        end
-    end)
-    trackerFrame.resizeBR:SetScript("OnMouseUp", function()
-        trackerFrame:StopMovingOrSizing()
-        SaveDraggedSize()
-        addon:ApplyTrackerAnchor()
-        addon:ClaimManualGeometry()
-        -- Update content width
-        addon:UpdateContentWidth()
-        addon:RequestUpdate()
-        if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
-    end)
-
-    -- Bottom Left
-    trackerFrame.resizeBL = CreateFrame("Button", nil, trackerFrame)
-    trackerFrame.resizeBL:SetSize(16, 16)
-    trackerFrame.resizeBL:SetPoint("BOTTOMLEFT")
-    trackerFrame.resizeBL:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-    trackerFrame.resizeBL:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-    trackerFrame.resizeBL:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    trackerFrame.resizeBL:GetNormalTexture():SetTexCoord(1, 0, 0, 1) -- Flip horizontally
-    trackerFrame.resizeBL:GetHighlightTexture():SetTexCoord(1, 0, 0, 1)
-    trackerFrame.resizeBL:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
-    trackerFrame.resizeBL:SetScript("OnMouseDown", function()
-        if not addon.db.locked then
-            trackerFrame:StartSizing("BOTTOMLEFT")
-        end
-    end)
-    trackerFrame.resizeBL:SetScript("OnMouseUp", function()
-        trackerFrame:StopMovingOrSizing()
-        SaveDraggedSize()
-        addon:ApplyTrackerAnchor()
-        addon:ClaimManualGeometry()
-        addon:UpdateContentWidth()
-        addon:RequestUpdate()
-        if addon.UpdateSettingWidgets then addon:UpdateSettingWidgets() end
-    end)
+    trackerFrame.resizeBR = CreateResizeGrip("BOTTOMRIGHT", false)
+    trackerFrame.resizeBL = CreateResizeGrip("BOTTOMLEFT", true)
     
     -- Mouse wheel scrolling
     trackerFrame:EnableMouseWheel(true)
@@ -323,60 +313,16 @@ function addon:CreateTrackerFrame()
         end
     end)
     
-    -- Scenario Frame (Top-pinned, outside scroll frame, anchored dynamically by layout)
-    local scenarioFrame = CreateFrame("Frame", nil, trackerFrame)
-    scenarioFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    scenarioFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
-    scenarioFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
-    scenarioFrame:SetHeight(1) -- Dynamic, set by renderer + layout
+    -- Top-pinned sections outside the scroll frame, chained by UpdateLayoutAnchors:
+    -- Scenario -> Active Quest (super-tracked) -> Follow the Arrow -> Campaign -> ...
+    -- -> Quest Timers ("Quest Timer: MM:SS" rows, filled by RenderQuestTimers.lua,
+    -- last so it sits directly above the quest list).
+    local scenarioFrame = CreatePinnedSection(trackerFrame, false)
     self.scenarioFrame = scenarioFrame
-
-    -- Active Quest Frame (Super-tracked quest, sits between Scenario and auto-quest popups)
-    --
-    -- The placeholder horizontal anchors here (and on the two sections below) are not
-    -- cosmetic: UpdateLayoutAnchors runs *after* the section renderers, so a section
-    -- carrying no anchors at all has width 0 the first time it is rendered. Everything
-    -- RenderTrackableItem measures is derived from its parent's width, and a font
-    -- string with no room reports a string height of 0 -- which puts the first
-    -- objective line on top of the quest title. Because painting only happens when the
-    -- collected data version changes, that bad first pass then stays on screen until
-    -- the quest's data next changes. UpdateLayoutAnchors replaces these anchors in the
-    -- same render pass, so they only ever supply a sane width to measure against.
-    local activeQuestFrame = CreateFrame("Frame", nil, trackerFrame)
-    activeQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    activeQuestFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
-    activeQuestFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
-    activeQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
-    activeQuestFrame:Hide()
-    self.activeQuestFrame = activeQuestFrame
-
-    -- FTA Frame (Follow the Arrow guide, pinned between Active Quest and Campaign)
-    local ftaFrame = CreateFrame("Frame", nil, trackerFrame)
-    ftaFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    ftaFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
-    ftaFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
-    ftaFrame:SetHeight(1)
-    ftaFrame:Hide()
-    self.ftaFrame = ftaFrame
-
-    -- Campaign Frame (Pinned below Active Quest when campaign quests are present)
-    local campaignFrame = CreateFrame("Frame", nil, trackerFrame)
-    campaignFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    campaignFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
-    campaignFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
-    campaignFrame:SetHeight(1)
-    campaignFrame:Hide()
-    self.campaignFrame = campaignFrame
-
-    -- Quest Timer Frame ("Quest Timer: MM:SS" rows, last pinned section so it sits
-    -- directly above the quest list). Filled by RenderQuestTimers.lua.
-    local questTimerFrame = CreateFrame("Frame", nil, trackerFrame)
-    questTimerFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 1)
-    questTimerFrame:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 5, -HEADER_H)
-    questTimerFrame:SetPoint("TOPRIGHT", trackerFrame, "TOPRIGHT", -5, -HEADER_H)
-    questTimerFrame:SetHeight(1)
-    questTimerFrame:Hide()
-    self.questTimerFrame = questTimerFrame
+    self.activeQuestFrame = CreatePinnedSection(trackerFrame, true)
+    self.ftaFrame = CreatePinnedSection(trackerFrame, true)
+    self.campaignFrame = CreatePinnedSection(trackerFrame, true)
+    self.questTimerFrame = CreatePinnedSection(trackerFrame, true)
 
     -- Auto Quest Frame (Below scenario/active-quest if visible, outside scroll frame)
     local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
@@ -388,9 +334,9 @@ function addon:CreateTrackerFrame()
     -- Completed Quest Frame (Pinned to the scenario frame so borrowed popups stay fixed)
     completedQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     completedQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
-    completedQuestFrame:SetWidth((self.db and self.db.frameWidth and (self.db.frameWidth - 10)) or 300)
+    completedQuestFrame:SetWidth(self.db.frameWidth - 10)
     completedQuestFrame:SetHeight(1)
-    completedQuestFrame:SetFrameLevel((trackerFrame:GetFrameLevel() or 1) + 2)
+    completedQuestFrame:SetFrameLevel(trackerFrame:GetFrameLevel() + 2)
     self.completedQuestFrame = completedQuestFrame
 
     -- World Quest Frame (Pinned to absolute bottom)
@@ -422,7 +368,7 @@ function addon:CreateTrackerFrame()
     self.contentFrame = contentFrame
     -- Width is corrected to the scroll viewport by UpdateContentWidth on the first
     -- render; this is only a starting size so the frame has one before then.
-    contentFrame:SetSize(max((self.db.frameWidth or 0) - 10, 1), 100)
+    contentFrame:SetSize(max(self.db.frameWidth - 10, 1), 100)
     scrollFrame:SetScrollChild(contentFrame)
 
     -- Scroll frame shadow gradients (depth effect at the edges of the scroll area).
@@ -435,7 +381,7 @@ function addon:CreateTrackerFrame()
     -- Anchors: horizontally pinned to the tracker so they are always exactly the
     -- tracker's width. Their vertical placement follows the scroll area and is
     -- applied by UpdateScrollShadows; the offsets below are just a starting point.
-    local shadowLevel = trackerFrame:GetFrameLevel() or 1
+    local shadowLevel = trackerFrame:GetFrameLevel()
 
     local scrollShadowTop = CreateFrame("Frame", nil, trackerFrame)
     scrollShadowTop:SetPoint("TOPLEFT", trackerFrame, "TOPLEFT", 0, 0)
@@ -468,15 +414,9 @@ function addon:CreateTrackerFrame()
 
     self:CreateTrackerHeader(trackerFrame)
 
-    -- Store references
-    self.scenarioFrame = scenarioFrame
-    
-    -- Show frame
     trackerFrame:Show()
-    
     self:UpdateTrackerLock()
-
-    if self.InitQuestTimerSection then self:InitQuestTimerSection() end
+    self:InitQuestTimerSection()
     
     return trackerFrame
 end
@@ -485,25 +425,18 @@ end
 function addon:UpdateTrackerLock()
     if not trackerFrame then return end
     
-    if self.db.locked then
-        trackerFrame:EnableMouse(false)
-        if trackerFrame.resizeBR then trackerFrame.resizeBR:Hide() end
-        if trackerFrame.resizeBL then trackerFrame.resizeBL:Hide() end
-    else
-        trackerFrame:EnableMouse(true)
-        if trackerFrame.resizeBR then trackerFrame.resizeBR:Show() end
-        if trackerFrame.resizeBL then trackerFrame.resizeBL:Show() end
-    end
+    local locked = self.db.locked
+    trackerFrame:EnableMouse(not locked)
+    trackerFrame.resizeBR:SetShown(not locked)
+    trackerFrame.resizeBL:SetShown(not locked)
 
-    local lockTex = trackerFrame.lockBtn and trackerFrame.lockBtn._lockTex
-    if lockTex then
-        if self.db.locked then
-            lockTex:SetDesaturated(false)
-            lockTex:SetVertexColor(1, 1, 1, 1)
-        else
-            lockTex:SetDesaturated(true)
-            lockTex:SetVertexColor(0.6, 0.6, 0.6, 1)
-        end
+    -- Gold when locked, grey when unlocked.
+    local lockTex = trackerFrame.lockBtn._lockTex
+    lockTex:SetDesaturated(not locked)
+    if locked then
+        lockTex:SetVertexColor(1, 1, 1, 1)
+    else
+        lockTex:SetVertexColor(0.6, 0.6, 0.6, 1)
     end
 
     -- Keep the Settings checkbox in step when toggled from the header or slash command.
@@ -513,12 +446,6 @@ function addon:UpdateTrackerLock()
     end
 end
 
-------------------------------------------------------------------------------
--- Dynamic Layout Engine
--- Call this after setting section heights and visibility in the render cycle.
-    -- Order: ScenarioFrame -> ActiveQuestFrame -> FTAFrame -> CampaignFrame -> AutoQuestFrame -> CompletedQuestFrame -> QuestTimerFrame -> ScrollFrame
--- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
-------------------------------------------------------------------------------
 -- Match the scroll content to the scroll frame's viewport.
 --
 -- A ScrollFrame clips its child to the viewport, so anything wider has its right edge
@@ -537,9 +464,9 @@ function addon:UpdateContentWidth()
     -- blocked in combat. Every render path re-runs this once combat ends.
     if not contentFrame or InCombatLockdown() then return end
 
-    local width = scrollFrame and scrollFrame:GetWidth() or 0
+    local width = scrollFrame:GetWidth()
     if width <= 1 then
-        width = (self.db.frameWidth or 0) - 10
+        width = self.db.frameWidth - 10
     end
 
     if width > 1 then
@@ -547,103 +474,106 @@ function addon:UpdateContentWidth()
     end
 end
 
+------------------------------------------------------------------------------
+-- Dynamic Layout Engine
+-- Call this after setting section heights and visibility in the render cycle.
+-- Top-pinned, in order (TOP_SECTIONS): Scenario -> Active Quest -> FTA -> Campaign
+-- -> Auto Quest -> Completed Quest -> Quest Timer, then the ScrollFrame.
+-- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
+------------------------------------------------------------------------------
+local TOP_SECTIONS = {
+    "scenarioFrame", "activeQuestFrame", "ftaFrame", "campaignFrame",
+    "autoQuestFrame", "completedQuestFrame", "questTimerFrame",
+}
+local LAYOUT_PAD  = 4    -- vertical gap between sections
+local LAYOUT_SIDE = 5    -- horizontal inset from tracker edges
+
+-- Reused across calls. layoutState holds, per top section, its rounded height
+-- (0 = hidden), then the bonus and world quest visibility, so anchors are only
+-- touched when one of those changes.
+local layoutState, visibleTop = {}, {}
+
+local function SectionHeight(frame)
+    if frame:IsShown() then
+        local height = frame:GetHeight()
+        if height > 1 then return floor(height + 0.5) end
+    end
+    return 0
+end
+
+-- Stores value in layoutState[i]; true if it differs from what was there.
+local function Track(i, value)
+    if layoutState[i] ~= value then
+        layoutState[i] = value
+        return true
+    end
+    return false
+end
+
 function addon:UpdateLayoutAnchors()
     if not self.trackerFrame then return end
 
-    local PAD      = 4    -- vertical gap between sections
-    local SIDE     = 5    -- horizontal inset from tracker edges
+    -- A nil signature (set by the renderer) forces a full re-anchor.
+    local changed = self._layoutSignature == nil
 
-    -- Determine section visibility
-    local scenVisible  = self.scenarioFrame    and self.scenarioFrame:IsShown()    and self.scenarioFrame:GetHeight()    > 1
-    local acqVisible   = self.activeQuestFrame and self.activeQuestFrame:IsShown() and self.activeQuestFrame:GetHeight() > 1
-    local ftaVisible   = self.ftaFrame         and self.ftaFrame:IsShown()         and self.ftaFrame:GetHeight()         > 1
-    local campVisible  = self.campaignFrame    and self.campaignFrame:IsShown()    and self.campaignFrame:GetHeight()    > 1
-    local aqVisible    = self.autoQuestFrame   and self.autoQuestFrame:IsShown()   and self.autoQuestFrame:GetHeight()   > 1
-    local cqVisible    = self.completedQuestFrame and self.completedQuestFrame:IsShown() and self.completedQuestFrame:GetHeight() > 1
-    local qtVisible    = self.questTimerFrame  and self.questTimerFrame:IsShown()  and self.questTimerFrame:GetHeight()  > 1
-    local bonusVisible = self.bonusFrame     and self.bonusFrame:IsShown()     and self.bonusFrame:GetHeight()     > 1
-    local wqVisible    = self.worldQuestFrame and self.worldQuestFrame:IsShown() and self.worldQuestFrame:GetHeight() > 1
+    wipe(visibleTop)
+    for i, key in ipairs(TOP_SECTIONS) do
+        local frame = self[key]
+        local height = SectionHeight(frame)
+        changed = Track(i, height) or changed
+        if height > 0 then visibleTop[#visibleTop + 1] = frame end
+    end
+    local bonusVisible = SectionHeight(self.bonusFrame) > 0
+    local wqVisible = SectionHeight(self.worldQuestFrame) > 0
+    changed = Track(#TOP_SECTIONS + 1, bonusVisible) or changed
+    changed = Track(#TOP_SECTIONS + 2, wqVisible) or changed
 
-    -- Build a change-detection signature so we only touch anchors when needed.
-    local sig = format("%s|%s|%s|%s|%s|%s|%s|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%s|%s",
-        tostring(scenVisible),
-        tostring(acqVisible),
-        tostring(ftaVisible),
-        tostring(campVisible),
-        tostring(aqVisible),
-        tostring(cqVisible),
-        tostring(qtVisible),
-        scenVisible  and self.scenarioFrame:GetHeight()    or 0,
-        acqVisible   and self.activeQuestFrame:GetHeight() or 0,
-        ftaVisible   and self.ftaFrame:GetHeight()         or 0,
-        campVisible  and self.campaignFrame:GetHeight()    or 0,
-        aqVisible    and self.autoQuestFrame:GetHeight()   or 0,
-        cqVisible    and self.completedQuestFrame:GetHeight() or 0,
-        qtVisible    and self.questTimerFrame:GetHeight()  or 0,
-        tostring(bonusVisible),
-        tostring(wqVisible))
-
-    if self._layoutSignature == sig then return end
-    self._layoutSignature = sig
+    if not changed then return end
+    self._layoutSignature = true
 
     ---------------------------------------------------------------------------
     -- Top-anchored sections, chained in order
     ---------------------------------------------------------------------------
-    local topSections = {}
-    if scenVisible  then topSections[#topSections + 1] = self.scenarioFrame    end
-    if acqVisible   then topSections[#topSections + 1] = self.activeQuestFrame end
-    if ftaVisible   then topSections[#topSections + 1] = self.ftaFrame         end
-    if campVisible  then topSections[#topSections + 1] = self.campaignFrame    end
-    if aqVisible    then topSections[#topSections + 1] = self.autoQuestFrame   end
-    if cqVisible    then topSections[#topSections + 1] = self.completedQuestFrame end
-    if qtVisible    then topSections[#topSections + 1] = self.questTimerFrame  end
-    local prevFrame  = self.trackerFrame
-    local prevPoint  = "TOPLEFT"
-    local prevPointR = "TOPRIGHT"
-    local yOff       = -HEADER_H
-    local xL, xR     = SIDE, -SIDE
-
-    for _, section in ipairs(topSections) do
-        -- Only call ClearAllPoints+SetPoint on this particular section when its
-        -- own anchor parameters changed.  The outer sig catches any downstream
-        -- change (e.g. activeQuestFrame height changing), which previously caused
-        -- ClearAllPoints to be called on *every* section including scenarioFrame —
-        -- momentarily detaching it and producing the visible flash/drop.
-        local sectionSig = format("%s|%s|%s|%d|%d",
-            tostring(prevFrame), prevPoint, prevPointR, xL, yOff)
-        if section._tpLayoutAnchorSig ~= sectionSig then
+    local prevFrame = self.trackerFrame
+    for _, section in ipairs(visibleTop) do
+        -- Only re-anchor this section when the frame above it changed. Everything
+        -- else about the anchor follows from that: the first section sits under
+        -- the header inset from the tracker's sides, later ones flush below the
+        -- previous section. Re-anchoring unchanged sections (scenarioFrame
+        -- especially) momentarily detached them and produced a visible flash/drop.
+        if section._tpLayoutAnchorPrev ~= prevFrame then
             section:ClearAllPoints()
-            section:SetPoint("TOPLEFT",  prevFrame, prevPoint,  xL, yOff)
-            section:SetPoint("TOPRIGHT", prevFrame, prevPointR, xR, yOff)
-            section._tpLayoutAnchorSig = sectionSig
+            if prevFrame == self.trackerFrame then
+                section:SetPoint("TOPLEFT", prevFrame, "TOPLEFT", LAYOUT_SIDE, -HEADER_H)
+                section:SetPoint("TOPRIGHT", prevFrame, "TOPRIGHT", -LAYOUT_SIDE, -HEADER_H)
+            else
+                section:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
+                section:SetPoint("TOPRIGHT", prevFrame, "BOTTOMRIGHT", 0, -LAYOUT_PAD)
+            end
+            section._tpLayoutAnchorPrev = prevFrame
         end
-        prevFrame  = section
-        prevPoint  = "BOTTOMLEFT"
-        prevPointR = "BOTTOMRIGHT"
-        yOff       = -PAD
-        xL, xR     = 0, 0
+        prevFrame = section
     end
 
     ---------------------------------------------------------------------------
     -- ScrollFrame — fills between last top section and first bottom section
     ---------------------------------------------------------------------------
-    if self.scrollFrame then
-        self.scrollFrame:ClearAllPoints()
+    local scroll = self.scrollFrame
+    scroll:ClearAllPoints()
 
-        if prevFrame == self.trackerFrame then
-            -- No top sections visible; scroll starts right below the header
-            self.scrollFrame:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -HEADER_H)
-        else
-            self.scrollFrame:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -PAD)
-        end
+    if prevFrame == self.trackerFrame then
+        -- No top sections visible; scroll starts right below the header
+        scroll:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -HEADER_H)
+    else
+        scroll:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
+    end
 
-        if bonusVisible then
-            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
-        elseif wqVisible then
-            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.worldQuestFrame, "TOPRIGHT", 0, 0)
-        else
-            self.scrollFrame:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -SIDE, SIDE)
-        end
+    if bonusVisible then
+        scroll:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+    elseif wqVisible then
+        scroll:SetPoint("BOTTOMRIGHT", self.worldQuestFrame, "TOPRIGHT", 0, 0)
+    else
+        scroll:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -LAYOUT_SIDE, LAYOUT_SIDE)
     end
 end
 

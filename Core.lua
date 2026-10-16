@@ -2,39 +2,57 @@
 local _, addon = ...
 
 -- Localize hot-path globals to avoid repeated global lookups
-local pairs, ipairs, next, tostring = pairs, ipairs, next, tostring
+local ipairs, next, tostring = ipairs, next, tostring
 local wipe = wipe
 local format = string.format
 local max, min = math.max, math.min
+local select = select
 local GetTime = GetTime
 local InCombatLockdown = InCombatLockdown
 local IsInInstance = IsInInstance
 local C_Scenario = C_Scenario
-local C_Timer = C_Timer
 -- NOTE: GetQuestDifficultyColor is deliberately *not* localized; see
 -- GetDifficultyColorForLevel in QuestColors.lua.
 
--- Core addon initialization and event handling
+-- Core addon initialization and event handling. The frame is shown only while an
+-- update is pending, so its OnUpdate costs nothing while the tracker is idle.
 local frame = CreateFrame("Frame")
+frame:Hide()
 
 local updateTimer = 0
-local requestedUpdate = false
 local pendingUpdate = false
 local lastRenderedDataVersion = -1
-local lastLayoutSignature = ""
+local lastFrameWidth, lastFrameHeight, lastFrameScale
 
 -- Dirty section tracking + cached buckets (high-impact perf)
 local dirtySections = { full = true }
-local sectionCache = {
-    quests = {},
-    achievements = {},
-    scenarios = {},
-    autoQuests = {},
-    superTracked = {},
-    professions = {},
-    monthly = {},
-    endeavors = {},
+
+-- Each bucket caches one collector's output until its section is marked dirty.
+-- Listed in the order buckets are concatenated before sorting. `enabled` is the
+-- settings check that gates collection (nil = always collected).
+local BUCKETS = {
+    { name = "quests", collector = "CollectQuests",
+      enabled = function(db) return db.showQuests or db.showWorldQuests end },
+    { name = "achievements", collector = "CollectAchievements",
+      enabled = function(db) return db.showAchievements end },
+    { name = "scenarios", collector = "CollectScenarioObjectives",
+      enabled = function(db) return db.showScenarios or db.showDungeonObjectives end },
+    { name = "autoQuests", collector = "CollectAutoQuests" },
+    { name = "superTracked", collector = "CollectSuperTrackedQuest" },
+    { name = "professions", collector = "CollectProfessionTracking",
+      enabled = function(db) return db.showProfessions end },
+    { name = "monthly", collector = "CollectMonthlyActivities",
+      enabled = function(db) return db.showMonthlyActivities end },
+    { name = "endeavors", collector = "CollectEndeavors",
+      enabled = function(db) return db.showEndeavors end },
 }
+for _, bucket in ipairs(BUCKETS) do
+    bucket.items = {}
+end
+
+-- Blizzard's scenario/delve trackers, which RenderScenario borrows.
+local SCENARIO_TRACKER_NAMES = { "DelvesObjectiveTracker", "DelveObjectiveTracker", "ScenarioObjectiveTracker" }
+addon.SCENARIO_TRACKER_NAMES = SCENARIO_TRACKER_NAMES
 
 local function MarkDirty(section)
     if not section or section == "full" then
@@ -44,22 +62,21 @@ local function MarkDirty(section)
     end
 end
 
-local function ClearDirty()
-    for k in pairs(dirtySections) do
-        dirtySections[k] = nil
-    end
-end
-
-local function RefreshBucket(name, collector, owner)
-    local bucket = sectionCache[name]
-    wipe(bucket)
-    collector(owner, bucket)
-end
-
 local function AppendBucket(dest, source)
     for i = 1, #source do
         dest[#dest + 1] = source[i]
     end
+end
+
+-- True if any of the given frames is shown and taller than 5px.
+local function AnyChildVisible(...)
+    for i = 1, select("#", ...) do
+        local child = select(i, ...)
+        if child:IsShown() and child:GetHeight() > 5 then
+            return true
+        end
+    end
+    return false
 end
 
 function addon:IsAnyScenarioTrackerActive()
@@ -68,21 +85,14 @@ function addon:IsAnyScenarioTrackerActive()
     end
     -- In War Within/Dragonflight, delves and some other scenarios might not return true above.
     -- Check if the actual UI modules are active.
-    local trackers = { "DelvesObjectiveTracker", "DelveObjectiveTracker", "ScenarioObjectiveTracker" }
-    for _, name in ipairs(trackers) do
+    for _, name in ipairs(SCENARIO_TRACKER_NAMES) do
         local t = _G[name]
         -- If it exists, is shown, and has an active UI inside it
-        if t and t:IsShown() and t.ContentsFrame then
-            local hasContent = false
-            -- Check if any children are actually visible (GetNumChildren > 0 alone is unreliable)
-            for _, child in pairs({t.ContentsFrame:GetChildren()}) do
-                if child:IsShown() and child:GetHeight() > 5 then
-                    hasContent = true
-                    break
-                end
-            end
-            local hasHeight = max(t:GetHeight() or 0, t.ContentsFrame:GetHeight() or 0) > 10
-            if hasContent or hasHeight then
+        local contents = t and t:IsShown() and t.ContentsFrame
+        if contents then
+            -- Height alone, or GetNumChildren > 0 alone, is unreliable.
+            if max(t:GetHeight() or 0, contents:GetHeight() or 0) > 10
+                or AnyChildVisible(contents:GetChildren()) then
                 return true
             end
         end
@@ -96,11 +106,6 @@ local function Print(...)
 end
 
 addon.Print = Print
-addon.disableObjectiveTrackerHooks = false
-
-function addon:GetSharedTooltip()
-    return GameTooltip
-end
 
 function addon:AcquireTooltip(owner, anchor)
     GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
@@ -144,39 +149,30 @@ function addon:Initialize()
     -- Manage default Blizzard tracker
     if ObjectiveTrackerFrame then
         -- Hook Show to control visibility based on our enabled state
-        if not addon.hookedTracker and not addon.disableObjectiveTrackerHooks then
-            hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
-                -- While Edit Mode is open the player needs to see and drag the
-                -- real tracker, so suppression is suspended (see OnEditModeEnter).
-                if addon.db.enabled and not addon._editModeActive then
-                    self:EnableMouse(false)
-                    if not InCombatLockdown() then
-                        self:SetAlpha(0)
-                    end
+        hooksecurefunc(ObjectiveTrackerFrame, "Show", function(self)
+            -- While Edit Mode is open the player needs to see and drag the
+            -- real tracker, so suppression is suspended (see OnEditModeEnter).
+            if addon.db.enabled and not addon._editModeActive then
+                self:EnableMouse(false)
+                if not InCombatLockdown() then
+                    self:SetAlpha(0)
                 end
-            end)
-            addon.hookedTracker = true
-        end
+            end
+        end)
 
         -- If any code path flips ObjectiveTracker mouse back on while TrackerPlus is enabled,
         -- immediately turn it back off to prevent click-through behavior.
-        if not addon.hookedTrackerMouse and not addon.disableObjectiveTrackerHooks then
-            hooksecurefunc(ObjectiveTrackerFrame, "EnableMouse", function(self, enabled)
-                if addon.db.enabled and enabled and not addon._editModeActive then
-                    self:EnableMouse(false)
-                end
-            end)
-            addon.hookedTrackerMouse = true
-        end
+        hooksecurefunc(ObjectiveTrackerFrame, "EnableMouse", function(self, enabled)
+            if addon.db.enabled and enabled and not addon._editModeActive then
+                self:EnableMouse(false)
+            end
+        end)
 
         -- Follow the tracker's strata if the game moves it after load, so its
         -- invisible children never end up layered above our window.
-        if not addon.hookedTrackerStrata then
-            hooksecurefunc(ObjectiveTrackerFrame, "SetFrameStrata", function()
-                addon:MatchBlizzardTrackerStrata()
-            end)
-            addon.hookedTrackerStrata = true
-        end
+        hooksecurefunc(ObjectiveTrackerFrame, "SetFrameStrata", function()
+            addon:MatchBlizzardTrackerStrata()
+        end)
         self:MatchBlizzardTrackerStrata()
 
         -- Initial visibility check
@@ -185,79 +181,69 @@ function addon:Initialize()
 
     -- Edit Mode enter/exit (clients without Edit Mode simply have no EventRegistry
     -- callbacks for it, so this is a no-op there).
-    if not addon.hookedEditMode and EventRegistry and EventRegistry.RegisterCallback then
+    if EventRegistry and EventRegistry.RegisterCallback then
         pcall(function()
-            EventRegistry:RegisterCallback("EditMode.Enter", function()
-                addon:OnEditModeEnter()
-            end, addon)
-            EventRegistry:RegisterCallback("EditMode.Exit", function()
-                addon:OnEditModeExit()
-            end, addon)
+            EventRegistry:RegisterCallback("EditMode.Enter", addon.OnEditModeEnter, addon)
+            EventRegistry:RegisterCallback("EditMode.Exit", addon.OnEditModeExit, addon)
         end)
-        addon.hookedEditMode = true
     end
 
     Print("Loaded! Type /trackerplus or /tp for options.")
 end
 
-function addon:RestoreAllHijackedFrames()
-    -- Restore borrowed frames to their original parents.
-    --
-    -- Only frames carrying our _trackerPlusOriginalParent marker are touched, and
-    -- RenderScenario only ever marks the top-level tracker. Every write to (and
-    -- even broad traversal of) a Blizzard frame spreads TrackerPlus taint into it,
-    -- which later surfaces as errors inside Blizzard's own tracker update, so this
-    -- deliberately checks a few known fields instead of walking GetChildren().
-    local function RestoreFrame(frameToRestore)
-        if not (frameToRestore and frameToRestore._trackerPlusOriginalParent) then
-            return
-        end
-
-        frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
-        frameToRestore:ClearAllPoints()
-        if frameToRestore._trackerPlusOriginalPoint1 then
-            frameToRestore:SetPoint(
-                frameToRestore._trackerPlusOriginalPoint1,
-                frameToRestore._trackerPlusOriginalRelTo,
-                frameToRestore._trackerPlusOriginalPoint2,
-                frameToRestore._trackerPlusOriginalX or 0,
-                frameToRestore._trackerPlusOriginalY or 0
-            )
-        end
-        frameToRestore._trackerPlusOriginalParent = nil
-        frameToRestore._trackerPlusOriginalPoint1 = nil
-        frameToRestore._trackerPlusOriginalRelTo = nil
-        frameToRestore._trackerPlusOriginalPoint2 = nil
-        frameToRestore._trackerPlusOriginalX = nil
-        frameToRestore._trackerPlusOriginalY = nil
+-- Restore borrowed frames to their original parents.
+--
+-- Only frames carrying our _trackerPlusOriginalParent marker are touched, and
+-- RenderScenario only ever marks the top-level tracker. Every write to (and
+-- even broad traversal of) a Blizzard frame spreads TrackerPlus taint into it,
+-- which later surfaces as errors inside Blizzard's own tracker update, so this
+-- deliberately checks a few known fields instead of walking GetChildren().
+local function RestoreFrame(frameToRestore)
+    if not (frameToRestore and frameToRestore._trackerPlusOriginalParent) then
+        return
     end
 
+    frameToRestore:SetParent(frameToRestore._trackerPlusOriginalParent)
+    frameToRestore:ClearAllPoints()
+    if frameToRestore._trackerPlusOriginalPoint1 then
+        frameToRestore:SetPoint(
+            frameToRestore._trackerPlusOriginalPoint1,
+            frameToRestore._trackerPlusOriginalRelTo,
+            frameToRestore._trackerPlusOriginalPoint2,
+            frameToRestore._trackerPlusOriginalX or 0,
+            frameToRestore._trackerPlusOriginalY or 0
+        )
+    end
+    frameToRestore._trackerPlusOriginalParent = nil
+    frameToRestore._trackerPlusOriginalPoint1 = nil
+    frameToRestore._trackerPlusOriginalRelTo = nil
+    frameToRestore._trackerPlusOriginalPoint2 = nil
+    frameToRestore._trackerPlusOriginalX = nil
+    frameToRestore._trackerPlusOriginalY = nil
+end
+
+local function RestoreTracker(tracker)
+    RestoreFrame(tracker)
+    local contents = tracker.ContentsFrame
+    if contents then
+        RestoreFrame(contents)
+        RestoreFrame(contents.WidgetContainer)
+    end
+end
+
+function addon:RestoreAllHijackedFrames()
     if not InCombatLockdown() then
-        local candidates = {
-            "DelvesObjectiveTracker",
-            "DelveObjectiveTracker",
-            "ScenarioObjectiveTracker",
-        }
-        for _, name in ipairs(candidates) do
-            local tracker = _G and _G[name]
+        for _, name in ipairs(SCENARIO_TRACKER_NAMES) do
+            local tracker = _G[name]
             if tracker then
-                pcall(function()
-                    RestoreFrame(tracker)
-                    local contents = tracker.ContentsFrame
-                    if contents then
-                        RestoreFrame(contents)
-                        RestoreFrame(contents.WidgetContainer)
-                    end
-                end)
+                pcall(RestoreTracker, tracker)
             end
         end
     end
 
-    -- Clear cached metadata
-    if addon.scenarioFrame then
-        addon.scenarioFrame.borrowedFrame = nil
+    if self.scenarioFrame then
+        self.scenarioFrame.borrowedFrame = nil
     end
-    addon.scenarioHostOriginalParent = nil
 end
 
 -- Edit Mode integration
@@ -292,10 +278,7 @@ function addon:OnEditModeExit()
 
     -- Re-hide the default tracker, then adopt whatever geometry was just set.
     self:UpdateDefaultTrackerVisibility()
-
-    if self.SyncWithBlizzardTracker then
-        self:SyncWithBlizzardTracker()
-    end
+    self:SyncWithBlizzardTracker()
 
     self:RequestUpdate("full")
 end
@@ -307,23 +290,26 @@ function addon:UpdateDefaultTrackerVisibility()
     -- Edit Mode owns the tracker's visibility while it is open.
     if self._editModeActive then return end
 
-    if addon.LogAt then addon:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled)) end
+    self:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled))
 
     if self.db.enabled then
         ObjectiveTrackerFrame:EnableMouse(false)
         if not InCombatLockdown() then
             ObjectiveTrackerFrame:SetAlpha(0)
-            if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame hidden") end
+            self:LogAt("trace", "ObjectiveTrackerFrame hidden")
         end
-    else
+    elseif not InCombatLockdown() then
         -- Restore default Blizzard tracker visibility
-        if ObjectiveTrackerFrame.Show and not InCombatLockdown() then
-            ObjectiveTrackerFrame:SetAlpha(1)
-            ObjectiveTrackerFrame:EnableMouse(true)
-            ObjectiveTrackerFrame:Show()
-            if addon.LogAt then addon:LogAt("trace", "ObjectiveTrackerFrame restored") end
-        end
+        ObjectiveTrackerFrame:SetAlpha(1)
+        ObjectiveTrackerFrame:EnableMouse(true)
+        ObjectiveTrackerFrame:Show()
+        self:LogAt("trace", "ObjectiveTrackerFrame restored")
     end
+end
+
+-- Registers an event that may not exist on every supported client.
+local function RegisterOptionalEvent(event)
+    pcall(frame.RegisterEvent, frame, event)
 end
 
 -- Event registration
@@ -346,10 +332,10 @@ function addon:RegisterEvents()
     frame:RegisterEvent("WORLD_QUEST_COMPLETED_BY_SPELL")
     
     -- Bonus objective / Task quest events
-    pcall(function() frame:RegisterEvent("QUEST_POI_UPDATE") end)
-    pcall(function() frame:RegisterEvent("TASK_PROGRESS_UPDATE") end)
-    pcall(function() frame:RegisterEvent("QUEST_PROGRESS_UPDATE") end)
-    pcall(function() frame:RegisterEvent("QUEST_LOG_CRITERIA_UPDATE") end)
+    RegisterOptionalEvent("QUEST_POI_UPDATE")
+    RegisterOptionalEvent("TASK_PROGRESS_UPDATE")
+    RegisterOptionalEvent("QUEST_PROGRESS_UPDATE")
+    RegisterOptionalEvent("QUEST_LOG_CRITERIA_UPDATE")
     
     -- Achievement events
     frame:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
@@ -375,44 +361,33 @@ function addon:RegisterEvents()
     frame:RegisterEvent("TRADE_SKILL_SHOW")
     frame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
     frame:RegisterEvent("TRACKED_RECIPE_UPDATE")
-    pcall(function() frame:RegisterEvent("ITEM_COUNT_CHANGED") end)
-    pcall(function() frame:RegisterEvent("BAG_UPDATE_DELAYED") end)
-    pcall(function() frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE") end)
-    pcall(function() frame:RegisterEvent("BANKFRAME_OPENED") end)
-    pcall(function() frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED") end)
-    pcall(function() frame:RegisterEvent("BANK_TABS_CHANGED") end)
-    pcall(function() frame:RegisterEvent("BANK_TAB_SETTINGS_UPDATED") end)
+    RegisterOptionalEvent("ITEM_COUNT_CHANGED")
+    RegisterOptionalEvent("BAG_UPDATE_DELAYED")
+    RegisterOptionalEvent("CURRENCY_DISPLAY_UPDATE")
+    RegisterOptionalEvent("BANKFRAME_OPENED")
+    RegisterOptionalEvent("PLAYERBANKSLOTS_CHANGED")
+    RegisterOptionalEvent("BANK_TABS_CHANGED")
+    RegisterOptionalEvent("BANK_TAB_SETTINGS_UPDATED")
 
     -- Monthly Activities (Trading Post)
     if C_PerksProgram then
-        -- Safe registration for valid events only
-        pcall(function() frame:RegisterEvent("PERKS_PROGRAM_DATA_REFRESH") end)
+        RegisterOptionalEvent("PERKS_PROGRAM_DATA_REFRESH")
     end
     
     -- Endeavors (Housing)
     if C_NeighborhoodInitiative then
-        -- Register accurate events for Endeavors
-        pcall(function() frame:RegisterEvent("INITIATIVE_TASKS_TRACKED_UPDATED") end)
-        pcall(function() frame:RegisterEvent("INITIATIVE_TASKS_TRACKED_LIST_CHANGED") end)
-        -- Keep these just in case older/internal names are used
-        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_TASKS_UPDATE") end)
-        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_TRACKING_UPDATE") end)
-        pcall(function() frame:RegisterEvent("NEIGHBORHOOD_INITIATIVE_UPDATE") end)
+        RegisterOptionalEvent("INITIATIVE_TASKS_TRACKED_UPDATED")
+        RegisterOptionalEvent("INITIATIVE_TASKS_TRACKED_LIST_CHANGED")
     end
     
     -- General Content Tracking (Modern API)
-    pcall(function() frame:RegisterEvent("CONTENT_TRACKING_UPDATE") end)
-    pcall(function() frame:RegisterEvent("TRACKABLE_INFO_UPDATE") end)
+    RegisterOptionalEvent("CONTENT_TRACKING_UPDATE")
+    RegisterOptionalEvent("TRACKABLE_INFO_UPDATE")
 
     -- Edit Mode: the game's tracker can be moved/resized there, and we mirror it
-    -- until the player positions TrackerPlus themselves. Safe registration; the
-    -- event does not exist on clients without Edit Mode.
-    pcall(function() frame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED") end)
-
-    -- FollowTheArrow addon events (safe registration; events may not exist)
-    pcall(function() frame:RegisterEvent("FTA_GUIDE_CHANGED") end)
-    pcall(function() frame:RegisterEvent("FTA_STEP_CHANGED") end)
-    pcall(function() frame:RegisterEvent("FTA_PROGRESS_UPDATED") end)
+    -- until the player positions TrackerPlus themselves. The event does not exist
+    -- on clients without Edit Mode.
+    RegisterOptionalEvent("EDIT_MODE_LAYOUTS_UPDATED")
 
     frame:SetScript("OnEvent", function(_, event, ...)
         addon:OnEvent(event, ...)
@@ -426,23 +401,19 @@ end
 -- Event handler
 function addon:OnEvent(event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
-        if self.RestorePosition then self.RestorePosition() end
+        self.RestorePosition()
         self:UpdateDefaultTrackerVisibility()
         self:RequestUpdate("full")
 
         -- The game's tracker may not have its final Edit Mode geometry yet at this
         -- point, so take one more reading shortly after login/zone-in.
-        if self.SyncWithBlizzardTracker and C_Timer and C_Timer.After then
-            C_Timer.After(1, function()
-                addon:SyncWithBlizzardTracker()
-            end)
-        end
+        C_Timer.After(1, function()
+            addon:SyncWithBlizzardTracker()
+        end)
     elseif event == "EDIT_MODE_LAYOUTS_UPDATED" then
         -- The player moved/resized the game's tracker in Edit Mode; follow it
         -- unless they've already positioned TrackerPlus themselves.
-        if self.SyncWithBlizzardTracker then
-            self:SyncWithBlizzardTracker()
-        end
+        self:SyncWithBlizzardTracker()
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat
         if self.db.hideInCombat then
@@ -509,19 +480,11 @@ function addon:OnEvent(event, ...)
         elseif event == "PERKS_PROGRAM_DATA_REFRESH" then
             self:RequestUpdate("monthly")
         elseif event == "INITIATIVE_TASKS_TRACKED_UPDATED"
-            or event == "INITIATIVE_TASKS_TRACKED_LIST_CHANGED"
-            or event == "NEIGHBORHOOD_INITIATIVE_TASKS_UPDATE"
-            or event == "NEIGHBORHOOD_INITIATIVE_TRACKING_UPDATE"
-            or event == "NEIGHBORHOOD_INITIATIVE_UPDATE" then
+            or event == "INITIATIVE_TASKS_TRACKED_LIST_CHANGED" then
             self:RequestUpdate("endeavors")
-            elseif event == "FTA_GUIDE_CHANGED"
-            or event == "FTA_STEP_CHANGED"
-            or event == "FTA_PROGRESS_UPDATED" then
-            self:RequestUpdate("fta")
-        elseif event == "CONTENT_TRACKING_UPDATE" or event == "TRACKABLE_INFO_UPDATE" then
-            -- Broad content tracking changes can affect multiple sections.
-            self:RequestUpdate("full")
         else
+            -- Includes CONTENT_TRACKING_UPDATE / TRACKABLE_INFO_UPDATE, which can
+            -- affect multiple sections.
             self:RequestUpdate("full")
         end
     end
@@ -529,19 +492,14 @@ end
 
 -- Update timer with debounce
 function addon:OnUpdate(elapsed)
-    if not requestedUpdate then
-        return
-    end
-    
     updateTimer = updateTimer + elapsed
     local db = self.db
-    local updateInterval = db.updateInterval or 0.1
-    local now = GetTime()
+    local updateInterval = db.updateInterval
 
     -- Adaptive cadence: fast during active objective churn, slower when idle/minimized/hidden
     if db.minimized then
         updateInterval = max(updateInterval, 0.25)
-    elseif self._updateBurstUntil and now < self._updateBurstUntil then
+    elseif self._updateBurstUntil and GetTime() < self._updateBurstUntil then
         updateInterval = min(updateInterval, 0.05)
     else
         updateInterval = max(updateInterval, 0.15)
@@ -553,7 +511,7 @@ function addon:OnUpdate(elapsed)
     
     if updateTimer >= updateInterval then
         updateTimer = 0
-        requestedUpdate = false
+        frame:Hide()
         self:UpdateTracker()
     end
 end
@@ -565,7 +523,7 @@ function addon:RequestUpdate(section)
     elseif next(dirtySections) == nil then
         MarkDirty("full")
     end
-    requestedUpdate = true
+    frame:Show()
 
     if section == "quests"
         or section == "autoQuests"
@@ -599,15 +557,8 @@ function addon:UpdateTracker()
     end
     
     -- Track layout changes independently from data changes
-    local layoutSignature = format("%d|%d|%s|%s|%s", 
-        db.frameWidth or 0,
-        db.frameHeight or 0,
-        tostring(db.groupByZone),
-        tostring(db.groupByCategory),
-        tostring(db.frameScale or 1)
-    )
-    if layoutSignature ~= lastLayoutSignature then
-        lastLayoutSignature = layoutSignature
+    if db.frameWidth ~= lastFrameWidth or db.frameHeight ~= lastFrameHeight or db.frameScale ~= lastFrameScale then
+        lastFrameWidth, lastFrameHeight, lastFrameScale = db.frameWidth, db.frameHeight, db.frameScale
         self._layoutDirty = true
     end
 
@@ -634,21 +585,14 @@ function addon:UpdateTracker()
         local ok, err = xpcall(function()
             self:UpdateTrackerDisplay(trackables)
         end, function(message)
-            if debugstack then
-                return string.format("%s\n%s", tostring(message), tostring(debugstack()))
-            end
-            return tostring(message)
+            return format("%s\n%s", tostring(message), tostring(debugstack()))
         end)
 
         if ok then
             lastRenderedDataVersion = dataVersion
             self._layoutDirty = false
         else
-            if self.LogAt then
-                self:LogAt("error", "Render error: %s", tostring(err))
-            elseif self.Log then
-                self:Log("Render error: %s", tostring(err))
-            end
+            self:LogAt("error", "Render error: %s", tostring(err))
 
             local now = GetTime()
             if not self._lastRenderErrorPrintAt or (now - self._lastRenderErrorPrintAt) > 5 then
@@ -681,28 +625,11 @@ function addon:UpdateCombatFrameVisibility()
     if not self.trackerFrame then return end
 
     local scenarioYOffset = 0
-    if self.RenderScenarioSection then
-        local ok, result = pcall(function()
-            return self:RenderScenarioSection()
-        end)
-        if ok then
-            scenarioYOffset = tonumber(result) or 0
-        end
+    local ok, result = pcall(self.RenderScenarioSection, self)
+    if ok then
+        scenarioYOffset = tonumber(result) or 0
     end
-
-    if self.scenarioFrame then
-        if scenarioYOffset > 0 then
-            self.scenarioFrame:SetHeight(scenarioYOffset)
-            if self.db and self.db.minimized then
-                self.scenarioFrame:Hide()
-            else
-                self.scenarioFrame:Show()
-            end
-        else
-            self.scenarioFrame:SetHeight(1)
-            self.scenarioFrame:Hide()
-        end
-    end
+    self:FinishPinnedSection(self.scenarioFrame, scenarioYOffset, 1)
 
     self:UpdateLayoutAnchors()
     self:UpdateScrollShadows()
@@ -713,90 +640,35 @@ function addon:CollectTrackables()
     local full = dirtySections.full
     local trackables = {}
     local db = self.db
-    local refreshedAny = false
+    -- A full refresh always repaints (settings changes rely on it). A section refresh
+    -- that was empty and is still empty changed nothing; bag/currency/item-info
+    -- events re-collect professions constantly, usually with no recipe tracked.
+    local changed = full or false
 
-    if full or dirtySections.quests then
-        refreshedAny = true
-        if db.showQuests or db.showWorldQuests then
-            RefreshBucket("quests", addon.CollectQuests, self)
-        else
-            wipe(sectionCache.quests)
+    for _, bucket in ipairs(BUCKETS) do
+        if full or dirtySections[bucket.name] then
+            local items = bucket.items
+            local hadItems = #items > 0
+            wipe(items)
+            if not bucket.enabled or bucket.enabled(db) then
+                self[bucket.collector](self, items)
+            end
+            if hadItems or #items > 0 then
+                changed = true
+            end
         end
+        AppendBucket(trackables, bucket.items)
     end
-
-    if full or dirtySections.achievements then
-        refreshedAny = true
-        if db.showAchievements then
-            RefreshBucket("achievements", addon.CollectAchievements, self)
-        else
-            wipe(sectionCache.achievements)
-        end
-    end
-
-    if full or dirtySections.scenarios then
-        refreshedAny = true
-        if db.showScenarios or db.showDungeonObjectives then
-            RefreshBucket("scenarios", addon.CollectScenarioObjectives, self)
-        else
-            wipe(sectionCache.scenarios)
-        end
-    end
-
-    if full or dirtySections.autoQuests then
-        refreshedAny = true
-        RefreshBucket("autoQuests", addon.CollectAutoQuests, self)
-    end
-
-    if full or dirtySections.superTracked then
-        refreshedAny = true
-        RefreshBucket("superTracked", addon.CollectSuperTrackedQuest, self)
-    end
-
-    if full or dirtySections.professions then
-        refreshedAny = true
-        if db.showProfessions then
-            RefreshBucket("professions", addon.CollectProfessionTracking, self)
-        else
-            wipe(sectionCache.professions)
-        end
-    end
-
-    if full or dirtySections.monthly then
-        refreshedAny = true
-        if db.showMonthlyActivities then
-            RefreshBucket("monthly", addon.CollectMonthlyActivities, self)
-        else
-            wipe(sectionCache.monthly)
-        end
-    end
-
-    if full or dirtySections.endeavors then
-        refreshedAny = true
-        if db.showEndeavors then
-            RefreshBucket("endeavors", addon.CollectEndeavors, self)
-        else
-            wipe(sectionCache.endeavors)
-        end
-    end
-
-    AppendBucket(trackables, sectionCache.quests)
-    AppendBucket(trackables, sectionCache.achievements)
-    AppendBucket(trackables, sectionCache.scenarios)
-    AppendBucket(trackables, sectionCache.autoQuests)
-    AppendBucket(trackables, sectionCache.superTracked)
-    AppendBucket(trackables, sectionCache.professions)
-    AppendBucket(trackables, sectionCache.monthly)
-    AppendBucket(trackables, sectionCache.endeavors)
     
     -- Sort trackables
     self:SortTrackables(trackables)
 
-    if refreshedAny then
+    if changed then
         self._dataVersion = (self._dataVersion or 0) + 1
     end
 
     -- Done applying this dirty batch
-    ClearDirty()
+    wipe(dirtySections)
     
     return trackables
 end
@@ -823,12 +695,7 @@ function addon:RegisterSlashCommands()
         msg = msg:lower():trim()
         
         if msg == "" or msg == "config" or msg == "settings" or msg == "options" then
-            if addon.OpenSettings then
-                addon.OpenSettings()
-            else
-                -- Fallback if Settings.lua hasn't loaded properly
-                Print("Settings panel not loaded yet.")
-            end
+            addon.OpenSettings()
         elseif msg == "toggle" then
             local enabled = not addon.db.enabled
             addon:SetSetting("enabled", enabled)
@@ -847,7 +714,7 @@ function addon:RegisterSlashCommands()
             addon:ResetDatabase()
             addon:RequestUpdate()
             Print("Settings reset to defaults")
-        elseif (msg == "nameplates" or msg:find("^nameplates ")) and addon.Nameplates then
+        elseif msg == "nameplates" or msg:find("^nameplates ") then
             addon.Nameplates:HandleCommand(msg:sub(#"nameplates" + 2))
         else
             Print("Commands:")

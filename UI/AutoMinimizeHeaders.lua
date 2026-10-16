@@ -12,7 +12,7 @@ local _, addon = ...
 -- quests under a collapsed header are never rendered, which is exactly the case this
 -- has to catch.
 
-local pairs, ipairs, wipe, sort, concat = pairs, ipairs, wipe, table.sort, table.concat
+local pairs, ipairs, wipe = pairs, ipairs, wipe
 
 local TICK_SECONDS = 0.5
 
@@ -22,7 +22,7 @@ local IsInsideQuestBlob = C_Minimap and C_Minimap.IsInsideQuestBlob
 function addon:GetAutoExpandZones(questItems, out)
     wipe(out)
 
-    local realZone = GetRealZoneText and GetRealZoneText()
+    local realZone = GetRealZoneText()
     if realZone and realZone ~= "" then out[realZone] = true end
 
     -- Fallback for when the quest log's header title differs from the real-zone text.
@@ -32,10 +32,10 @@ function addon:GetAutoExpandZones(questItems, out)
         if info and info.name and info.name ~= "" then out[info.name] = true end
     end
 
-    if IsInsideQuestBlob and questItems then
+    if IsInsideQuestBlob then
         for _, item in ipairs(questItems) do
             local zone = item.zone
-            if zone and not out[zone] and item.id and not item.isWorldQuest
+            if zone and not out[zone] and item.id
                 and IsInsideQuestBlob(item.id) == true then
                 out[zone] = true
             end
@@ -50,30 +50,34 @@ end
 -------------------------------------------------------------------------------
 -- Zone changes already fire events that refresh the quests section; walking into or
 -- out of a quest area fires nothing, so poll for that and repaint only on a change.
-local zoneSet, zoneList = {}, {}
-local lastSignature
+-- The zone set from the previous tick and the one being built; swapped each tick.
+local lastZones, zoneSet = nil, {}
+
+local function SameSet(a, b)
+    for key in pairs(a) do
+        if not b[key] then return false end
+    end
+    for key in pairs(b) do
+        if not a[key] then return false end
+    end
+    return true
+end
 
 local function Tick()
-    local buckets = addon._organizeBuckets
-    addon:GetAutoExpandZones(buckets and buckets.quest, zoneSet)
+    addon:GetAutoExpandZones(addon._organizeBuckets.quest, zoneSet)
 
-    wipe(zoneList)
-    for zone in pairs(zoneSet) do zoneList[#zoneList + 1] = zone end
-    sort(zoneList)
-    local signature = concat(zoneList, "\n")
-
-    if signature ~= lastSignature then
-        lastSignature = signature
+    if not (lastZones and SameSet(zoneSet, lastZones)) then
         addon:RequestUpdate("quests")
     end
+    lastZones, zoneSet = zoneSet, lastZones or {}
 end
 
 local ticker
 
 function addon:UpdateAutoMinimizeWatcher()
-    local enabled = self.db and self.db.autoMinimizeHeaders
+    local enabled = self.db.autoMinimizeHeaders
     if enabled and not ticker then
-        lastSignature = nil
+        lastZones = nil
         ticker = C_Timer.NewTicker(TICK_SECONDS, Tick)
     elseif not enabled and ticker then
         ticker:Cancel()

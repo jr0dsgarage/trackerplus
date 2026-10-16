@@ -26,7 +26,7 @@ local MIN_ADOPTABLE_SIZE = 50
 function addon:GetBlizzardTrackerFrame()
     for i = 1, #BLIZZARD_TRACKER_FRAMES do
         local name = BLIZZARD_TRACKER_FRAMES[i]
-        local frame = _G and _G[name]
+        local frame = _G[name]
         if frame and frame.GetLeft and frame.GetWidth then
             return frame, name
         end
@@ -73,7 +73,8 @@ end
 -- Place and size our tracker exactly over the game's tracker.
 -- Returns true when geometry was adopted.
 function addon:SyncWithBlizzardTracker()
-    if not addon.trackerFrame then return false end
+    local trackerFrame = self.trackerFrame
+    if not trackerFrame then return false end
 
     local db = self.db
     if not db.matchBlizzardTracker then return false end
@@ -84,7 +85,7 @@ function addon:SyncWithBlizzardTracker()
 
     -- SetSize and SetPoint offsets are expressed in the frame's own coordinate
     -- space, so convert absolute pixels through the scale our frame ends up at.
-    local uiScale = (UIParent and UIParent:GetEffectiveScale()) or 1
+    local uiScale = UIParent:GetEffectiveScale()
     local dstScale = uiScale * (db.frameScale or 1)
     if dstScale <= 0 then return false end
 
@@ -96,26 +97,19 @@ function addon:SyncWithBlizzardTracker()
     -- background/border/content children exist, and that function would create the
     -- border frame early and have it duplicated moments later. Dropping the cached
     -- appearance state makes the next appearance pass re-apply everything cleanly.
-    addon.trackerFrame:SetSize(db.frameWidth, db.frameHeight)
+    trackerFrame:SetSize(db.frameWidth, db.frameHeight)
     self:UpdateContentWidth()
     self._appearanceState = nil
 
-    addon.trackerFrame:ClearAllPoints()
-    addon.trackerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", geo.left / dstScale, geo.top / dstScale)
+    trackerFrame:ClearAllPoints()
+    trackerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", geo.left / dstScale, geo.top / dstScale)
 
-    if addon.LogAt then
-        addon:LogAt("info", "Matched game tracker (%s): %dx%d", tostring(geo.source), db.frameWidth, db.frameHeight)
-    end
+    self:LogAt("info", "Matched game tracker (%s): %dx%d", tostring(geo.source), db.frameWidth, db.frameHeight)
 
     -- Size changed, so section anchors need recomputing on the next paint.
     self._layoutDirty = true
-    if self.RequestUpdate then
-        self:RequestUpdate()
-    end
-
-    if self.UpdateSettingWidgets then
-        self:UpdateSettingWidgets()
-    end
+    self:RequestUpdate()
+    self:UpdateSettingWidgets()
 
     return true
 end
@@ -125,8 +119,6 @@ end
 function addon:ClaimManualGeometry()
     if self.db.matchBlizzardTracker then
         self.db.matchBlizzardTracker = false
-        if self.UpdateSettingWidgets then
-            self:UpdateSettingWidgets()
-        end
+        self:UpdateSettingWidgets()
     end
 end

@@ -36,16 +36,42 @@ local function ShouldForceObjectiveIncomplete(objectiveText)
     return not hasLeadingNumericPrefix
 end
 
--- Helper to gather quest data
-function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
-    local info = C_QuestLog.GetInfo(logIndex)
+local function IsCampaignInfo(info)
+    return (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory or false
+end
+
+-- The quest's tag name (shown after the title, e.g. "(Dungeon)") and whether it
+-- earns the "+" group marker, from a single tag lookup.
+local function GetQuestTagDetails(questID, info, isWorldQuest)
+    local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
+
+    local typeName
+    if isWorldQuest then
+        typeName = "World Quest"
+    elseif tagInfo then
+        typeName = tagInfo.tagName
+    end
+
+    local isGroup = (tonumber(info.suggestedGroup) or 0) > 0
+    if not isGroup and tagInfo then
+        isGroup = tagInfo.isElite or (Enum.QuestTag and tagInfo.tagID == Enum.QuestTag.Group) or false
+    end
+
+    return typeName, isGroup
+end
+
+-- Helper to gather quest data. Pass info when the caller already fetched it.
+function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
+    info = info or C_QuestLog.GetInfo(logIndex)
     if not info then return nil end
     
     local questID = info.questID
     
     local isWorldQuest = C_QuestLog.IsWorldQuest(questID)
-    local isBonusObjective = C_QuestLog.IsQuestTask(questID) and not isWorldQuest
+    local isTask = C_QuestLog.IsQuestTask(questID)
+    local isBonusObjective = isTask and not isWorldQuest
     local isComplete = C_QuestLog.IsComplete(questID)
+    local questType, isGroupQuest = GetQuestTagDetails(questID, info, isWorldQuest)
     local itemType = typeOverride
     if not itemType then
          if isBonusObjective then
@@ -69,10 +95,10 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
         -- decides green/yellow/orange. Carried so colouring and difficulty sorting can
         -- use it while the title keeps displaying level.
         difficultyLevel = info.difficultyLevel,
-        questType = self:GetQuestTypeName(questID),
+        questType = questType,
         -- Drives the "+" in "[28+]", matching the default quest log's marker for
         -- elite / group quests.
-        isGroupQuest = self:IsGroupQuest(questID, info),
+        isGroupQuest = isGroupQuest,
         isComplete = isComplete,
         isFailed = info.isFailed,
         isWorldQuest = isWorldQuest,
@@ -95,38 +121,33 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride)
     local hasObjectives = false
     local hasProgressBarObj = false
 
-    if objectives then
-        for _, obj in ipairs(objectives) do
-            -- Dont add redundant "0/1" objectives if we have a progress bar for the whole quest
-            -- But usually tasks have "Assault X" as text and the bar is separate.
-            -- Keeping the text is useful for context.
-            hasObjectives = true
-            
-            local flags = obj.flags or 0
-            local isFlagged = band(flags, 1) == 1
-            if obj.type == "progressbar" or isFlagged or (obj.text and string.match(obj.text, "%%")) then
-                hasProgressBarObj = true
-            end
-
-            local objectiveFinished = (obj.finished == true)
-            -- Blizzard can flag text-only objectives as finished before they flip to Ready to Turn-in.
-            if objectiveFinished and ShouldForceObjectiveIncomplete(obj.text) then
-                objectiveFinished = false
-            end
-            
-            questInfo.objectives[#questInfo.objectives + 1] = {
-                text = obj.text,
-                type = obj.type,
-                finished = objectiveFinished,
-                numFulfilled = obj.numFulfilled,
-                numRequired = obj.numRequired,
-                flags = obj.flags,
-            }
+    for _, obj in ipairs(objectives) do
+        -- Keep text objectives even when the quest also has a progress bar; tasks
+        -- usually say "Assault X" with the bar separate, and the text gives context.
+        hasObjectives = true
+        
+        local isFlagged = band(obj.flags or 0, 1) == 1
+        if obj.type == "progressbar" or isFlagged or (obj.text and obj.text:find("%", 1, true)) then
+            hasProgressBarObj = true
         end
+
+        local objectiveFinished = (obj.finished == true)
+        -- Blizzard can flag text-only objectives as finished before they flip to Ready to Turn-in.
+        if objectiveFinished and ShouldForceObjectiveIncomplete(obj.text) then
+            objectiveFinished = false
+        end
+        
+        questInfo.objectives[#questInfo.objectives + 1] = {
+            text = obj.text,
+            type = obj.type,
+            finished = objectiveFinished,
+            numFulfilled = obj.numFulfilled,
+            numRequired = obj.numRequired,
+        }
     end
 
     -- Check for Task/Bonus/World Quest progress bars only if we lack a native one
-    local canUseTaskProgress = C_QuestLog.IsQuestTask(questID) or isWorldQuest or isBonusObjective
+    local canUseTaskProgress = isTask or isWorldQuest
     if not hasProgressBarObj and canUseTaskProgress and C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo then
         local progress = C_TaskQuest.GetQuestProgressBarInfo(questID)
 
@@ -175,14 +196,15 @@ function addon:IsCampaignQuestLogEntry(logIndex, info)
     info = info or C_QuestLog.GetInfo(logIndex)
     if not info or info.isHeader then return false end
 
-    if (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory then
+    if IsCampaignInfo(info) then
         return true
     end
 
+    -- Otherwise the quest is campaign if the header it sits under is.
     for i = logIndex - 1, 1, -1 do
         local headerInfo = C_QuestLog.GetInfo(i)
         if headerInfo and headerInfo.isHeader then
-            return (headerInfo.campaignID and headerInfo.campaignID ~= 0) or headerInfo.isCampaign or headerInfo.isStory or false
+            return IsCampaignInfo(headerInfo)
         end
     end
 
@@ -206,20 +228,20 @@ function addon:GetQuestObjectiveText(questID, logIndex)
     -- collection, and the previous selection is restored afterwards so the
     -- player's own quest log selection isn't moved out from under them.
     local previousQuestID
-    if C_QuestLog and C_QuestLog.GetSelectedQuest then
+    if C_QuestLog.GetSelectedQuest then
         local ok, selected = pcall(C_QuestLog.GetSelectedQuest)
         if ok then previousQuestID = selected end
     end
 
     local selected = false
-    if questID and C_QuestLog and C_QuestLog.SetSelectedQuest then
+    if questID and C_QuestLog.SetSelectedQuest then
         selected = pcall(C_QuestLog.SetSelectedQuest, questID)
     end
 
     if not selected and SelectQuestLogEntry then
         -- Legacy fallback: select by log index instead.
         local idx = logIndex
-        if not idx and questID and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        if not idx and questID then
             idx = C_QuestLog.GetLogIndexForQuestID(questID)
         end
         if idx and idx > 0 then
@@ -235,7 +257,7 @@ function addon:GetQuestObjectiveText(questID, logIndex)
 
     -- Put the player's selection back.
     if previousQuestID and previousQuestID ~= 0 and previousQuestID ~= questID
-        and C_QuestLog and C_QuestLog.SetSelectedQuest then
+        and C_QuestLog.SetSelectedQuest then
         pcall(C_QuestLog.SetSelectedQuest, previousQuestID)
     end
 
@@ -255,13 +277,8 @@ function addon:CollectQuests(trackables)
     local numQuests = C_QuestLog.GetNumQuestLogEntries()
     local currentZone = GetRealZoneText() or "Unknown Zone"
     local currentHeaderIsCampaign = false
-    local worldQuestsHeader = (_G and rawget(_G, "WORLD_QUESTS")) or "World Quests"
-
-    local function IsWorldQuestsHeaderTitle(title)
-        if not title then return false end
-        if title == worldQuestsHeader then return true end
-        return tostring(title):lower() == tostring(worldQuestsHeader):lower()
-    end
+    local isUnderWorldQuestHeader = false
+    local worldQuestsHeader = (WORLD_QUESTS or "World Quests"):lower()
 
     for i = 1, numQuests do
         local info = C_QuestLog.GetInfo(i)
@@ -269,13 +286,11 @@ function addon:CollectQuests(trackables)
         if info then
             if info.isHeader then
                 currentZone = info.title
-                currentHeaderIsCampaign = (info.campaignID and info.campaignID ~= 0) or info.isCampaign or info.isStory
+                currentHeaderIsCampaign = IsCampaignInfo(info)
+                isUnderWorldQuestHeader = currentZone ~= nil and tostring(currentZone):lower() == worldQuestsHeader
             else
                 local isWorldQuest = C_QuestLog.IsWorldQuest(info.questID)
-                local isWatched = (C_QuestLog.GetQuestWatchType(info.questID) ~= nil)
                 local isTask = C_QuestLog.IsQuestTask(info.questID)
-                local isComplete = C_QuestLog.IsComplete(info.questID)
-                local isUnderWorldQuestHeader = IsWorldQuestsHeaderTitle(currentZone)
                 local treatAsWorldQuest = isWorldQuest or isUnderWorldQuestHeader
 
                 -- Allow hidden quests IF they are Tasks (Bonus Objectives)
@@ -286,24 +301,26 @@ function addon:CollectQuests(trackables)
                     -- World quests are rendered in their own pinned section.
                     -- Do not require the watch flag; quest-log tracking can be transient.
                     -- Hide completed/ended world quests immediately so stale headers disappear.
-                    shouldInclude = self.db.showWorldQuests and not isComplete
+                    shouldInclude = self.db.showWorldQuests and not C_QuestLog.IsComplete(info.questID)
                 elseif isTask then
                     -- Bonus objectives are rendered in their own pinned section.
                     -- Do not require watch state; these are often hidden/unwatched in the quest log.
                     shouldInclude = self.db.showBonusObjectives
                 else
-                    shouldInclude = self.db.showQuests and isWatched
+                    shouldInclude = self.db.showQuests and C_QuestLog.GetQuestWatchType(info.questID) ~= nil
                 end
 
                 if (not info.isHidden or allowHidden) and shouldInclude then
-                    local isCamp = currentHeaderIsCampaign or self:IsCampaignQuestLogEntry(i, info)
+                    -- Same answer as IsCampaignQuestLogEntry, which walks back to
+                    -- this same header; the loop already knows it.
+                    local isCamp = currentHeaderIsCampaign or IsCampaignInfo(info)
                     local questType = nil
                     if treatAsWorldQuest then
                         questType = "worldquest"
                     elseif isCamp and not isWorldQuest and not isTask then
                         questType = "campaign"
                     end
-                    local questInfo = self:GetQuestData(i, questType, currentZone)
+                    local questInfo = self:GetQuestData(i, questType, currentZone, info)
                     if questInfo then
                         trackables[#trackables + 1] = questInfo
                     end
@@ -346,36 +363,12 @@ function addon:CollectAutoQuests(trackables)
     end
 end
 
--- Get quest type name
-function addon:IsGroupQuest(questID, info)
-    if info and (tonumber(info.suggestedGroup) or 0) > 0 then
-        return true
-    end
-    local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
-    if not tagInfo then return false end
-    if tagInfo.isElite then return true end
-    return Enum.QuestTag and tagInfo.tagID == Enum.QuestTag.Group or false
-end
-
-function addon:GetQuestTypeName(questID)
-    local questInfo = C_QuestLog.GetQuestTagInfo(questID)
-    
-    if C_QuestLog.IsWorldQuest(questID) then
-        return "World Quest"
-    elseif questInfo then
-        return questInfo.tagName
-    end
-    
-    return nil
-end
-
 -- Collect super tracked quest
 function addon:CollectSuperTrackedQuest(trackables)
     local superTrackedQuestID = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()
     if not superTrackedQuestID or superTrackedQuestID == 0 then return end
 
-    -- Check if it's a world quest logic here if needed...
-    -- But assuming it's in the log for now:
+    -- Only quests in the log can be shown here.
     local logIndex = C_QuestLog.GetLogIndexForQuestID(superTrackedQuestID)
     if not logIndex then return end
 

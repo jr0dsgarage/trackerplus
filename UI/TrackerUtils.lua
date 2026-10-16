@@ -89,70 +89,70 @@ function addon:CreateBorderLines(bar, size)
     bar.border.right:SetWidth(pixelSize)
 end
 
+-- Major header order and titles. Scenarios are rendered separately, and campaign
+-- items are typed "quest" with questType="campaign", so they fall into Quests.
+local ORGANIZE_ORDER = {
+    { type = "quest", title = "Quests" },
+    { type = "achievement", title = "Achievements" },
+    { type = "profession", title = "Professions" },
+    { type = "monthly", title = "Monthly Activities" },
+    { type = "endeavor", title = "Endeavors" },
+}
+
+-- Reused across passes. Buckets are keyed by item type; types not listed in
+-- ORGANIZE_ORDER have no bucket and are skipped.
+local organized = {}
+local zones, sortedZones, zoneTables = {}, {}, {}
+local autoKeepZones = {}
+local organizeBuckets = {}
+for _, entry in ipairs(ORGANIZE_ORDER) do
+    organizeBuckets[entry.type] = {}
+end
+-- AutoMinimizeHeaders.lua scans the Quests bucket between renders.
+addon._organizeBuckets = organizeBuckets
+
 -- Organize trackables into Major/Minor hierarchy
 function addon:OrganizeTrackables(trackables)
+    local db = self.db
+    local collapsedHeaders = db.collapsedHeaders
     self.knownMinorKeys = self.knownMinorKeys or {}
-    wipe(self.knownMinorKeys)
-
-    self._organizedTrackables = self._organizedTrackables or {}
-    local organized = self._organizedTrackables
+    local knownMinorKeys = self.knownMinorKeys
+    wipe(knownMinorKeys)
     wipe(organized)
 
-    -- Scenarios should already be extracted by ExtractScenarios, but just in case
-
-    self._organizeBuckets = self._organizeBuckets or {
-        quest = {},
-        achievement = {},
-        profession = {},
-        monthly = {},
-        endeavor = {},
-    }
-    local buckets = self._organizeBuckets
-    for _, bucket in pairs(buckets) do
+    for _, bucket in pairs(organizeBuckets) do
         wipe(bucket)
     end
-
-    self._organizeZones = self._organizeZones or {}
-    self._organizeSortedZones = self._organizeSortedZones or {}
-    self._organizeZoneTables = self._organizeZoneTables or {}
-    local zones = self._organizeZones
-    local sortedZones = self._organizeSortedZones
-    local zoneTables = self._organizeZoneTables
-    
-    -- Bucketing
     for _, item in ipairs(trackables) do
-        local itemType = item.type
-        if itemType ~= "scenario" then
-            if not buckets[itemType] then buckets[itemType] = {} end
-            buckets[itemType][#buckets[itemType] + 1] = item
+        local bucket = organizeBuckets[item.type]
+        if bucket then
+            bucket[#bucket + 1] = item
         end
     end
-    
-    -- Function to sort and add buckets
-    local function AddBucket(bucketType, title)
-        local items = buckets[bucketType]
-        if items and #items > 0 then
+
+    for _, entry in ipairs(ORGANIZE_ORDER) do
+        local bucketType = entry.type
+        local items = organizeBuckets[bucketType]
+        if #items > 0 then
             -- Major Header
             local majorKey = "MAJOR_" .. bucketType
-            self.knownMinorKeys[majorKey] = {} -- Init cache for this header
-            local majorCollapsed = self.db.collapsedHeaders[majorKey]
-            
+            local minorKeys = {}
+            knownMinorKeys[majorKey] = minorKeys
+            local majorCollapsed = collapsedHeaders[majorKey]
+
             organized[#organized + 1] = {
                 isHeader = true,
                 headerType = "major",
-                title = title,
+                title = entry.title,
                 key = majorKey,
                 collapsed = majorCollapsed
             }
-            
+
             if not majorCollapsed then
                 -- Group by Minor (Zone or Category)
                 wipe(zones)
                 for _, item in ipairs(items) do
                     local zone = item.zone or "General"
-                    -- Simplify "World Quest" zones
-                    if item.isWorldQuest then zone = "World Quests - " .. zone end
-
                     local zoneItems = zones[zone]
                     if not zoneItems then
                         zoneItems = zoneTables[zone]
@@ -165,29 +165,26 @@ function addon:OrganizeTrackables(trackables)
                     end
                     zoneItems[#zoneItems + 1] = item
                 end
-                
-                -- Sort Zones
+
                 wipe(sortedZones)
-                for zoneName, _ in pairs(zones) do sortedZones[#sortedZones + 1] = zoneName end
+                for zoneName in pairs(zones) do sortedZones[#sortedZones + 1] = zoneName end
                 table.sort(sortedZones)
 
                 -- Auto-minimize (header "A"): only the current zone and zones whose
                 -- quest area we're standing in stay open. See AutoMinimizeHeaders.lua.
                 local autoKeep
-                if bucketType == "quest" and self.db.autoMinimizeHeaders then
-                    self._autoKeepZones = self._autoKeepZones or {}
-                    autoKeep = self:GetAutoExpandZones(items, self._autoKeepZones)
+                if bucketType == "quest" and db.autoMinimizeHeaders then
+                    autoKeep = self:GetAutoExpandZones(items, autoKeepZones)
                 end
 
                 for _, zoneName in ipairs(sortedZones) do
-                    local zoneItems = zones[zoneName]
                     local minorKey = "MINOR_" .. bucketType .. "_" .. zoneName
-                    self.knownMinorKeys[majorKey][#self.knownMinorKeys[majorKey] + 1] = minorKey
+                    minorKeys[#minorKeys + 1] = minorKey
                     if autoKeep then
-                        self.db.collapsedHeaders[minorKey] = not autoKeep[zoneName]
+                        collapsedHeaders[minorKey] = not autoKeep[zoneName]
                     end
-                    local minorCollapsed = self.db.collapsedHeaders[minorKey]
-                    
+                    local minorCollapsed = collapsedHeaders[minorKey]
+
                     -- Minor Header
                     organized[#organized + 1] = {
                         isHeader = true,
@@ -196,9 +193,9 @@ function addon:OrganizeTrackables(trackables)
                         key = minorKey,
                         collapsed = minorCollapsed
                     }
-                    
+
                     if not minorCollapsed then
-                        for _, item in ipairs(zoneItems) do
+                        for _, item in ipairs(zones[zoneName]) do
                             organized[#organized + 1] = item
                         end
                     end
@@ -206,16 +203,7 @@ function addon:OrganizeTrackables(trackables)
             end
         end
     end
-    
-    -- Add in desired order (campaign items are typed as "quest" with questType="campaign",
-    -- so they naturally fall into the quest bucket)
-    AddBucket("quest", "Quests")
-    -- AddBucket("scenario", "Dungeons & Scenarios") -- Scenarios handled separately
-    AddBucket("achievement", "Achievements")
-    AddBucket("profession", "Professions")
-    AddBucket("monthly", "Monthly Activities")
-    AddBucket("endeavor", "Endeavors")
-    
+
     return organized
 end
 
@@ -249,7 +237,10 @@ function addon:ForEachActiveButton(fn)
     end
 end
 
--- Get or create a button from the pool
+local OBJECTIVE_PART_KEYS = { "objectiveBullets", "objectivePrefixes", "objectives", "objectiveProgresses" }
+
+-- Get or create a button from the pool. Returns it shown, unanchored and with every
+-- part another renderer might have added hidden or reset.
 function addon:GetOrCreateButton(parent)
     activeButtons = activeButtons + 1
     
@@ -260,10 +251,7 @@ function addon:GetOrCreateButton(parent)
         if parent and btn:GetParent() ~= parent then
              btn:SetParent(parent)
         end
-        btn:ClearAllPoints()
     else
-        -- Create new button
-        -- Note: If parent is nil here, it might be an issue, but usually parent is passed.
         btn = CreateFrame("Button", nil, parent)
         btn:SetHeight(20)
         
@@ -286,11 +274,7 @@ function addon:GetOrCreateButton(parent)
         table.insert(trackableButtons, btn)
     end
     
-    -- Reset Custom Elements (Cleanup from potentially being used as a Popup/AutoQuest)
-    if btn.popupBackdrop then btn.popupBackdrop:Hide() end
-    if btn.largeIcon then btn.largeIcon:Hide() end
-    if btn.stageBox then btn.stageBox:Hide() end
-    if btn.subText then btn.subText:Hide() end
+    -- Reset parts other renderers add to pooled buttons
     if btn._ftaCounter then btn._ftaCounter:Hide() end
     -- The quest-area highlight belongs to whichever quest last used this button; the
     -- quest renderer re-applies it, every other renderer must not inherit it.
@@ -300,24 +284,21 @@ function addon:GetOrCreateButton(parent)
     btn:ClearAllPoints()
     btn:Show()
     
-    -- Nuclear option: Ensure any lingering children like ProgressBars are hidden
+    -- Hide any lingering children like progress bars
     if btn.progressBars then
-        local arr = btn.progressBars
-        for _, frame in pairs(arr) do
-            if frame then frame:Hide() end
+        for _, frame in pairs(btn.progressBars) do
+            frame:Hide()
         end
     end
-    if btn.objectives then
-        local arr = btn.objectives
-        for i = 1, #arr do arr[i]:Hide() end
+    -- Objective lines a previous row left behind (RenderTrackableItem re-shows
+    -- the ones it uses).
+    for _, key in ipairs(OBJECTIVE_PART_KEYS) do
+        local arr = btn[key]
+        if arr then
+            for i = 1, #arr do arr[i]:Hide() end
+        end
     end
-    if btn.objectiveProgresses then
-        local arr = btn.objectiveProgresses
-        for i = 1, #arr do arr[i]:Hide() end
-    end
-    if btn.distance then btn.distance:Hide() end
     if btn.styledBackdrop then btn.styledBackdrop:Hide() end
-    if btn.SetBackdrop then btn:SetBackdrop(nil) end
 
     -- Reset quest-specific child controls so pooled buttons don't leak icons
     if btn.poiButton then
@@ -378,9 +359,7 @@ function addon:GetOrCreateSecureButton(parent)
         table.insert(secureButtons, button)
     end
     
-    -- Re-parenting secure frames in combat is restricted, so we ensure this is only called out of combat.
-    -- If we are in combat, we can't reparent securely, but this function is likely called during update which is combat-protected usually?
-    -- Actually, render updates might be delayed until after combat.
+    -- Secure frames can't be reparented in combat; renders then reuse the old parent.
     if not InCombatLockdown() then
         button:SetParent(parent)
     end
@@ -531,7 +510,7 @@ function addon:SetQuestLogFocus(questID)
     -- The list leaves out quests under collapsed headers, so open the quest's header.
     -- ExpandQuestHeader is C-side; the resulting QUEST_LOG_UPDATE rebuilds the list
     -- securely and the hook below then finishes the scroll.
-    if questID and ExpandQuestHeader and C_QuestLog and C_QuestLog.GetHeaderIndexForQuest then
+    if questID and ExpandQuestHeader and C_QuestLog.GetHeaderIndexForQuest then
         local headerIndex = C_QuestLog.GetHeaderIndexForQuest(questID)
         local info = headerIndex and C_QuestLog.GetInfo(headerIndex)
         if info and info.isCollapsed then
@@ -567,10 +546,14 @@ function addon:ApplyQuestLogFocus()
     end
 end
 
+-- Called from Initialize, and again from MapPOIColor.lua if Blizzard_WorldMap loads
+-- later (or earlier, before Initialize), so it must only hook once.
+local questLogFocusHooked = false
+
 function addon:InitQuestLogFocus()
-    if self._questLogFocusHooked then return end
+    if questLogFocusHooked then return end
     if not (QuestLogQuests_Update and WorldMapFrame) then return end
-    self._questLogFocusHooked = true
+    questLogFocusHooked = true
 
     hooksecurefunc("QuestLogQuests_Update", function()
         if questLogFocusID then
@@ -602,13 +585,11 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 end
             elseif trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" then
                 local questID = trackable.id or trackable.questID
-                if questID then
-                    -- Show on map
-                    if QuestMapFrame and QuestMapFrame.GetDetailQuestID and QuestMapFrame:GetDetailQuestID() == questID and QuestMapFrame:IsVisible() then
-                        -- Already shown, do nothing or toggle? Standard behavior is just show.
-                    else
-                        self:OpenMapToQuest(questID)
-                    end
+                -- Show on map, unless its details are already open there.
+                local alreadyShown = QuestMapFrame and QuestMapFrame.GetDetailQuestID
+                    and QuestMapFrame:GetDetailQuestID() == questID and QuestMapFrame:IsVisible()
+                if questID and not alreadyShown then
+                    self:OpenMapToQuest(questID)
                 end
             elseif trackable.type == "achievement" then
                 -- Open achievement UI
@@ -626,24 +607,20 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 end
 
                 if C_TradeSkillUI.OpenRecipe then
-                    C_TradeSkillUI.OpenRecipe(trackable.id)
-
                     local function TryOpenRecipe()
                         C_TradeSkillUI.OpenRecipe(trackable.id)
                     end
 
-                    if C_Timer and C_Timer.After then
-                        C_Timer.After(0, TryOpenRecipe)
-                        C_Timer.After(0.2, TryOpenRecipe)
-                        C_Timer.After(0.5, TryOpenRecipe)
-                    end
+                    -- The profession frame may still be loading; retry as it settles.
+                    TryOpenRecipe()
+                    C_Timer.After(0, TryOpenRecipe)
+                    C_Timer.After(0.2, TryOpenRecipe)
+                    C_Timer.After(0.5, TryOpenRecipe)
                 end
             elseif trackable.type == "monthly" then
                 if not EncounterJournal then EncounterJournal_LoadUI() end
                 if not EncounterJournal:IsShown() then ToggleEncounterJournal() end
-                -- Try to switch to Monthly Activities tab if possible (Tab 3 usually)
-                -- Specific API to open directly to activity?
-                -- EncounterJournal_DisplayMonthlyActivities() is standard if available
+                -- Switch to the Traveler's Log tab where the client supports it.
                 if EncounterJournal_DisplayMonthlyActivities then
                     EncounterJournal_DisplayMonthlyActivities()
                 end
@@ -715,9 +692,19 @@ function addon:OnTrackableClick(trackable, mouseButton)
     end
 end
 
+-- Sets every stored MINOR_<type>_* header under a major key to `value`.
+local function SetChildHeaders(collapsedHeaders, majorKey, value)
+    local prefix = "MINOR_" .. majorKey:sub(#"MAJOR_" + 1) .. "_"
+    for k in pairs(collapsedHeaders) do
+        if k:sub(1, #prefix) == prefix then
+            collapsedHeaders[k] = value
+        end
+    end
+end
+
 -- Toggle header collapse state
 function addon:ToggleHeader(key, recursive)
-    if not self.db.collapsedHeaders then self.db.collapsedHeaders = {} end
+    local collapsedHeaders = self.db.collapsedHeaders
 
     -- Toggling a quest zone header by hand overrides auto-minimize, which would
     -- otherwise undo the click on the next paint. Turn it off until re-enabled.
@@ -726,48 +713,24 @@ function addon:ToggleHeader(key, recursive)
         self:SetAutoMinimize(false)
     end
 
-    if recursive and key:find("MAJOR_") then
-        -- Recursive toggling logic (Shift+Click)
-        local currentState = self.db.collapsedHeaders[key]
-        
-        if not currentState then 
-            -- Currently Expanded ([-]) -> Minimize Children
-            self.db.collapsedHeaders[key] = false -- Keep Parent Expanded
-            
-            -- Collapse known children (from Render Cache)
-            if self.knownMinorKeys and self.knownMinorKeys[key] then
-                for _, minorKey in ipairs(self.knownMinorKeys[key]) do
-                    self.db.collapsedHeaders[minorKey] = true
-                end
+    if recursive and key:find("^MAJOR_") then
+        -- Shift+Click: the major header stays expanded either way.
+        if not collapsedHeaders[key] then
+            -- Currently expanded: collapse every child, both the ones rendered last
+            -- pass and any stored ones.
+            collapsedHeaders[key] = false
+            for _, minorKey in ipairs(self.knownMinorKeys and self.knownMinorKeys[key] or {}) do
+                collapsedHeaders[minorKey] = true
             end
-            
-            -- Also catch persistent entries
-            local type = key:match("MAJOR_(.+)")
-            local prefix = "MINOR_" .. type .. "_"
-            for k, _ in pairs(self.db.collapsedHeaders) do
-                if k:find("^" .. prefix) then
-                    self.db.collapsedHeaders[k] = true
-                end
-            end
+            SetChildHeaders(collapsedHeaders, key, true)
         else
-            -- Currently Collapsed ([+]) -> Expand All
-            self.db.collapsedHeaders[key] = false -- Expand Parent
-            
-            -- Expand all children (remove from DB so they default to nil/Expanded)
-            local type = key:match("MAJOR_(.+)")
-            local prefix = "MINOR_" .. type .. "_"
-            for k, _ in pairs(self.db.collapsedHeaders) do
-                if k:find("^" .. prefix) then
-                    self.db.collapsedHeaders[k] = nil
-                end
-            end
+            -- Currently collapsed: expand it and all children (nil = expanded).
+            collapsedHeaders[key] = false
+            SetChildHeaders(collapsedHeaders, key, nil)
         end
     else
-        -- Standard Click
-        local newState = not self.db.collapsedHeaders[key]
-        self.db.collapsedHeaders[key] = newState
+        collapsedHeaders[key] = not collapsedHeaders[key]
     end
     
     self:RequestUpdate()
 end
-

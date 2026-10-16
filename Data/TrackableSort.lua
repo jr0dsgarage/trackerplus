@@ -14,9 +14,9 @@ local C_QuestLog = C_QuestLog
 -- game returns squared distance; we never need the real distance, only an
 -- ordering, so there's no point taking a square root). Unreachable or unknown
 -- objectives return huge so they sort last.
-function addon:GetTrackableSortDistance(item)
-    local questID = item and (item.id or item.questID)
-    if not questID or not C_QuestLog or not C_QuestLog.GetDistanceSqToQuest then
+local function GetSortDistance(item)
+    local questID = item.id or item.questID
+    if not questID or not C_QuestLog.GetDistanceSqToQuest then
         return huge
     end
 
@@ -45,15 +45,28 @@ end
 -- thresholds on, so the sort order lines up with the colors shown on each row.
 -- Trackables without a real level (achievements, professions, scaling quests) are
 -- treated as being at the player's level.
-function addon:GetTrackableSortDifficulty(item, playerLevel)
+local function GetSortDifficulty(item, playerLevel)
     -- difficultyLevel is the scaling-aware level, so prefer it; level is what the
     -- title displays and the two diverge on scaling quests.
-    local level = item and (tonumber(item.difficultyLevel) or tonumber(item.level))
+    local level = tonumber(item.difficultyLevel) or tonumber(item.level)
     if not level or level <= 0 then
         return 0
     end
-    return level - (playerLevel or 0)
+    return level - playerLevel
 end
+
+-- Scenarios first, then the super-tracked (pinned) quest, then everything else.
+local function GetSortPriority(trackable)
+    if trackable.type == "scenario" then
+        return 1
+    elseif trackable.type == "supertrack" then
+        return 2
+    end
+    return 3
+end
+
+-- Reused across passes; keyed by trackable.
+local priorities, values = {}, {}
 
 -- Sort trackables
 function addon:SortTrackables(trackables)
@@ -69,39 +82,21 @@ function addon:SortTrackables(trackables)
     local isDifficulty = not isProximity and not isAlphabetical
     local difficultyDescending = (sortMethod == "difficulty_desc")
 
-    local function GetPriority(trackable)
-        -- Priority 1: Scenarios/Dungeons (always on top)
-        if trackable.type == "scenario" then
-            return 1
-        end
-
-        -- Priority 2: Super Tracked Quest (Pinned)
-        if trackable.type == "supertrack" then
-            return 2
-        end
-
-        -- Priority 3: Everything else
-        return 3
-    end
-
     -- Precompute each entry's sort key. table.sort calls the comparator O(n log n)
     -- times and these keys come from API calls, so computing them inside the
     -- comparator would hit the distance API dozens of times per quest.
-    self._sortPriority = self._sortPriority or {}
-    self._sortValue = self._sortValue or {}
-    local priorities, values = self._sortPriority, self._sortValue
     wipe(priorities)
     wipe(values)
 
-    local playerLevel = (UnitLevel and UnitLevel("player")) or 0
+    local playerLevel = UnitLevel("player") or 0
 
     for i = 1, #trackables do
         local item = trackables[i]
-        priorities[item] = GetPriority(item)
+        priorities[item] = GetSortPriority(item)
         if isProximity then
-            values[item] = self:GetTrackableSortDistance(item)
+            values[item] = GetSortDistance(item)
         elseif isDifficulty then
-            values[item] = self:GetTrackableSortDifficulty(item, playerLevel)
+            values[item] = GetSortDifficulty(item, playerLevel)
         end
     end
 
