@@ -611,11 +611,26 @@ local function InitUI()
     sy = CreateCheckbox(s, "Hide When Empty", "fadeWhenEmpty", "Hide the tracker while nothing is tracked (only while it's locked).", sy)
     y = y - EndColumnRow(left, leftY, s, sy)
 
+    -- Built only from what applies here: campaigns are retail-only, and Follow the
+    -- Arrow needs its addon. Left out entirely when neither does.
+    local showCampaignPin = addon:IsSettingAvailable("includeCampaignQuestInActiveQuest")
+    local showFTAPin = addon:IsFollowTheArrowAvailable()
+    if showCampaignPin or showFTAPin then
+        s, sy = StartSection(panel, "Pinned Sections", y)
+        if showCampaignPin then
+            sy = CreateCheckbox(s, "Campaign in Active Quest", "includeCampaignQuestInActiveQuest", "When a campaign quest is your Active (super-tracked) quest, also show it in the Active Quest section instead of only under Campaign Quests.", sy)
+        end
+        if showFTAPin then
+            sy = CreateCheckbox(s, "Follow the Arrow", "includeFTAQuests", "Show a Follow the Arrow guide section between Active Quest and Campaign Quests.", sy)
+        end
+        y = y - EndSection(s, sy)
+    end
+
     local overview = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     overview:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, y)
     overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
     overview:SetJustifyH("LEFT")
-    overview:SetText("More settings are on the pages under TrackerPlus in the list on the left: Tracking, Nameplates, Appearance, Layout and Debug.")
+    overview:SetText("More settings are on the pages under TrackerPlus in the list on the left: Tracking Panel, Map Pins, Nameplates, Appearance, Layout and Debug.")
     y = y - 30
 
     local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -625,9 +640,9 @@ local function InitUI()
     resetBtn:SetScript("OnClick", function() StaticPopup_Show("TRACKERPLUS_RESET_CONFIRM") end)
 
     ---------------------------------------------------------------------------
-    -- Tracking
+    -- Tracking Panel
     ---------------------------------------------------------------------------
-    local tracking = CreateSettingsPage("Tracking", "Tracking", "What the tracker shows, how quests are colored and sorted, and quest markers on the world map.")
+    local tracking = CreateSettingsPage("Tracking", "Tracking Panel", "What the tracker shows and how quests are colored, sorted and highlighted.")
     y = -5
 
     left, leftY = StartColumnSection(tracking, "Quest Display", y, 1)
@@ -640,27 +655,9 @@ local function InitUI()
         {text = "Alphabetical", value = "alphabetical"}
     }, "Order entries within each zone. Difficulty compares each quest's level to yours: Easiest First puts trivial quests at the top, Hardest First puts them at the bottom. Proximity puts the closest objective first. Alphabetical sorts by name.", leftY)
 
-    s, sy = StartColumnSection(tracking, "Pinned Sections", y, 2)
-    sy = CreateCheckbox(s, "Campaign in Active Quest", "includeCampaignQuestInActiveQuest", "When a campaign quest is your Active (super-tracked) quest, also show it in the Active Quest section instead of only under Campaign Quests.", sy)
-    sy = CreateCheckbox(s, "Follow the Arrow", "includeFTAQuests", "Show a Follow the Arrow guide section between Active Quest and Campaign Quests. Requires the FollowTheArrow addon.", sy)
-    y = y - EndColumnRow(left, leftY, s, sy)
-
-    local mapPinsEnabled, mapPinStyle, mapPinThickness, mapPinOpacity
-    left, leftY = StartColumnSection(tracking, "World Map Pins", y, 1)
-    leftY = CreateCheckbox(left, "Color by Difficulty", "colorMapPOIsByDifficulty", "Ring the game's quest pins on the world map in the same color that quest's name has in the tracker.", leftY)
-    leftY, mapPinStyle = CreateDropdown(left, "Style", "mapPOIOutlineStyle", {
-        {text = "Glow", value = "glow"},
-        {text = "Circle", value = "circle"}
-    }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", leftY)
-    leftY, mapPinThickness = CreateSlider(left, "Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", leftY)
-    leftY, mapPinOpacity = CreateSlider(left, "Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", leftY)
-    mapPinsEnabled = function(db) return db.colorMapPOIsByDifficulty end
-    AddDependency(mapPinsEnabled, mapPinStyle, mapPinThickness)
-    AddDependency(function(db) return db.colorMapPOIsByDifficulty and db.mapPOIOutlineStyle ~= "circle" end, mapPinOpacity)
-
     local areaStyle, areaColor
     s, sy = StartColumnSection(tracking, "Quest Area Highlight", y, 2)
-    sy = CreateCheckbox(s, "Mark Quests You're In", "highlightQuestsInArea", "Highlight a quest's tracker row while you are inside the area the map shades for it.", sy)
+    sy = CreateCheckbox(s, "Highlight quests in your current area", "highlightQuestsInArea", "Highlight a quest's tracker row while you are inside the area the map shades for it.", sy)
     sy, areaStyle = CreateDropdown(s, "Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable.", sy)
     sy, areaColor = CreateColorPicker(s, "Color", "questAreaHighlightColor", function()
         addon:RefreshQuestAreaHighlights(true)
@@ -676,7 +673,8 @@ local function InitUI()
     local typesRight = CreateFrame("Frame", nil, s)
     typesRight:SetPoint("TOPLEFT", s, "TOPLEFT", 295, 0)
     typesRight:SetSize(290, 1)
-    local TRACKABLE_TYPES = {
+    local TRACKABLE_TYPES = {}
+    for _, entry in ipairs({
         { "Quests", "showQuests", "Track regular quests." },
         { "World Quests", "showWorldQuests", "Track world quests." },
         { "Bonus Objectives", "showBonusObjectives", "Track bonus objectives." },
@@ -685,16 +683,44 @@ local function InitUI()
         { "Professions", "showProfessions", "Track profession recipes." },
         { "Monthly Activities", "showMonthlyActivities", "Track Trading Post / Traveler's Log activities." },
         { "Endeavors", "showEndeavors", "Track housing endeavors." },
-    }
+    }) do
+        if addon:IsSettingAvailable(entry[2]) then
+            TRACKABLE_TYPES[#TRACKABLE_TYPES + 1] = entry
+        end
+    end
+    -- Left column fills first; the right takes the rest.
+    local typesPerColumn = math.ceil(#TRACKABLE_TYPES / 2)
     local typesY = sy
     for i, entry in ipairs(TRACKABLE_TYPES) do
-        local column = i <= 4 and typesLeft or typesRight
-        CreateCheckbox(column, entry[1], entry[2], entry[3], typesY - ((i - 1) % 4) * 30)
+        local column = i <= typesPerColumn and typesLeft or typesRight
+        CreateCheckbox(column, entry[1], entry[2], entry[3], typesY - ((i - 1) % typesPerColumn) * 30)
     end
-    sy = sy - 4 * 30
+    sy = sy - typesPerColumn * 30
     y = y - EndSection(s, sy)
 
     tracking:SetHeight(math.abs(y) + 20)
+
+    ---------------------------------------------------------------------------
+    -- Map Pins
+    ---------------------------------------------------------------------------
+    local mapPins = CreateSettingsPage("MapPins", "Map Pins", "How the game's quest pins on the world map are marked.")
+    y = -5
+
+    local mapPinsEnabled, mapPinStyle, mapPinThickness, mapPinOpacity
+    left, leftY = StartSection(mapPins, "World Map Pins", y)
+    leftY = CreateCheckbox(left, "Color by Difficulty", "colorMapPOIsByDifficulty", "Ring the game's quest pins on the world map in the same color that quest's name has in the tracker.", leftY)
+    leftY, mapPinStyle = CreateDropdown(left, "Style", "mapPOIOutlineStyle", {
+        {text = "Glow", value = "glow"},
+        {text = "Circle", value = "circle"}
+    }, "Glow uses the game's own soft ring art, fading outwards. Circle draws a hard-edged ring of an exact pixel thickness instead.", leftY)
+    leftY, mapPinThickness = CreateSlider(left, "Thickness", "mapPOIOutlineThickness", 1, 10, 1, "How far past the pin the circle or glow reaches, in pixels.", leftY)
+    leftY, mapPinOpacity = CreateSlider(left, "Glow Opacity", "mapPOIGlowOpacity", 0.05, 1, 0.05, "How solid the glow is, where 1 is as solid as it can be drawn. Only applies to the Glow style; the circle is always drawn opaque.", leftY)
+    mapPinsEnabled = function(db) return db.colorMapPOIsByDifficulty end
+    AddDependency(mapPinsEnabled, mapPinStyle, mapPinThickness)
+    AddDependency(function(db) return db.colorMapPOIsByDifficulty and db.mapPOIOutlineStyle ~= "circle" end, mapPinOpacity)
+    y = y - EndSection(left, leftY)
+
+    mapPins:SetHeight(math.abs(y) + 20)
 
     -- Page: Nameplates. Built by NameplatesSettings.lua; added here so it registers with the rest.
     orderedPages[#orderedPages + 1] = { id = "Nameplates", name = "Nameplates", frame = addon.Nameplates.settingsPanel }
@@ -802,17 +828,28 @@ local function InitUI()
         } },
     }
     local colorsBottom = sy
-    for index, columnInfo in ipairs(COLOR_COLUMNS) do
-        local column = ColorColumn(index)
-        local columnY = CreateSubheader(column, columnInfo[1], sy)
+    local columnIndex = 0
+    for _, columnInfo in ipairs(COLOR_COLUMNS) do
+        local pickers = {}
         for _, picker in ipairs(columnInfo[2]) do
-            local widget
-            columnY, widget = CreateColorPicker(column, picker[1], picker[2], picker[3], columnY, COLOR_COLUMN_WIDTH - 24)
-            if picker[2] == "borderColor" then
-                AddDependency(function(db) return db.borderEnabled end, widget)
+            if addon:IsSettingAvailable(picker[2]) then
+                pickers[#pickers + 1] = picker
             end
         end
-        colorsBottom = math.min(colorsBottom, columnY)
+        -- A column with nothing left in it on this client is left out entirely.
+        if #pickers > 0 then
+            columnIndex = columnIndex + 1
+            local column = ColorColumn(columnIndex)
+            local columnY = CreateSubheader(column, columnInfo[1], sy)
+            for _, picker in ipairs(pickers) do
+                local widget
+                columnY, widget = CreateColorPicker(column, picker[1], picker[2], picker[3], columnY, COLOR_COLUMN_WIDTH - 24)
+                if picker[2] == "borderColor" then
+                    AddDependency(function(db) return db.borderEnabled end, widget)
+                end
+            end
+            colorsBottom = math.min(colorsBottom, columnY)
+        end
     end
     sy = colorsBottom
     y = y - EndSection(s, sy)
@@ -872,7 +909,7 @@ local function InitUI()
     debugPage:SetHeight(math.abs(y) + 20)
 
     -- The order pages appear under TrackerPlus in the Settings list, independent of build order.
-    local PAGE_ORDER = { Tracking = 1, Nameplates = 2, Appearance = 3, Layout = 4, Debug = 5 }
+    local PAGE_ORDER = { Tracking = 1, MapPins = 2, Nameplates = 3, Appearance = 4, Layout = 5, Debug = 6 }
     table.sort(orderedPages, function(a, b)
         return (PAGE_ORDER[a.id] or 99) < (PAGE_ORDER[b.id] or 99)
     end)

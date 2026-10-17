@@ -4,6 +4,46 @@ local addonName, addon = ...
 -- Database version for future migrations
 local DB_VERSION = 6
 
+-- Which client we're running in. WoW Forever (vanilla content on the modern client)
+-- reports 1.6x builds; retail reports 12.x.
+local build = select(4, GetBuildInfo())
+addon.IsForever = build >= 16000 and build < 20000
+addon.IsRetail = not addon.IsForever
+
+-- Settings for features Forever doesn't have (campaigns, world quests, achievements,
+-- ...). There they are forced off and left out of the Settings panel.
+local RETAIL_ONLY_SETTINGS = {
+    includeCampaignQuestInActiveQuest = true,
+    showWorldQuests = true,
+    showBonusObjectives = true,
+    showScenarios = true,
+    showDungeonObjectives = true,
+    showAchievements = true,
+    showMonthlyActivities = true,
+    showEndeavors = true,
+    -- Colors for the trackable types above
+    achievementColor = true,
+    monthlyColor = true,
+    endeavorColor = true,
+    scenarioColor = true,
+    bonusColor = true,
+}
+
+-- Whether a setting applies to this client.
+function addon:IsSettingAvailable(key)
+    return addon.IsRetail or not RETAIL_ONLY_SETTINGS[key]
+end
+
+-- Turns off every toggle this client can't use, whatever the profile says.
+local function ApplyClientRestrictions(settings)
+    if addon.IsRetail then return end
+    for key in pairs(RETAIL_ONLY_SETTINGS) do
+        if type(settings[key]) == "boolean" then
+            settings[key] = false
+        end
+    end
+end
+
 -- Default settings
 local DEFAULTS = {
     enabled = true,
@@ -312,6 +352,8 @@ function addon:InitDatabase()
         end
     end
     
+    ApplyClientRestrictions(TrackerPlusDB.settings)
+
     -- Create reference to settings
     addon.db = TrackerPlusDB.settings
 end
@@ -319,6 +361,7 @@ end
 -- Reset settings to defaults
 function addon:ResetDatabase()
     TrackerPlusDB.settings = DeepCopy(DEFAULTS)
+    ApplyClientRestrictions(TrackerPlusDB.settings)
     addon.db = TrackerPlusDB.settings
 
     -- Nameplates keeps its own settings table beside ours.
