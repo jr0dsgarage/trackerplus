@@ -358,6 +358,16 @@ function W.CreateDropdown(parent, width, generator)
     control.Dropdown:SetWidth(width)
     control.Dropdown:SetupMenu(generator)
 
+    -- The template only re-checks its previous / next buttons when the dropdown signals
+    -- an update, which stepping (Pick) and choosing from the menu don't reliably do, so
+    -- a button could stay enabled at the end of the list or grey after moving off it.
+    -- Re-check after every pick and whenever the menu closes. Own owner key: a caller
+    -- may register its own OnMenuClose with the control as owner, and an owner gets
+    -- only one callback per event.
+    local function UpdateSteppers() control:UpdateSteppers() end
+    hooksecurefunc(control.Dropdown, "Pick", UpdateSteppers)
+    control.Dropdown:RegisterCallback(DropdownButtonMixin.Event.OnMenuClose, UpdateSteppers, {})
+
     -- Re-reads the saved value, e.g. after it changed somewhere other than this dropdown
     function control:Refresh()
         self.Dropdown:GenerateMenu()
