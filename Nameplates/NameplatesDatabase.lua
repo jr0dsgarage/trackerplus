@@ -71,6 +71,13 @@ local STYLE_KEYS = {
     "bonusObjectiveStyle",
 }
 
+-- Highlights for features Forever doesn't have; turned off there (and their rows left
+-- out of the Nameplates page), like RETAIL_ONLY_SETTINGS in Database.lua.
+local RETAIL_ONLY_KEYS = {
+    "worldQuestEnabled",
+    "bonusObjectiveEnabled",
+}
+
 local deepCopy = TrackerPlus.DeepCopy
 
 local function mergeDefaults(target, source)
@@ -151,6 +158,12 @@ function Nameplates:InitializeDB()
 
     -- Always merge in any new defaults (doesn't overwrite existing values)
     mergeDefaults(Nameplates.db, DEFAULTS)
+
+    if not TrackerPlus.IsRetail then
+        for _, key in ipairs(RETAIL_ONLY_KEYS) do
+            Nameplates.db[key] = false
+        end
+    end
 end
 
 -- Replaces the settings with a fresh copy of the defaults.

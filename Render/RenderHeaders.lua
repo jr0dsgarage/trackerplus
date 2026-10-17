@@ -52,9 +52,16 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
     local iconPos = db.headerIconPosition or "left"
     local bgStyle = db.headerBackgroundStyle or "questlog"
     local headerColor = db.headerColor
-    local expandSigCollapsed = iconStyle .. "|" .. iconPos .. "|1"
-    local expandSigExpanded = iconStyle .. "|" .. iconPos .. "|0"
-    local textLayoutSig = iconStyle .. ":" .. iconPos
+    -- The text icon is drawn in the header font and color, and its width (which the title
+    -- makes room for) follows the font, so those count as part of its style.
+    local iconFontSig = ""
+    if iconStyle == "text_brackets" then
+        iconFontSig = format("|%s:%s:%s:%s:%s:%s", tostring(db.headerFontFace), tostring(db.headerFontSize),
+            tostring(db.headerFontOutline), tostring(headerColor.r), tostring(headerColor.g), tostring(headerColor.b))
+    end
+    local expandSigCollapsed = iconStyle .. "|" .. iconPos .. "|1" .. iconFontSig
+    local expandSigExpanded = iconStyle .. "|" .. iconPos .. "|0" .. iconFontSig
+    local textLayoutSig = iconStyle .. ":" .. iconPos .. iconFontSig
     local bgSigMajor, bgSigMinor = bgStyle .. ":1", bgStyle .. ":0"
     local textStyleSigMajor = format("%s:%s:%s:%s:%s:%s:%s", tostring(db.headerFontFace), tostring(db.headerFontSize + 2),
         tostring(db.headerFontOutline), tostring(headerColor.r), tostring(headerColor.g), tostring(headerColor.b), tostring(headerColor.a))
@@ -153,6 +160,9 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                 header.expandBtn:SetPushedTexture("")
                 header.expandBtn:SetHighlightTexture("")
                 -- Note: Setting Texture to "" usually clears Atlas as well in WoW API
+                if header.expandBtn.label then
+                    header.expandBtn.label:Hide()
+                end
             
                 if iconStyle == "none" then
                     header.expandBtn:Hide()
@@ -170,19 +180,20 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                         header.expandBtn:SetNormalTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Up" or "Interface\\Buttons\\UI-Panel-CollapseButton-Up")
                         header.expandBtn:SetPushedTexture(isCollapsed and "Interface\\Buttons\\UI-Panel-ExpandButton-Down" or "Interface\\Buttons\\UI-Panel-CollapseButton-Down")
                     elseif iconStyle == "text_brackets" then
-                        header.expandBtn:SetSize(24, 16)
-                        header.expandBtn:SetText(isCollapsed and "[+]" or "[-]")
-                        
-                        local fontString = header.expandBtn:GetFontString()
-                        if fontString then
-                            fontString:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
-                            fontString:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
-                            if iconPos == "right" then
-                                fontString:SetJustifyH("RIGHT")
-                            else
-                                fontString:SetJustifyH("LEFT")
-                            end
+                        -- Its own label rather than the button's text, with the button sized to fit
+                        -- it: a fixed-size button squeezed the text at larger header fonts.
+                        local label = header.expandBtn.label
+                        if not label then
+                            label = header.expandBtn:CreateFontString(nil, "OVERLAY")
+                            label:SetPoint("CENTER")
+                            label:SetWordWrap(false)
+                            header.expandBtn.label = label
                         end
+                        label:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
+                        label:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, 1)
+                        label:SetText(isCollapsed and "+" or "-")
+                        label:Show()
+                        header.expandBtn:SetSize(math.ceil(label:GetStringWidth()) + 2, math.max(16, math.ceil(label:GetStringHeight())))
                     elseif iconStyle == "questlog" then
                         header.expandBtn:SetSize(16, 16)
                         
@@ -232,14 +243,22 @@ function addon:RenderNormalTrackables(trackables, contentFrame)
                      -- No icon: Text fills full width with small padding
                     header.text:SetPoint("TOPLEFT", 5, -2)
                     header.text:SetPoint("TOPRIGHT", -5, -2)
-                elseif iconPos == "right" then
-                    -- Icon on Right: Text starts Left, ends before icon
-                    header.text:SetPoint("TOPLEFT", 5, -2)
-                    header.text:SetPoint("TOPRIGHT", -22, -2)
                 else
-                    -- Icon on Left (Default): Text starts after icon
-                    header.text:SetPoint("TOPLEFT", 22, -2)
-                    header.text:SetPoint("TOPRIGHT", -5, -2)
+                    -- Room for the icon: 22 for the 16px icons, or the text icon's width plus its
+                    -- 8px inset and a small gap.
+                    local iconSpace = 22
+                    if iconStyle == "text_brackets" then
+                        iconSpace = header.expandBtn:GetWidth() + 12
+                    end
+                    if iconPos == "right" then
+                        -- Icon on Right: Text starts Left, ends before icon
+                        header.text:SetPoint("TOPLEFT", 5, -2)
+                        header.text:SetPoint("TOPRIGHT", -iconSpace, -2)
+                    else
+                        -- Icon on Left (Default): Text starts after icon
+                        header.text:SetPoint("TOPLEFT", iconSpace, -2)
+                        header.text:SetPoint("TOPRIGHT", -5, -2)
+                    end
                 end
                 header._textLayoutSignature = textLayoutSig
             end

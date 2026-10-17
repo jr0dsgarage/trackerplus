@@ -46,6 +46,9 @@ local SETTING_EFFECTS = {
     frameHeight = UpdateAppearance,
     frameScale = UpdateAppearance,
     borderEnabled = UpdateAppearance,
+    borderSize = UpdateAppearance,
+    backgroundStyle = UpdateAppearance,
+    -- borderStyle is added below UpdateSlider, which it needs.
     barBorderSize = UpdateAppearanceAndRepaint,
     barTexture = UpdateAppearanceAndRepaint,
     headerFontSize = UpdateAppearanceAndRepaint,
@@ -527,6 +530,25 @@ local function UpdateSlider(dbKey)
     end
 end
 
+-- Picking a border also sets Border Size to the size that texture is drawn for.
+SETTING_EFFECTS.borderStyle = function(name)
+    local _, edgeSize = addon:ResolvePanelMedia("border", name)
+    addon:SetSetting("borderSize", edgeSize)
+    UpdateSlider("borderSize")
+    addon:UpdateTrackerAppearance()
+end
+
+-- Dropdown options for a panel texture kind ("border" or "background").
+local function GetPanelMediaOptions(kind)
+    return function()
+        local options = {}
+        for i, entry in ipairs(addon:GetPanelMediaList(kind)) do
+            options[i] = { text = entry.name, value = entry.name }
+        end
+        return options
+    end
+end
+
 local function UpdateCheckbox(dbKey)
     local check = _G[addonName .. dbKey .. "Check"]
     if check then
@@ -750,25 +772,42 @@ local function InitUI()
     leftY = CreateSlider(left, "Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame.", leftY)
     AddDependency(function(db) return not db.matchBlizzardTracker end, frameWidthSlider, frameHeightSlider)
 
-    s, sy = StartColumnSection(appearance, "Styling", y, 2)
+    -- The color pickers only apply to Solid; textures are drawn in their own colors.
+    local function IsSolid(kind, name)
+        return addon:IsSolidPanelMedia((addon:ResolvePanelMedia(kind, name)))
+    end
+    local borderStyleDropdown, borderSizeSlider, borderColorPicker, backgroundColorPicker
+    s, sy = StartColumnSection(appearance, "Panel Styling", y, 2)
+    sy = CreateDropdown(s, "Background", "backgroundStyle", GetPanelMediaOptions("background"), "The texture behind the tracker, stretched to fill it: Solid, the game's own backgrounds, or any other addons registered with LibSharedMedia.", sy)
+    sy, backgroundColorPicker = CreateColorPicker(s, "Background Color", "backgroundColor", UpdateAppearance, sy, 250)
     sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker.", sy)
-    sy = CreateDropdown(s, "Expand/Collapse Icon", "headerIconStyle", {
+    sy, borderStyleDropdown = CreateDropdown(s, "Border Style", "borderStyle", GetPanelMediaOptions("border"), "The border drawn around the outside of the tracker: the game's own borders, plus any other addons registered with LibSharedMedia. Picking one sets Border Size to suit it.", sy)
+    sy, borderColorPicker = CreateColorPicker(s, "Border Color", "borderColor", UpdateAppearance, sy, 250)
+    sy, borderSizeSlider = CreateSlider(s, "Border Size", "borderSize", 1, 32, 1, "How thick the border is, in pixels; it grows outwards from the tracker. Textured borders look best at the size picking them sets.", sy)
+    AddDependency(function(db) return db.borderEnabled end, borderStyleDropdown, borderSizeSlider)
+    AddDependency(function(db) return db.borderEnabled and IsSolid("border", db.borderStyle) end, borderColorPicker)
+    AddDependency(function(db) return IsSolid("background", db.backgroundStyle) end, backgroundColorPicker)
+    y = y - EndColumnRow(left, leftY, s, sy)
+
+    left, leftY = StartColumnSection(appearance, "Header Styling", y, 1)
+    leftY = CreateDropdown(left, "Expand/Collapse Icon", "headerIconStyle", {
         {text = "None", value = "none"},
         {text = "Standard (Gold)", value = "standard"},
         {text = "Square (Check)", value = "square"},
-        {text = "Text [+/-]", value = "text_brackets"},
+        {text = "Text (+/-)", value = "text_brackets"},
         {text = "Quest Log (+/-)", value = "questlog"}
-    }, "Style of the expand/collapse icons on headers.", sy)
-    sy = CreateDropdown(s, "Icon Position", "headerIconPosition", {
+    }, "Style of the expand/collapse icons on headers.", leftY)
+    leftY = CreateDropdown(left, "Icon Position", "headerIconPosition", {
         {text = "Left (Start)", value = "left"},
         {text = "Right (End)", value = "right"}
-    }, "Which side of the header the expand/collapse icon sits on.", sy)
-    sy = CreateDropdown(s, "Header Background", "headerBackgroundStyle", {
+    }, "Which side of the header the expand/collapse icon sits on.", leftY)
+    leftY = CreateDropdown(left, "Header Background", "headerBackgroundStyle", {
         {text = "None", value = "none"},
         {text = "Quest Log Background", value = "questlog"},
         {text = "Tracker Background (Custom)", value = "tracker"}
-    }, "Background behind section and zone headers.", sy)
-    sy = CreateSubheader(s, "Progress Bars", sy)
+    }, "Background behind section and zone headers.", leftY)
+
+    s, sy = StartColumnSection(appearance, "Progress Bars", y, 2)
     sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides it).", sy)
     sy = CreateDropdown(s, "Texture", "barTexture", GetBarTextureOptions, "Texture used for progress bars. Lists the textures other addons registered with LibSharedMedia.", sy)
     y = y - EndColumnRow(left, leftY, s, sy)
@@ -803,12 +842,9 @@ local function InitUI()
         column:SetSize(COLOR_COLUMN_WIDTH, 1)
         return column
     end
-    local updateAppearance = function() addon:UpdateTrackerAppearance() end
     local updateDisplay = function() addon:RefreshDisplay() end
     local COLOR_COLUMNS = {
         { "Frame", {
-            { "Background", "backgroundColor", updateAppearance },
-            { "Border", "borderColor", updateAppearance },
             { "Bar Background", "barBackgroundColor", updateDisplay },
         } },
         { "Text", {
@@ -842,11 +878,7 @@ local function InitUI()
             local column = ColorColumn(columnIndex)
             local columnY = CreateSubheader(column, columnInfo[1], sy)
             for _, picker in ipairs(pickers) do
-                local widget
-                columnY, widget = CreateColorPicker(column, picker[1], picker[2], picker[3], columnY, COLOR_COLUMN_WIDTH - 24)
-                if picker[2] == "borderColor" then
-                    AddDependency(function(db) return db.borderEnabled end, widget)
-                end
+                columnY = CreateColorPicker(column, picker[1], picker[2], picker[3], columnY, COLOR_COLUMN_WIDTH - 24)
             end
             colorsBottom = math.min(colorsBottom, columnY)
         end

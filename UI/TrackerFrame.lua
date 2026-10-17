@@ -601,6 +601,8 @@ function addon:UpdateTrackerAppearance()
         and s.bgA == (db.backgroundColor and db.backgroundColor.a or 0)
         and s.borderEnabled == borderEnabled
         and s.borderSize == (db.borderSize or 0)
+        and s.borderStyle == db.borderStyle
+        and s.backgroundStyle == db.backgroundStyle
         and s.borderR == (db.borderColor and db.borderColor.r or 0)
         and s.borderG == (db.borderColor and db.borderColor.g or 0)
         and s.borderB == (db.borderColor and db.borderColor.b or 0)
@@ -628,6 +630,8 @@ function addon:UpdateTrackerAppearance()
     s.bgA = db.backgroundColor and db.backgroundColor.a or 0
     s.borderEnabled = borderEnabled
     s.borderSize = db.borderSize or 0
+    s.borderStyle = db.borderStyle
+    s.backgroundStyle = db.backgroundStyle
     s.borderR = db.borderColor and db.borderColor.r or 0
     s.borderG = db.borderColor and db.borderColor.g or 0
     s.borderB = db.borderColor and db.borderColor.b or 0
@@ -647,35 +651,59 @@ function addon:UpdateTrackerAppearance()
         return
     end
     
+    local borderFile, _, borderInnerEdge = self:ResolvePanelMedia("border", db.borderStyle)
+
     -- Update background
     if trackerFrame.bg then
-        trackerFrame.bg:SetColorTexture(
-            db.backgroundColor.r,
-            db.backgroundColor.g,
-            db.backgroundColor.b,
-            db.backgroundColor.a
-        )
+        local bg = trackerFrame.bg
+        local color = db.backgroundColor
+        local backgroundFile = self:ResolvePanelMedia("background", db.backgroundStyle)
+        if self:IsSolidPanelMedia(backgroundFile) then
+            -- Undo a texture's tint, which would otherwise carry over.
+            bg:SetVertexColor(1, 1, 1, 1)
+            bg:SetColorTexture(color.r, color.g, color.b, color.a)
+        else
+            -- Stretched over the whole panel, in the texture's own colors (the Background
+            -- color is only for Solid).
+            bg:SetTexture(backgroundFile)
+            bg:SetHorizTile(false)
+            bg:SetVertTile(false)
+            bg:SetTexCoord(0, 1, 0, 1)
+            bg:SetVertexColor(1, 1, 1, 1)
+        end
     end
     
     -- Update border
     if db.borderEnabled then
-        if not trackerFrame.border then
-            trackerFrame.border = CreateFrame("Frame", nil, trackerFrame, "BackdropTemplate")
-            trackerFrame.border:SetAllPoints()
+        local border = trackerFrame.border
+        if not border then
+            border = CreateFrame("Frame", nil, trackerFrame, "BackdropTemplate")
+            trackerFrame.border = border
         end
-        self._trackerBorderBackdrop = self._trackerBorderBackdrop or {
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            edgeSize = db.borderSize,
-        }
-        self._trackerBorderBackdrop.edgeSize = db.borderSize
-        trackerFrame.border:SetBackdrop(self._trackerBorderBackdrop)
-        trackerFrame.border:SetBackdropBorderColor(
-            db.borderColor.r,
-            db.borderColor.g,
-            db.borderColor.b,
-            db.borderColor.a
-        )
-        trackerFrame.border:Show()
+        -- Drawn over the panel's contents, so section headers don't cover a textured border's
+        -- inner edge.
+        border:SetFrameLevel(trackerFrame:GetFrameLevel() + 100)
+
+        -- Pushed out so the inner edge of the border's art sits exactly on the panel's edge, and
+        -- grows outwards with its size. A solid border is all art; textured ones are transparent
+        -- past their inner edge, and that part lies over the panel.
+        local edgeSize = db.borderSize or 1
+        local solidBorder = self:IsSolidPanelMedia(borderFile)
+        local outset = math.floor(edgeSize * borderInnerEdge + 0.5)
+        border:ClearAllPoints()
+        border:SetPoint("TOPLEFT", -outset, outset)
+        border:SetPoint("BOTTOMRIGHT", outset, -outset)
+
+        -- A new table each time: SetBackdrop ignores the table it already has, even if its
+        -- contents changed, so editing one in place never redraws the border.
+        border:SetBackdrop({
+            edgeFile = borderFile,
+            edgeSize = edgeSize,
+        })
+        -- The Border color is for Solid; textures are drawn in their own colors.
+        local color = solidBorder and db.borderColor or { r = 1, g = 1, b = 1, a = 1 }
+        border:SetBackdropBorderColor(color.r, color.g, color.b, color.a)
+        border:Show()
     else
         if trackerFrame.border then
             trackerFrame.border:Hide()

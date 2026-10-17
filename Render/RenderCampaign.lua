@@ -45,6 +45,9 @@ function addon:RenderCampaignSection(campaignItems)
         end
         if expandBtn._expandMode ~= "campaign" then
             expandBtn:SetText("")
+            if expandBtn.label then -- the zone header's text icon (+ / -)
+                expandBtn.label:Hide()
+            end
             expandBtn:SetSize(16, 16)
             expandBtn:ClearAllPoints()
             expandBtn:SetPoint("RIGHT", -8, 0)

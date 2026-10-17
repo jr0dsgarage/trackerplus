@@ -42,9 +42,17 @@ local highlightOptions = {
           .. " mobs, but never the Current Target highlight.\n\nThis highlight doesn't show inside instances." },
     { key = "questObjective", label = "Quest Objective Target" },
     { key = "questItem", label = "Quest Item Target" },
-    { key = "worldQuest", label = "World Quest Objective Target" },
-    { key = "bonusObjective", label = "Bonus Objective Target" },
+    { key = "worldQuest", label = "World Quest Objective Target", retailOnly = true },
+    { key = "bonusObjective", label = "Bonus Objective Target", retailOnly = true },
 }
+-- Forever has no world quests or bonus objectives (see RETAIL_ONLY_KEYS in NameplatesDatabase.lua).
+if not TrackerPlus.IsRetail then
+    for i = #highlightOptions, 1, -1 do
+        if highlightOptions[i].retailOnly then
+            table.remove(highlightOptions, i)
+        end
+    end
+end
 
 local highlightStyleChoices = {
     { value = "outline", text = "Outline" },
@@ -54,6 +62,8 @@ local highlightStyleChoices = {
 }
 
 local WHITE_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
+-- The search box's magnifying glass, on each highlight's preview button.
+local PREVIEW_ICON = "Interface\\Common\\UI-Searchbox-Icon"
 local previewClickSound = SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
 
 -- Uses the same renderer as live nameplates; disabled highlights preview dimmed.
@@ -141,9 +151,9 @@ local function applySettings()
     Nameplates:RequestUpdate()
 end
 
--- Only the outline style has a thickness.
-local function setThicknessEnabled(row, enabled)
-    row.thickness:SetEnabled(enabled)
+-- Only the outline style has a thickness, so the slider is hidden for the others.
+local function setThicknessShown(row, shown)
+    row.thickness:SetShown(shown)
 end
 
 local function updateSwatch(button, color)
@@ -159,25 +169,32 @@ end
 -- A highlight row's style dropdown picked `value`.
 local function onStyleSelected(option, value)
     Nameplates.db[option.key .. "Style"] = value
-    setThicknessEnabled(ui.highlightRows[option.key], value == "outline")
+    setThicknessShown(ui.highlightRows[option.key], value == "outline")
     applySettings()
     refreshPreviewFor(option)
 end
 
--- A highlight row's Thickness or Offset slider moved.
+-- A highlight row's Offset or Thickness slider moved.
 local function onRowSliderChanged(option, dbKey, value)
     Nameplates.db[dbKey] = value
     applySettings()
     refreshPreviewFor(option)
 end
 
+-- Highlight row spacing: between rows, between the small controls, and around the sliders.
+local ROW_SPACING = 76
+local CONTROL_GAP = 8
+local SLIDER_GAP = 16
+-- Kept clear on the right of the rows, matching the page's left margin.
+local CONTENT_RIGHT_MARGIN = 16
+
 local function createHighlightRow(anchor, option, index)
-    local rowOffset = -12 - (index - 1) * 68  -- Increased spacing for two-line layout
+    local rowOffset = -12 - (index - 1) * ROW_SPACING -- two lines: label, then controls
 
     -- Label on first line
     local label = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, rowOffset)
-    label:SetWidth(600)
+    -- Starts one preview button in: that button leads the line (anchored below).
+    label:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 26, rowOffset)
     label:SetJustifyH("LEFT")
     label:SetText(option.label)
 
@@ -191,10 +208,10 @@ local function createHighlightRow(anchor, option, index)
     local dropdown = TrackerPlus.SettingsWidgets.CreateChoiceDropdown(content, 100, highlightStyleChoices,
         function() return Nameplates.db[styleKey] end,
         function(value) onStyleSelected(option, value) end)
-    dropdown:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+    dropdown:SetPoint("LEFT", checkbox, "RIGHT", CONTROL_GAP, 0)
 
     local colorButton = CreateFrame("Button", nil, content)
-    colorButton:SetPoint("LEFT", dropdown, "RIGHT", 4, 0)
+    colorButton:SetPoint("LEFT", dropdown, "RIGHT", CONTROL_GAP, 0)
     colorButton:SetSize(24, 24)
 
     local border = colorButton:CreateTexture(nil, "BACKGROUND")
@@ -206,7 +223,8 @@ local function createHighlightRow(anchor, option, index)
     swatch:SetPoint("BOTTOMRIGHT", -1, 1)
     colorButton.swatch = swatch
 
-    -- The value is shown in each slider's label, so no value beside the arrows.
+    -- The value is shown in each slider's label, so no value beside the arrows. The width
+    -- here is a starting point: fitRowWidths stretches both sliders to fill the row.
     local function createRowSlider(labelText, dbKey, minVal, maxVal)
         return TrackerPlus.SettingsWidgets.CreateSlider(content, {
             min = minVal, max = maxVal, step = 1, width = 70, showValue = false,
@@ -216,20 +234,32 @@ local function createHighlightRow(anchor, option, index)
         })
     end
 
-    local thickness = createRowSlider("Thickness", option.key .. "Thickness", 1, 5)
-    thickness:SetPoint("LEFT", colorButton, "RIGHT", 12, 0)
-
     local offset = createRowSlider("Offset", option.key .. "Offset", 0, 5)
-    offset:SetPoint("LEFT", thickness, "RIGHT", 12, 0)
+    offset:SetPoint("LEFT", colorButton, "RIGHT", SLIDER_GAP, 0)
+
+    local thickness = createRowSlider("Thickness", option.key .. "Thickness", 1, 5)
+    thickness:SetPoint("LEFT", offset, "RIGHT", SLIDER_GAP, 0)
+
+    -- Marks the end of the row for the hover tooltip. Thickness can be hidden, and a
+    -- hidden owner would hide the tooltip, so it can't be the anchor itself.
+    local rowEnd = CreateFrame("Frame", nil, content)
+    rowEnd:SetSize(1, 1)
+    rowEnd:SetPoint("LEFT", thickness, "RIGHT", 0, 0)
+
+    -- Preview button: a magnifying glass at the start of the label's line.
+    local function addMagnifierIcon(button)
+        local icon = button:CreateTexture(nil, "OVERLAY")
+        icon:SetTexture(PREVIEW_ICON)
+        icon:SetSize(12, 12)
+        icon:SetPoint("CENTER", 0, 0)
+        return icon
+    end
 
     local previewButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    previewButton:SetPoint("LEFT", offset, "RIGHT", 12, 0)
-    previewButton:SetSize(24, 22)
+    previewButton:SetPoint("RIGHT", label, "LEFT", -6, 0)
+    previewButton:SetSize(20, 18)
     previewButton:SetMotionScriptsWhileDisabled(true)
-    previewButton:SetText("i")
-    previewButton:SetNormalFontObject(GameFontHighlightSmall)
-    previewButton:SetHighlightFontObject(GameFontHighlightSmall)
-    previewButton:SetDisabledFontObject(GameFontDisableSmall)
+    addMagnifierIcon(previewButton)
 
     local function tintButtonTextures(button, normal, highlight, disabled)
         local normalTexture = button:GetNormalTexture()
@@ -250,23 +280,21 @@ local function createHighlightRow(anchor, option, index)
 
     local indicator = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     indicator:SetPoint("CENTER", previewButton, "CENTER", 0, 0)
-    indicator:SetSize(24, 22)
-    indicator:SetText("i")
-    indicator:SetNormalFontObject(GameFontHighlightSmall)
-    indicator:SetDisabledFontObject(GameFontDisableSmall)
+    indicator:SetSize(20, 18)
+    addMagnifierIcon(indicator)
     indicator:Disable()
     indicator:EnableMouse(false)
     indicator:Hide()
     tintButtonTextures(indicator, { r = 0.65, g = 0.1, b = 0.1 }, { r = 0.9, g = 0.2, b = 0.2 }, { r = 0.35, g = 0.08, b = 0.08 })
 
     -- One hover row for the label and every control on the line below it; the optional
-    -- explanation shows beside the preview button. (That button keeps its own tooltip.)
+    -- explanation shows past the end of the row. (The preview button keeps its own tooltip.)
     TrackerPlus.SettingsWidgets.AttachHover(checkbox, {
-        title = option.label, body = option.tooltip, top = label, anchor = previewButton,
+        title = option.label, body = option.tooltip, top = label, anchor = rowEnd,
         frames = {
             dropdown.Dropdown, dropdown.DecrementButton, dropdown.IncrementButton, colorButton,
-            thickness.Slider, thickness.Back, thickness.Forward,
             offset.Slider, offset.Back, offset.Forward,
+            thickness.Slider, thickness.Back, thickness.Forward,
         },
     })
 
@@ -332,7 +360,7 @@ local function refreshHighlightRow(option, row)
     row.offset:SetValue(style.offset, true)
 
     row.dropdown:Refresh()
-    setThicknessEnabled(row, style.mode == "outline")
+    setThicknessShown(row, style.mode == "outline")
 end
 
 -- Stops every event handler in a frame tree, so no Blizzard code ever runs on the preview again.
@@ -342,6 +370,50 @@ local function silenceFrameTree(frame)
     end
     for _, child in ipairs({ frame:GetChildren() }) do
         silenceFrameTree(child)
+    end
+end
+
+-- Lays the preview plate out for the game's current Nameplates options (Style, Size). Blizzard rebuilds
+-- NamePlateSetupOptions/NamePlateEnemyFrameOptions whenever those change, so re-applying them is enough;
+-- run when the plate is built and every time the panel opens, since the game's options may have changed.
+local function layoutPreviewPlate(plate)
+    local width, height = NamePlateConstants and NamePlateConstants.NAMEPLATE_WIDTH or 230, 60
+    if NamePlateDriverFrame and NamePlateDriverFrame.GetNamePlateScale and GetCVarNumberOrDefault then
+        local ok, w, h = pcall(function()
+            local style = GetCVarNumberOrDefault(NamePlateConstants.STYLE_CVAR)
+            local scale = NamePlateDriverFrame:GetNamePlateScale(style)
+            return NamePlateDriverFrame:GetNamePlateWidth(style, scale), NamePlateDriverFrame:GetNamePlateHeight(style, scale)
+        end)
+        if ok and w and h then
+            width, height = w, h
+        end
+    end
+    plate:SetSize(width, height)
+
+    -- Sizes, textures and anchors for the style (ApplyFrameOptions re-anchors too). No unit is set,
+    -- so nothing reads unit data.
+    local unitFrame = plate.UnitFrame
+    pcall(unitFrame.ApplyFrameOptions, unitFrame, NamePlateSetupOptions, NamePlateEnemyFrameOptions)
+
+    -- Styles with a level slot in the health bar border (Classic) show the level there, as
+    -- CompactUnitFrame_UpdateLevel would for a mob of your own level.
+    local levelFrame = unitFrame.LevelFrame
+    if levelFrame then
+        if NamePlateEnemyFrameOptions.showLevel and levelFrame.LevelText then
+            local level = UnitLevel("player")
+            levelFrame.LevelText:SetText(level)
+            local color = GetRelativeDifficultyColor and GetRelativeDifficultyColor(level, level)
+            if color then
+                levelFrame.LevelText:SetVertexColor(color.r, color.g, color.b)
+            end
+            levelFrame.LevelText:Show()
+            if levelFrame.HighLevelTexture then
+                levelFrame.HighLevelTexture:Hide()
+            end
+            levelFrame:Show()
+        else
+            levelFrame:Hide()
+        end
     end
 end
 
@@ -371,26 +443,9 @@ local function createBlizzardPreviewPlate(parent)
     }
     plate:Init("NamePlateUnitFrameTemplate", driver)
 
-    local width, height = NamePlateConstants and NamePlateConstants.NAMEPLATE_WIDTH or 230, 60
-    if NamePlateDriverFrame and NamePlateDriverFrame.GetNamePlateScale and GetCVarNumberOrDefault then
-        local ok, w, h = pcall(function()
-            local style = GetCVarNumberOrDefault(NamePlateConstants.STYLE_CVAR)
-            local scale = NamePlateDriverFrame:GetNamePlateScale(style)
-            return NamePlateDriverFrame:GetNamePlateWidth(style, scale), NamePlateDriverFrame:GetNamePlateHeight(style, scale)
-        end)
-        if ok and w and h then
-            width, height = w, h
-        end
-    end
-    plate:SetSize(width, height)
-
     plate:AcquireUnitFrame()
     local unitFrame = plate.UnitFrame
     silenceFrameTree(plate)
-
-    -- Size and style the pieces like a live enemy plate. No unit is set, so nothing reads unit data.
-    pcall(unitFrame.ApplyFrameOptions, unitFrame, NamePlateSetupOptions, NamePlateEnemyFrameOptions)
-    pcall(unitFrame.UpdateAnchors, unitFrame)
 
     -- Fixed stand-in values (our own, never secret).
     local healthBar = unitFrame.HealthBarsContainer.healthBar
@@ -405,7 +460,7 @@ local function createBlizzardPreviewPlate(parent)
     -- normally hide the pieces that don't apply. Hide those a plain enemy plate wouldn't show.
     local hiddenKeys = {
         "AurasFrame", "CastBarsContainer", "RaidTargetFrame", "ClassificationFrame", "SoftTargetFrame",
-        "LevelFrame", "WidgetContainer", "behindCameraIcon", "selectionHighlight", "aggroHighlight", "aggroFlash",
+        "WidgetContainer", "behindCameraIcon", "selectionHighlight", "aggroHighlight", "aggroFlash",
     }
     for _, key in ipairs(hiddenKeys) do
         local region = unitFrame[key]
@@ -432,9 +487,24 @@ local function createBlizzardPreviewPlate(parent)
     -- The level badge, as Blizzard's preview shows it.
     local badge = unitFrame.PlayerLevelDiffFrame
     if badge and badge.playerLevelDiffText then
-        badge.playerLevelDiffText:SetText(UnitLevel("player"))
+        local level = UnitLevel("player")
+        -- Colored as for a mob of your own level, where the badge colors by difficulty (Forever).
+        local color = badge.GetDifficultyColor and badge:GetDifficultyColor(0)
+        badge.playerLevelDiffText:SetText(color and color:WrapTextInColorCode(level) or level)
+        badge.playerLevelDiffText:Show()
+        -- Forever's badge has a skull for unknown levels that starts visible; Blizzard
+        -- (CompactUnitFrame_UpdatePlayerLevelDiff) hides it whenever the level is known.
+        if badge.highLevelTexture then
+            badge.highLevelTexture:Hide()
+        end
+        -- Forever's badge decides for itself whether it shows, and the health bar is shortened to
+        -- make room for it. With no unit it would say no, so answer for it as a live mob's would.
+        if badge.ShouldDisplay then
+            badge.ShouldDisplay = function() return true end
+        end
         badge:Show()
     end
+    -- Sized and styled by layoutPreviewPlate, which the panel runs each time it opens.
     return plate
 end
 
@@ -585,7 +655,7 @@ local function fitContentHeight()
     end
 
     local bottom
-    for _, region in ipairs({ row.checkbox, row.dropdown, row.thickness, row.offset, row.previewButton }) do
+    for _, region in ipairs({ row.checkbox, row.dropdown, row.offset, row.previewButton }) do
         local regionBottom = region:GetBottom()
         if regionBottom and (not bottom or regionBottom < bottom) then
             bottom = regionBottom
@@ -596,12 +666,43 @@ local function fitContentHeight()
     end
 end
 
+-- Widens the content to the scroll frame (keeping the preview box in its top right corner) and
+-- stretches each row's two sliders so the row, with every control showing, reaches the right margin.
+local MIN_SLIDER_WIDTH = 90 -- arrows included
+
+local function fitRowWidths()
+    local width = scrollFrame:GetWidth()
+    local contentLeft = content:GetLeft()
+    if not width or width <= 0 or not contentLeft then
+        return
+    end
+    content:SetWidth(width)
+
+    for _, row in pairs(ui.highlightRows) do
+        local sliderLeft = row.offset:GetLeft()
+        if sliderLeft then
+            local available = width - CONTENT_RIGHT_MARGIN - (sliderLeft - contentLeft)
+            local sliderWidth = math.max(MIN_SLIDER_WIDTH, math.floor((available - SLIDER_GAP) / 2))
+            row.offset:SetWidth(sliderWidth)
+            row.thickness:SetWidth(sliderWidth)
+        end
+    end
+end
+
 panel:SetScript("OnShow", function()
     buildSettingsUI()
+    -- Pick up any change to the game's Nameplates Style or Size since the panel was last open.
+    if ui.preview.plate then
+        layoutPreviewPlate(ui.preview.plate)
+    end
     panel.refresh()
+    fitRowWidths()
     fitContentHeight()
     -- Anchors may not be resolved until the first frame after the panel is shown.
-    C_Timer.After(0, fitContentHeight)
+    C_Timer.After(0, function()
+        fitRowWidths()
+        fitContentHeight()
+    end)
 end)
 
 function panel.refresh()
