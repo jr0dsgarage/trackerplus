@@ -24,6 +24,60 @@ local ResolveTrackableItemData = addon.ResolveTrackableItemData
 
 local DEFAULT_BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
 
+-- Row backgrounds: the game's own card atlases, as the Social (friends list) rows use
+-- them (Blizzard_FriendsFrame FriendsListSocialCardMixin:GetBestBackgroundAtlas).
+-- Stretched to the row, so their native size is ignored.
+local ROW_BACKGROUND_DEFAULT = "friends-card-default"
+addon.RowBackgroundStyles = {
+    {text = "Friend Card", value = "friends-card-default"},
+}
+local IS_ROW_BACKGROUND = {}
+for _, style in ipairs(addon.RowBackgroundStyles) do IS_ROW_BACKGROUND[style.value] = true end
+
+-- Out to the quest-area highlight's box on the left so the POI button sits on the
+-- card, and a pixel past the row's top and bottom.
+local ROW_BG_LEFT = -8
+local ROW_BG_PAD = 1
+-- Room between the card's top edge and the row's title and POI button.
+local ROW_BG_TOP_INSET = 2
+
+-- Shared with the quest-area highlight's card styles, which overlay this background.
+function addon:AnchorRowCard(tex, button)
+    tex:SetPoint("TOPLEFT", button, "TOPLEFT", ROW_BG_LEFT, ROW_BG_PAD)
+    tex:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, -ROW_BG_PAD)
+end
+
+-- Rows in the Active Quest panel sit on its own backdrop, so they never get one.
+local function WantsRowBackground(self, db, parent)
+    return db.rowBackgroundEnabled and parent ~= self.activeQuestFrame
+end
+
+local function ApplyRowBackground(button, show, db)
+    local tex = button.rowBg
+    if not show then
+        if tex then tex:Hide() end
+        return
+    end
+    if not tex then
+        -- Below the row's own bg and the quest-area fill (BACKGROUND 0 and 1).
+        tex = button:CreateTexture(nil, "BACKGROUND", nil, -1)
+        addon:AnchorRowCard(tex, button)
+        button.rowBg = tex
+    end
+    local atlas = db.rowBackgroundStyle
+    if not IS_ROW_BACKGROUND[atlas] then atlas = ROW_BACKGROUND_DEFAULT end
+    if tex._atlas ~= atlas then
+        -- An atlas missing on this client would leave the texture blank; fall back.
+        if C_Texture and C_Texture.GetAtlasInfo and not C_Texture.GetAtlasInfo(atlas) then
+            atlas = ROW_BACKGROUND_DEFAULT
+        end
+        tex:SetAtlas(atlas, false)
+        tex._atlas = atlas
+    end
+    tex:SetAlpha(db.rowBackgroundAlpha or 1)
+    tex:Show()
+end
+
 local function OnRowClick(self, mouseButton)
     addon:OnTrackableClick(self.trackableData, mouseButton)
 end
@@ -140,6 +194,9 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", indent, -yOffset)
     button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -5, -yOffset)
 
+    local showRowBg = WantsRowBackground(self, db, parent)
+    local topInset = showRowBg and ROW_BG_TOP_INSET or 0
+
     -- POI Button (Using Blizzard Template for authenticity)
     if not button.poiButton then
         button.poiButton = CreateFrame("Button", nil, button, "POIButtonTemplate")
@@ -170,7 +227,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
              secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 25)
              secureBtn:SetFrameLevel(button:GetFrameLevel() + 10) -- Ensure on top of header/backdrop
         else
-             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, 0) -- Right aligned
+             secureBtn:SetPoint("TOPRIGHT", button, "TOPRIGHT", -2, -topInset) -- Right aligned
         end
 
         secureBtn:SetSize(btnSize, btnSize)
@@ -274,7 +331,7 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         -- (0.75-scaled) units, hence the division.
         local poiShift = ((db.fontSize or 12) - 12) / 2
         button.poiButton:ClearAllPoints()
-        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, -poiShift / 0.75)
+        button.poiButton:SetPoint("TOPLEFT", button, "TOPLEFT", -4, -(poiShift + topInset) / 0.75)
         
         button.poiButton.questID = item.id
         if button.poiButton.SetQuestID then
@@ -366,8 +423,8 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
 
     button.text:ClearAllPoints()
-    button.text:SetPoint("TOPLEFT", leftPadding, -2) 
-    button.text:SetPoint("TOPRIGHT", rightPadding, -2)
+    button.text:SetPoint("TOPLEFT", leftPadding, -2 - topInset)
+    button.text:SetPoint("TOPRIGHT", rightPadding, -2 - topInset)
 
     local titleText = item.title
     if db.showQuestLevel and item.level and item.level > 0 then
@@ -420,11 +477,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     -- laid out from a bad measurement stays wrong on screen until the quest's data
     -- next changes; the floor keeps that from being possible.
     local textHeight = max(button.text:GetStringHeight() or 0, db.fontSize + 2)
-    local height = max(db.fontSize + 4, textHeight + 4)
-    
+    local height = max(db.fontSize + 4, textHeight + 4) + topInset
+
     -- Objectives
     if not item.collapsed and item.objectives and #item.objectives > 0 then
-        local currentY = -(textHeight + 2)
+        local currentY = -(textHeight + 2 + topInset)
         local isAchievementObjective = (item.type == "achievement")
         
         for objIndex, obj in ipairs(item.objectives) do
@@ -667,8 +724,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     button:SetHeight(height)
     button.trackableData = item
 
+    ApplyRowBackground(button, showRowBg, db)
+
     -- Stripe beside quests the player is standing in; it spans the row's full height.
-    self:ApplyQuestAreaHighlight(button, isQuest and item.id or nil)
+    -- Not in the Active Quest panel, which has its own backdrop.
+    local highlightQuestID = isQuest and parent ~= self.activeQuestFrame and item.id or nil
+    self:ApplyQuestAreaHighlight(button, highlightQuestID)
 
     if button._scriptMode ~= "trackable" then
         button:SetScript("OnClick", OnRowClick)

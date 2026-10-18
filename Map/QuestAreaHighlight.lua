@@ -88,6 +88,31 @@ local function WashGradient(strongRight)
     end
 end
 
+-- The Social window's card atlases, laid exactly over the row background (see
+-- AnchorRowCard in RenderItem.lua). The Battle.net card keeps its own colors; the
+-- selected one is tinted, and drawn additively as Blizzard draws it (a highlight).
+local function Card(atlas, blendMode)
+    return function(button)
+        -- Above the row background (BACKGROUND -1), like the fills.
+        local tex = button:CreateTexture(nil, "BACKGROUND", nil, 1)
+        addon:AnchorRowCard(tex, button)
+        tex:SetAtlas(atlas, false)
+        tex:SetBlendMode(blendMode or "BLEND")
+        return {tex}
+    end
+end
+
+local function NoColor() end
+
+-- The selected card's art is yellow, and a vertex color multiplies it (blue on yellow
+-- comes out green), so it's taken to grey first and the color then shows as picked.
+local function TintColor(textures, r, g, b, a)
+    for _, tex in ipairs(textures) do
+        tex:SetDesaturated(true)
+        tex:SetVertexColor(r, g, b, a)
+    end
+end
+
 local STYLES = {
     stripe = {
         text = "Stripe (Left)",
@@ -154,6 +179,16 @@ local STYLES = {
         build = function(button) return {Fill(button)} end,
         color = WashGradient(true),
     },
+    cardBattleNet = {
+        text = "Friend Card (Battle.net)",
+        build = Card("friends-card-battleNet"),
+        color = NoColor,
+    },
+    cardSelected = {
+        text = "Friend Card (Selected)",
+        build = Card("friends-card-selected", "ADD"),
+        color = TintColor,
+    },
 }
 
 -- Dropdown order for Settings.lua.
@@ -161,8 +196,15 @@ addon.QuestAreaHighlightStyles = {}
 for _, key in ipairs({
     "stripe", "stripeRight", "bracket", "outline",
     "background", "gradient", "gradientRight",
+    "cardBattleNet", "cardSelected",
 }) do
     table.insert(addon.QuestAreaHighlightStyles, {text = STYLES[key].text, value = key})
+end
+
+-- Whether the Color setting does anything for a style (Settings greys it out if not).
+function addon:QuestAreaHighlightUsesColor(styleKey)
+    local style = STYLES[styleKey] or STYLES[DEFAULT_STYLE]
+    return style.color ~= NoColor
 end
 
 local function HideParts(textures)

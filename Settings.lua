@@ -57,6 +57,9 @@ local SETTING_EFFECTS = {
     headerIconStyle = Repaint,
     headerIconPosition = Repaint,
     headerBackgroundStyle = Repaint,
+    rowBackgroundEnabled = Repaint,
+    rowBackgroundStyle = Repaint,
+    rowBackgroundAlpha = Repaint,
 
     fadeWhenEmpty = Recollect,
     showQuestLevel = Recollect,
@@ -652,7 +655,7 @@ local function InitUI()
     overview:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, y)
     overview:SetPoint("RIGHT", panel, "RIGHT", -24, 0)
     overview:SetJustifyH("LEFT")
-    overview:SetText("More settings are on the pages under TrackerPlus in the list on the left: Tracking Panel, Map Pins, Nameplates, Appearance, Layout and Debug.")
+    overview:SetText("More settings are on the pages under TrackerPlus in the list on the left: Tracking Panel, Nameplates, Appearance, Layout, Map Pins and Debug.")
     y = y - 30
 
     local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -664,10 +667,10 @@ local function InitUI()
     ---------------------------------------------------------------------------
     -- Tracking Panel
     ---------------------------------------------------------------------------
-    local tracking = CreateSettingsPage("Tracking", "Tracking Panel", "What the tracker shows and how quests are colored, sorted and highlighted.")
+    local tracking = CreateSettingsPage("Tracking", "Tracking Panel", "What the tracker shows and how quests are colored and sorted.")
     y = -5
 
-    left, leftY = StartColumnSection(tracking, "Quest Display", y, 1)
+    left, leftY = StartSection(tracking, "Quest Display", y)
     leftY = CreateCheckbox(left, "Show Quest Level", "showQuestLevel", "Show each quest's level before its name, e.g. [28+] for a group quest.", leftY)
     leftY = CreateCheckbox(left, "Color by Difficulty", "colorQuestsByDifficulty", "Color quest names by how hard each quest is for you, matching the default quest log (grey, green, yellow, orange, red). Turn off to use the flat Quest Text color from Appearance instead.", leftY)
     leftY = CreateDropdown(left, "Sort Order", "sortMethod", {
@@ -676,16 +679,7 @@ local function InitUI()
         {text = "Proximity", value = "proximity"},
         {text = "Alphabetical", value = "alphabetical"}
     }, "Order entries within each zone. Difficulty compares each quest's level to yours: Easiest First puts trivial quests at the top, Hardest First puts them at the bottom. Proximity puts the closest objective first. Alphabetical sorts by name.", leftY)
-
-    local areaStyle, areaColor
-    s, sy = StartColumnSection(tracking, "Quest Area Highlight", y, 2)
-    sy = CreateCheckbox(s, "Highlight quests in your current area", "highlightQuestsInArea", "Highlight a quest's tracker row while you are inside the area the map shades for it.", sy)
-    sy, areaStyle = CreateDropdown(s, "Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable.", sy)
-    sy, areaColor = CreateColorPicker(s, "Color", "questAreaHighlightColor", function()
-        addon:RefreshQuestAreaHighlights(true)
-    end, sy, 250)
-    AddDependency(function(db) return db.highlightQuestsInArea end, areaStyle, areaColor)
-    y = y - EndColumnRow(left, leftY, s, sy)
+    y = y - EndSection(left, leftY)
 
     -- Two columns of checkboxes inside one full-width section.
     s, sy = StartSection(tracking, "Trackable Types", y)
@@ -807,10 +801,30 @@ local function InitUI()
         {text = "Tracker Background (Custom)", value = "tracker"}
     }, "Background behind section and zone headers.", leftY)
 
-    s, sy = StartColumnSection(appearance, "Progress Bars", y, 2)
+    local rowStyleDropdown, rowAlphaSlider
+    s, sy = StartColumnSection(appearance, "Row Styling", y, 2)
+    sy = CreateCheckbox(s, "Show Row Background", "rowBackgroundEnabled", "Draw a background behind each quest and trackable row (not those in the Active Quest panel).", sy)
+    sy, rowStyleDropdown = CreateDropdown(s, "Row Background", "rowBackgroundStyle", addon.RowBackgroundStyles, "The background drawn behind each row, from the game's own Social window cards.", sy)
+    sy, rowAlphaSlider = CreateSlider(s, "Opacity", "rowBackgroundAlpha", 0.05, 1, 0.05, "How solid the row background is.", sy)
+    AddDependency(function(db) return db.rowBackgroundEnabled end, rowStyleDropdown, rowAlphaSlider)
+
+    local areaStyle, areaColor
+    sy = CreateSubheader(s, "Quest Area Highlight", sy)
+    sy = CreateCheckbox(s, "Highlight quests in your current area", "highlightQuestsInArea", "Highlight a quest's tracker row while you are inside the area the map shades for it.", sy)
+    sy, areaStyle = CreateDropdown(s, "Style", "questAreaHighlightStyle", addon.QuestAreaHighlightStyles, "How a quest you're standing in is marked in the tracker. Background and Gradient styles use a faded version of the color below so the text stays readable. Friend Card styles lay a card over the row background: Battle.net in its own colors, Selected tinted the color below.", sy)
+    sy, areaColor = CreateColorPicker(s, "Color", "questAreaHighlightColor", function()
+        addon:RefreshQuestAreaHighlights(true)
+    end, sy, 250)
+    AddDependency(function(db) return db.highlightQuestsInArea end, areaStyle)
+    AddDependency(function(db)
+        return db.highlightQuestsInArea and addon:QuestAreaHighlightUsesColor(db.questAreaHighlightStyle)
+    end, areaColor)
+    y = y - EndColumnRow(left, leftY, s, sy)
+
+    s, sy = StartSection(appearance, "Progress Bars", y)
     sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides it).", sy)
     sy = CreateDropdown(s, "Texture", "barTexture", GetBarTextureOptions, "Texture used for progress bars. Lists the textures other addons registered with LibSharedMedia.", sy)
-    y = y - EndColumnRow(left, leftY, s, sy)
+    y = y - EndSection(s, sy)
     
     -- Fonts: one row per text type, font picker on the left and its size on the right
     s, sy = StartSection(appearance, "Fonts", y)
@@ -941,7 +955,7 @@ local function InitUI()
     debugPage:SetHeight(math.abs(y) + 20)
 
     -- The order pages appear under TrackerPlus in the Settings list, independent of build order.
-    local PAGE_ORDER = { Tracking = 1, MapPins = 2, Nameplates = 3, Appearance = 4, Layout = 5, Debug = 6 }
+    local PAGE_ORDER = { Tracking = 1, Nameplates = 2, Appearance = 3, Layout = 4, MapPins = 5, Debug = 6 }
     table.sort(orderedPages, function(a, b)
         return (PAGE_ORDER[a.id] or 99) < (PAGE_ORDER[b.id] or 99)
     end)

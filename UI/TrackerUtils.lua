@@ -276,6 +276,8 @@ function addon:GetOrCreateButton(parent)
     
     -- Reset parts other renderers add to pooled buttons
     if btn._ftaCounter then btn._ftaCounter:Hide() end
+    -- Only trackable rows draw a row background (RenderTrackableItem re-shows it).
+    if btn.rowBg then btn.rowBg:Hide() end
     -- The quest-area highlight belongs to whichever quest last used this button; the
     -- quest renderer re-applies it, every other renderer must not inherit it.
     if btn._areaLit or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end

@@ -72,7 +72,11 @@ local DEFAULTS = {
     headerIconStyle = "standard", -- "none", "standard", "square", "text_brackets", "questlog"
     headerIconPosition = "right", -- "left", "right"
     headerBackgroundStyle = "questlog", -- "none", "questlog", "tracker"
-    
+    -- Trackable row background (see Render/RenderItem.lua for the styles)
+    rowBackgroundEnabled = false,
+    rowBackgroundStyle = "friends-card-default",
+    rowBackgroundAlpha = 1,
+
     -- Font Settings (fontFace/fontSize are the quest name font)
     fontSize = 12,
     fontFace = "Fonts\\FRIZQT__.TTF",
