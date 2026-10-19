@@ -20,12 +20,8 @@ local NO_EDGE_ADJUST = { left = 0, top = 0, right = 0, bottom = 0 }
 -- Our "Blizzard" style, per-edge on top of DEFAULT_BORDER_SHRINK (positive = inward): the bottom
 -- edge is extended 1px so the bar's bottom edge isn't peeking out below it.
 local BLIZZARD_STYLE_EDGE_ADJUST = { left = 0, top = 0, right = 0, bottom = -1 }
--- "Fix Default border offset": per-edge inward nudges (tuned in-game) that make Blizzard's default
--- border atlas (UI-HUD-CoolDownManager-Selected-yellow) sit evenly around the health bar.
-local DEFAULT_BORDER_EDGE_ADJUST = { left = 2, top = 3, right = 1, bottom = 1 }
--- The same, tuned in-game for the level badge's own border. The badge only ever shows Blizzard's
--- default border (fixed or not), never our highlight styles.
-local LEVEL_BADGE_EDGE_ADJUST = { left = 1, top = 4, right = 1, bottom = 2 }
+-- "Fix Default border offset": Blizzard's border (health bar and level badge) with its top edge moved down 1px.
+local DEFAULT_BORDER_EDGE_ADJUST = { left = 0, top = 1, right = 0, bottom = 0 }
 local GLOW_SIZE = 16
 
 -- Every health bar we've hooked (bars live in Blizzard's unit frame pool, so this stays small).
@@ -142,17 +138,11 @@ end
 -- Renderers -----------------------------------------------------------------
 -- Each bar keeps its own persistent parts (created on first use) that are shown or hidden per update.
 
--- A host can carry several independent sets of parts (the health bar hosts its own and the badge's).
-local function getParts(host, key)
-    local sets = host.tpnp_highlight
-    if not sets then
-        sets = {}
-        host.tpnp_highlight = sets
-    end
-    local parts = sets[key]
+local function getParts(host)
+    local parts = host.tpnp_highlight
     if not parts then
         parts = {}
-        sets[key] = parts
+        host.tpnp_highlight = parts
     end
     return parts
 end
@@ -182,7 +172,7 @@ local function renderBlizzard(host, parts, style, r, g, b, a, geo)
         parts.blizzard = texture
     end
 
-    -- The redrawn default border passes Blizzard's own atlas; our styles use the plain tintable one.
+    -- "Rounded" and the redrawn default border pass their own atlas; the others use the plain tintable one.
     local atlas = style.atlas or geo.atlas or BLIZZARD_BORDER_ATLAS
     if texture.tpnp_atlas ~= atlas then
         texture:SetAtlas(atlas)
@@ -192,7 +182,7 @@ local function renderBlizzard(host, parts, style, r, g, b, a, geo)
     texture:SetDesaturated(style.desaturate == true)
 
     -- Anchor to Blizzard's own border so we inherit its exact geometry (it re-anchors on every resize).
-    -- The redrawn default border passes nativeInset = 0 to sit exactly on it.
+    -- "Rounded" and the redrawn default border pass nativeInset = 0 to sit exactly on it.
     local anchor, inset = geo.frame, FALLBACK_BLIZZARD_INSET
     -- Per-edge nudges toward the bar (positive = inward), applied on top of the offset.
     local adjust = NO_EDGE_ADJUST
@@ -316,8 +306,8 @@ end
 
 local NO_COLOR = {}
 
-local function renderSurface(host, key, style, geo)
-    local parts = getParts(host, key)
+local function renderSurface(host, style, geo)
+    local parts = getParts(host)
     hideParts(parts)
     if not style then
         return
@@ -330,7 +320,7 @@ end
 
 -- Draws `style` on any status bar (live nameplate or the settings preview); nil style hides it.
 function Nameplates:RenderBarHighlight(bar, style)
-    renderSurface(bar, "bar", style, barGeometry(bar))
+    renderSurface(bar, style, barGeometry(bar))
 end
 
 -- Nameplate bar state ---------------------------------------------------------
@@ -361,9 +351,9 @@ local function currentTargetStyle()
     return buildStyle("currentTarget")
 end
 
--- "Fix Default border offset": Blizzard's own border redrawn by us with its atlas's uneven padding
--- corrected (DEFAULT_BORDER_EDGE_ADJUST). The atlas and tint are copied per surface from that
--- surface's native border (see nativeCopyStyle), so only the geometry differs from Blizzard's.
+-- "Fix Default border offset": Blizzard's own border redrawn by us (DEFAULT_BORDER_EDGE_ADJUST). The
+-- atlas and tint are copied per surface from its native border (see nativeCopyStyle), so only the geometry
+-- differs from Blizzard's. Blizzard's textures are restricted, so we can't just move its own.
 local DEFAULT_BORDER_STYLE = {
     offset = 0,
     nativeInset = 0,
@@ -384,11 +374,11 @@ end
 
 -- "Rounded" style: Blizzard's current nameplate border atlas, whose corners match the nameplate's.
 -- An uncolored variant is used if the client has one; otherwise the pre-colored one is desaturated
--- so our color can tint it. Positioned with the tuned default-border geometry, then the style's Offset.
+-- so our color can tint it. Positioned with the tuned edge nudges below, then the style's Offset.
 local ROUNDED_NEUTRAL_ATLASES = { "UI-HUD-CoolDownManager-Selected", "UI-HUD-CoolDownManager-Selected-white" }
 local ROUNDED_FALLBACK_ATLAS = "UI-HUD-CoolDownManager-Selected-yellow"
--- DEFAULT_BORDER_EDGE_ADJUST with the top edge raised 1px (tuned in-game) so it meets the nameplate's top.
-local ROUNDED_EDGE_ADJUST = { left = 2, top = 2, right = 1, bottom = 1 }
+-- Per-edge inward nudges (tuned in-game) that sit the atlas evenly around the health bar.
+local ROUNDED_EDGE_ADJUST = { left = 1, top = 2, right = 1, bottom = 1 }
 local roundedNeutralAtlas
 
 local function findNeutralRoundedAtlas()
@@ -503,12 +493,9 @@ local function renderBadgeBorder(badge, active, selected)
     local badgeStyle
     if active and not hideBadge and Nameplates.db.fixDefaultBorderOffset and selected then
         badgeStyle = nativeCopyStyle(DEFAULT_BORDER_STYLE, native, badgeCopyStyle)
-        if badgeStyle then
-            badgeStyle.nativeEdgeAdjust = LEVEL_BADGE_EDGE_ADJUST
-        end
     end
 
-    renderSurface(badge, "badge", badgeStyle, badgeGeometry(badge))
+    renderSurface(badge, badgeStyle, badgeGeometry(badge))
     native:SetAlpha((hideBadge or badgeStyle ~= nil) and 0 or 1)
 end
 

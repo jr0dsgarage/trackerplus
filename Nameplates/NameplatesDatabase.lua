@@ -10,9 +10,9 @@ local DEFAULTS = {
     enabled = true,
     debugMode = false,
     hideLevelBadgeBorder = true,
-    -- Blizzard's target/focus border on nameplates this module isn't styling:
-    fixDefaultBorderOffset = false, -- redraw it evenly in Blizzard's color (our own styles are unaffected)
-    hideDefaultBorder = false,      -- hide the health bar's (the level badge still gets the offset fix)
+    -- Blizzard's target/focus health bar border on nameplates this module isn't styling:
+    fixDefaultBorderOffset = false, -- redraw it (and the level badge's) with its top edge 1px lower
+    hideDefaultBorder = false,      -- hide the health bar's
     currentTargetEnabled = true,
     currentTargetColor = { r = 0, g = 1, b = 0, a = 0.8 },
     currentTargetThickness = 2,

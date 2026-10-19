@@ -955,7 +955,7 @@ local function InitUI()
     debugPage:SetHeight(math.abs(y) + 20)
 
     -- The order pages appear under TrackerPlus in the Settings list, independent of build order.
-    local PAGE_ORDER = { Tracking = 1, Nameplates = 2, Appearance = 3, Layout = 4, MapPins = 5, Debug = 6 }
+    local PAGE_ORDER = { Tracking = 1, Appearance = 2, Layout = 3, Nameplates = 4, MapPins = 5, Debug = 6 }
     table.sort(orderedPages, function(a, b)
         return (PAGE_ORDER[a.id] or 99) < (PAGE_ORDER[b.id] or 99)
     end)

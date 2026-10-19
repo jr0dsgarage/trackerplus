@@ -612,7 +612,7 @@ local function buildSettingsUI()
     end
 
     ui.fixDefaultBorder = addOption("Fix Default border offset",
-        "Redraws Blizzard's own target/focus border (and the level badge's) so it sits evenly around the health bar, keeping Blizzard's color. Applies on nameplates that aren't already highlighted. Doesn't affect the highlight styles below; use their Offset sliders.",
+        "Moves the top of Blizzard's own target/focus border on the health bar and level badge down 1px, keeping Blizzard's color. Applies on nameplates that aren't already highlighted. Doesn't affect the highlight styles below; use their Offset sliders.",
         function(checked)
             Nameplates.db.fixDefaultBorderOffset = checked
         end)
@@ -624,7 +624,7 @@ local function buildSettingsUI()
         end)
 
     ui.hideLevelBadgeBorder = addOption("Disable Default Level Badge border",
-        "Hides Blizzard's target/focus border around the level badge. When unchecked, the level badge keeps Blizzard's border (redrawn by \"Fix Default border offset\" if that's on); the highlight styles below are never drawn on it.",
+        "Hides Blizzard's target/focus border around the level badge. When unchecked, the level badge keeps Blizzard's border (adjusted by \"Fix Default border offset\" if that's on); the highlight styles below are never drawn on it.",
         function(checked)
             Nameplates.db.hideLevelBadgeBorder = checked
         end)
