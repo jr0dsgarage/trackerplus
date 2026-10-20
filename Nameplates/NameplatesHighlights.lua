@@ -239,6 +239,8 @@ local function renderGlow(host, parts, style, r, g, b, a, geo)
         for index, piece in ipairs(GLOW_PIECES) do
             local texture = host:CreateTexture(nil, "OVERLAY", nil, 1)
             texture:SetAtlas(piece.atlas, index > 4)
+            -- The atlas is baked green; strip it so the vertex color tints a neutral glow.
+            texture:SetDesaturated(true)
             texture:SetBlendMode("ADD")
             texture:SetTexCoord(unpack(piece.texCoord))
             glow[index] = texture
