@@ -4,10 +4,7 @@ A replacement for World of Warcraft's objective tracker. Quests are colored by d
 
 Works on Retail and on WoW Forever. Features that Forever doesn't have (campaigns, world quests, achievements and so on) are switched off there and left out of the settings.
 
-<!-- SCREENSHOT: docs/screenshots/hero.png
-     The tracker in a busy zone: several zone headers, difficulty-colored quests, the Active Quest section and a quest-area marker.
 ![TrackerPlus in game](docs/screenshots/hero.png)
--->
 
 ## Contents
 
@@ -87,15 +84,9 @@ Each quest row has:
 
 An optional **row background** can be drawn behind each row (**Settings → Appearance → Row Styling**).
 
-<!-- SCREENSHOT: docs/screenshots/quest-row.png
-     Close-up of one or two quest rows: map pin button, level, objectives, a progress bar and a quest item button.
 ![Quest rows](docs/screenshots/quest-row.png)
--->
-
-<!-- SCREENSHOT: docs/screenshots/quest-tooltip.png
-     The hover tooltip on a quest row.
+![Quest icon](docs/screenshots/quest-icon.png)
 ![Quest tooltip](docs/screenshots/quest-tooltip.png)
--->
 
 ### Quest colors
 
