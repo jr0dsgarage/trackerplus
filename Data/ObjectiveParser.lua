@@ -1,10 +1,8 @@
 local addonName, addon = ...
-local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 
 -- Localize hot-path globals
-local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
-local format, match = string.format, string.match
-local max, floor = math.max, math.floor
+local tostring = tostring
+local format = string.format
 
 -------------------------------------------------------------------------------
 -- Objective parse cache
@@ -14,14 +12,35 @@ local objectiveParseCacheCount = 0
 
 local function GetObjectiveParseKey(item, obj, objIndex)
     -- Use only safe, immutable values (id, objIndex, numbers) to avoid tainting.
-    -- Never include obj.text or obj.quantityString as they come from protected frames.
-    return table.concat({
+    -- Never include the raw obj.text/obj.quantityString strings themselves as they
+    -- come from protected frames — but DO include their lengths. A quest advancing to a
+    -- new stage can reset an objective at the same index to the same numeric shape
+    -- (e.g. "0/1") with entirely different flavor text ("Talk to X" -> "Kill Y"); without
+    -- some signal of text identity in the key, the cache would keep serving the previous
+    -- stage's parsed text forever (see ParseObjectiveDisplay regression notes). String
+    -- length is a plain number, not the protected value itself, so it carries no taint.
+    return format("%s\31%s\31%s\31%s\31%s\31%d\31%d",
         tostring(item.id or 0),
         tostring(objIndex),
         tostring(obj.type or ""),
         tostring(obj.numFulfilled or 0),
         tostring(obj.numRequired or 0),
-    }, "\31")
+        obj.text and #obj.text or 0,
+        obj.quantityString and #obj.quantityString or 0)
+end
+
+-- "45%" in the quantity string, else in the text.
+local function MatchPercent(obj)
+    return (obj.quantityString or ""):match("(%d+)%%") or (obj.text or ""):match("(%d+)%%")
+end
+
+-- "3/10" in the quantity string, else in the text.
+local function MatchRatio(obj)
+    local fulfilled, required = (obj.quantityString or ""):match("(%d+)%s*/%s*(%d+)")
+    if not fulfilled then
+        fulfilled, required = (obj.text or ""):match("(%d+)%s*/%s*(%d+)")
+    end
+    return fulfilled, required
 end
 
 -------------------------------------------------------------------------------
@@ -52,63 +71,29 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
     if obj.type == "progressbar" then
         parsed.isProgressBar = true
 
-        -- Follow Blizzard's task progress source when available.
-        if C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo and item and item.id then
-            local taskProgress = C_TaskQuest.GetQuestProgressBarInfo(item.id)
-            if taskProgress ~= nil then
-                parsed.progressValue = tonumber(taskProgress) or 0
-                parsed.progressMax = 100
-            else
-                -- Fallback to explicit objective percentage if provided by Blizzard objective text.
-                local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
-                if not percentMatch then
-                    percentMatch = string.match(obj.text or "", "(%d+)%%")
-                end
-                if percentMatch then
-                    parsed.progressValue = tonumber(percentMatch) or 0
-                    parsed.progressMax = 100
-                elseif required and required > 0 then
-                    parsed.progressValue = fulfilled or 0
-                    parsed.progressMax = required
-                else
-                    local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
-                    if not ratioFulfilled then
-                        ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
-                    end
-                    if ratioFulfilled and ratioRequired then
-                        parsed.progressValue = tonumber(ratioFulfilled) or 0
-                        parsed.progressMax = tonumber(ratioRequired) or 100
-                    else
-                        parsed.progressValue = fulfilled or 0
-                        parsed.progressMax = 100
-                    end
-                end
-            end
+        -- Follow Blizzard's task progress source when available. When the task API
+        -- exists but has nothing for this quest, a percentage in the text outranks
+        -- numFulfilled/numRequired; without the API, the counts come first.
+        local hasTaskAPI = C_TaskQuest and C_TaskQuest.GetQuestProgressBarInfo and item and item.id
+        local taskProgress = hasTaskAPI and C_TaskQuest.GetQuestProgressBarInfo(item.id)
+        local percentMatch = MatchPercent(obj)
+
+        if hasTaskAPI and taskProgress ~= nil then
+            parsed.progressValue = tonumber(taskProgress) or 0
+        elseif hasTaskAPI and percentMatch then
+            parsed.progressValue = tonumber(percentMatch) or 0
         elseif required and required > 0 then
             parsed.progressValue = fulfilled or 0
             parsed.progressMax = required
+        elseif percentMatch then
+            parsed.progressValue = tonumber(percentMatch) or 0
         else
-            local percentMatch = string.match(obj.quantityString or "", "(%d+)%%")
-            if not percentMatch then
-                percentMatch = string.match(obj.text or "", "(%d+)%%")
-            end
-
-            if percentMatch then
-                parsed.progressValue = tonumber(percentMatch) or 0
-                parsed.progressMax = 100
+            local ratioFulfilled, ratioRequired = MatchRatio(obj)
+            if ratioFulfilled and ratioRequired then
+                parsed.progressValue = tonumber(ratioFulfilled) or 0
+                parsed.progressMax = tonumber(ratioRequired) or 100
             else
-                local ratioFulfilled, ratioRequired = string.match(obj.quantityString or "", "(%d+)%s*/%s*(%d+)")
-                if not ratioFulfilled then
-                    ratioFulfilled, ratioRequired = string.match(obj.text or "", "(%d+)%s*/%s*(%d+)")
-                end
-
-                if ratioFulfilled and ratioRequired then
-                    parsed.progressValue = tonumber(ratioFulfilled) or 0
-                    parsed.progressMax = tonumber(ratioRequired) or 100
-                else
-                    parsed.progressValue = fulfilled or 0
-                    parsed.progressMax = 100
-                end
+                parsed.progressValue = fulfilled or 0
             end
         end
 
@@ -119,7 +104,7 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
         -- Follow Blizzard completion state for visibility, not just computed percentage.
         -- If Blizzard marks objective or quest complete, hide the progress bar row.
         local objectiveFinished = (obj.finished == true)
-        local questFinished = (item and (item.isComplete == true or item.isFinished == true))
+        local questFinished = (item and item.isComplete == true)
         if objectiveFinished or questFinished then
             parsed.isProgressBar = false
         end
@@ -133,7 +118,7 @@ function addon.ParseObjectiveDisplay(item, obj, objIndex)
         if cleanText == "" and obj.text then
             cleanText = obj.text:gsub("%s*%(%d+%%%)", "")
         end
-        parsed.bodyText = (cleanText or "Progress")
+        parsed.bodyText = cleanText
     elseif obj.quantityString and obj.quantityString ~= "" then
         -- Only show a numeric prefix if the quantity string actually contains a number.
         -- Some objectives have a quantityString like "Defeated" which shouldn't become a prefix.
@@ -192,7 +177,7 @@ function addon.ResolveTrackableItemData(item)
     -- Always re-resolve logIndex from questID to guard against stale indices
     -- caused by quest log reordering (quest accept/abandon/complete since last collect).
     local logIndex = item.logIndex
-    if item.id and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+    if item.id then
         local freshIndex = C_QuestLog.GetLogIndexForQuestID(item.id)
         if freshIndex and freshIndex > 0 then
             logIndex = freshIndex

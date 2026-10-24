@@ -1,10 +1,11 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, pairs = ipairs, pairs
+local ipairs, pairs, select, tostring = ipairs, pairs, select, tostring
 local max = math.max
 local GetTime = GetTime
 local hooksecurefunc = hooksecurefunc
+local InCombatLockdown = InCombatLockdown
 
 local COMPLETED_QUEST_POPUP_X = -20
 
@@ -23,6 +24,15 @@ local function NormalizeCompletedQuestPopupAnchor(owner, popup)
         return
     end
 
+    -- This runs both from the direct borrow path and reactively from the
+    -- hooksecurefunc guards below (i.e. whenever Blizzard's own code calls
+    -- SetPoint/ClearAllPoints on the popup, which can happen mid-combat).
+    -- SetParent/ClearAllPoints/SetPoint on a Blizzard-owned frame must stay
+    -- out-of-combat only, matching the pattern used in RenderScenario.lua.
+    if InCombatLockdown() then
+        return
+    end
+
     local targetX = tonumber(popup._trackerPlusLockedAnchorX or COMPLETED_QUEST_POPUP_X) or COMPLETED_QUEST_POPUP_X
     local targetY = tonumber(popup._trackerPlusLockedAnchorY or 0) or 0
 
@@ -31,7 +41,7 @@ local function NormalizeCompletedQuestPopupAnchor(owner, popup)
     end
 
     local point, relativeTo, relativePoint, xOfs, yOfs = popup:GetPoint(1)
-    local numPoints = popup.GetNumPoints and popup:GetNumPoints() or 0
+    local numPoints = popup:GetNumPoints()
     local isDirty =
         numPoints ~= 1
         or point ~= "TOPRIGHT"
@@ -47,23 +57,12 @@ local function NormalizeCompletedQuestPopupAnchor(owner, popup)
     popup:ClearAllPoints()
     popup:SetPoint("TOPRIGHT", completedQuestFrame, "TOPRIGHT", targetX, targetY)
 
-    if addon.LogAt then
-        addon:LogAt("trace", "[CQ-ANCHOR-FIX] normalize popup=%s points=%d p=%s rp=%s x=%.1f y=%.1f targetX=%.1f targetY=%.1f",
-            tostring(popup.GetName and popup:GetName() or "<unnamed>"),
-            tonumber(numPoints or 0),
-            tostring(point),
-            tostring(relativePoint),
-            tonumber(xOfs or 0),
-            tonumber(yOfs or 0),
-            tonumber(targetX or 0),
-            tonumber(targetY or 0))
-    end
+    addon:LogAt("trace", "[CQ-ANCHOR-FIX] normalize popup=%s points=%d p=%s rp=%s x=%.1f y=%.1f targetX=%.1f targetY=%.1f",
+        popup:GetName() or "<unnamed>", numPoints, tostring(point), tostring(relativePoint),
+        tonumber(xOfs or 0), tonumber(yOfs or 0), targetX, targetY)
 end
 
 local function InstallCompletedQuestPopupAnchorGuards(owner, popup)
-    if not (owner and popup and hooksecurefunc) then
-        return
-    end
     if popup._trackerPlusAnchorGuardsInstalled then
         return
     end
@@ -79,19 +78,12 @@ local function InstallCompletedQuestPopupAnchorGuards(owner, popup)
         end
 
         frame._trackerPlusGuardApplying = true
-        pcall(function()
-            NormalizeCompletedQuestPopupAnchor(owner, frame)
-        end)
+        pcall(NormalizeCompletedQuestPopupAnchor, owner, frame)
         frame._trackerPlusGuardApplying = nil
     end
 
-    hooksecurefunc(popup, "SetPoint", function(frame)
-        normalizeFromGuard(frame)
-    end)
-
-    hooksecurefunc(popup, "ClearAllPoints", function(frame)
-        normalizeFromGuard(frame)
-    end)
+    hooksecurefunc(popup, "SetPoint", normalizeFromGuard)
+    hooksecurefunc(popup, "ClearAllPoints", normalizeFromGuard)
 end
 
 local function IsLikelyAutoQuestPopupFrame(frame)
@@ -109,18 +101,21 @@ local function IsLikelyAutoQuestPopupFrame(frame)
         or contents.QuestIconBadgeBorder ~= nil
 end
 
-local function CountVisibleChildren(frame)
-    if not (frame and frame.GetChildren) then
-        return 0
-    end
-
+local function CountShown(...)
     local count = 0
-    for _, child in ipairs({ frame:GetChildren() }) do
-        if child and child.IsShown and child:IsShown() then
+    for i = 1, select("#", ...) do
+        if select(i, ...):IsShown() then
             count = count + 1
         end
     end
     return count
+end
+
+local function CountVisibleChildren(frame)
+    if not frame then
+        return 0
+    end
+    return CountShown(frame:GetChildren())
 end
 
 local function IsLiveAutoQuestPopupFrame(frame)
@@ -129,46 +124,41 @@ local function IsLiveAutoQuestPopupFrame(frame)
     end
 
     local contents = frame.Contents
-    local frameShown = frame.IsShown and frame:IsShown() or false
-    local contentsShown = contents and contents.IsShown and contents:IsShown() or false
-    local visibleChildren = CountVisibleChildren(contents)
-    local frameHeight = frame.GetHeight and (frame:GetHeight() or 0) or 0
-    local contentsHeight = contents and contents.GetHeight and (contents:GetHeight() or 0) or 0
-
-    return (frameShown or contentsShown or visibleChildren > 0)
-        and (frameHeight > 1 or contentsHeight > 1)
+    return (frame:IsShown() or contents:IsShown() or CountVisibleChildren(contents) > 0)
+        and ((frame:GetHeight() or 0) > 1 or (contents:GetHeight() or 0) > 1)
 end
 
-local function CollectAnonymousAutoQuestPopups(found, seen)
-    local questTracker = _G and _G["QuestObjectiveTracker"]
+local function CollectAnonymousAutoQuestPopups(found, seen, trace)
+    local questTracker = QuestObjectiveTracker
     local contentsFrame = questTracker and questTracker.ContentsFrame
-    if not (contentsFrame and contentsFrame.GetChildren) then
+    if not contentsFrame then
         return
     end
 
     local children = { contentsFrame:GetChildren() }
-    if addon.LogAt then
+    if trace then
         addon:LogAt("trace", "[AQ-BORROW-SCAN] contentsFrame has %d children", #children)
     end
 
     for _, child in ipairs(children) do
-        local childName = child.GetName and child:GetName() or "<unnamed>"
-        local isShown = child.IsShown and child:IsShown() or false
-        local hasContents = child.Contents ~= nil
-
-        if child and not seen[child] and IsLiveAutoQuestPopupFrame(child) then
-            if addon.LogAt then
-                addon:LogAt("trace", "[AQ-BORROW-SCAN] MATCHED child=%s shown=%s contents=%s", childName, tostring(isShown), tostring(hasContents))
+        if not seen[child] then
+            local matched = IsLiveAutoQuestPopupFrame(child)
+            if matched then
+                seen[child] = true
+                found[#found + 1] = child
             end
-            seen[child] = true
-            found[#found + 1] = child
-        elseif child and not seen[child] and addon.LogAt then
-            addon:LogAt("trace", "[AQ-BORROW-SCAN] child=%s shown=%s hasContents=%s likelyPopup=%s", childName, tostring(isShown), tostring(hasContents), tostring(IsLikelyAutoQuestPopupFrame(child)))
+            if trace then
+                addon:LogAt("trace", "[AQ-BORROW-SCAN] %s child=%s shown=%s hasContents=%s likelyPopup=%s",
+                    matched and "MATCHED" or "skipped", child:GetName() or "<unnamed>", tostring(child:IsShown()),
+                    tostring(child.Contents ~= nil), tostring(IsLikelyAutoQuestPopupFrame(child)))
+            end
         end
     end
 end
 
-local function FindAllAutoQuestPopupFrames(scanCount)
+-- Popups found by global name plus anonymous ones under the quest tracker; also
+-- returns the set of what was found, for de-duplication.
+local function FindAllAutoQuestPopupFrames(scanCount, trace)
     local found = {}
     local seen = {}
 
@@ -180,31 +170,20 @@ local function FindAllAutoQuestPopupFrames(scanCount)
         end
     end
 
-    CollectAnonymousAutoQuestPopups(found, seen)
-    return found
+    CollectAnonymousAutoQuestPopups(found, seen, trace)
+    return found, seen
 end
 
 local function IsRenderableBorrowedAutoQuestPopup(popup)
-    if not (popup and IsLikelyAutoQuestPopupFrame(popup)) then
+    if not IsLikelyAutoQuestPopupFrame(popup) then
         return false
     end
 
     local contents = popup.Contents
-    if not contents then
-        return false
-    end
-
-    local popupShown = popup.IsShown and popup:IsShown() or false
-    local contentsShown = contents.IsShown and contents:IsShown() or false
-    local popupHeight = popup.GetHeight and (popup:GetHeight() or 0) or 0
-    local contentsHeight = contents.GetHeight and (contents:GetHeight() or 0) or 0
-    local contentsAlpha = contents.GetAlpha and (contents:GetAlpha() or 0) or 0
-    local visibleChildren = CountVisibleChildren(contents)
-
-    return popupHeight > 1
-        and contentsHeight > 1
-        and contentsAlpha > 0
-        and (popupShown or contentsShown or visibleChildren > 0)
+    return (popup:GetHeight() or 0) > 1
+        and (contents:GetHeight() or 0) > 1
+        and (contents:GetAlpha() or 0) > 0
+        and (popup:IsShown() or contents:IsShown() or CountVisibleChildren(contents) > 0)
 end
 
 local function IsRecentlySeenPopup(popup, now)
@@ -212,87 +191,67 @@ local function IsRecentlySeenPopup(popup, now)
     return lastSeen and now and (now - lastSeen) <= 3.0 or false
 end
 
-local function EnsureAutoQuestPopupVisible(popup)
-    local function ensureFrame(frame, forceIgnoreParentAlpha)
-        if not frame then
-            return
-        end
-        if frame.Show then
-            frame:Show()
-        end
-        if frame.SetAlpha then
-            frame:SetAlpha(1)
-        end
-        if forceIgnoreParentAlpha and frame.SetIgnoreParentAlpha then
-            frame:SetIgnoreParentAlpha(true)
-        end
+local function EnsureFrameVisible(frame, ignoreParentAlpha)
+    frame:Show()
+    frame:SetAlpha(1)
+    if ignoreParentAlpha and frame.SetIgnoreParentAlpha then
+        frame:SetIgnoreParentAlpha(true)
     end
+end
 
-    ensureFrame(popup, true)
-
-    local contents = popup and popup.Contents
-    ensureFrame(contents, true)
-
-    if contents and contents.GetChildren then
-        for _, child in ipairs({ contents:GetChildren() }) do
-            ensureFrame(child, false)
-        end
-    end
-
-    if popup and popup.GetChildren then
-        for _, child in ipairs({ popup:GetChildren() }) do
-            if child ~= contents then
-                ensureFrame(child, false)
-            end
+-- Shows each of the given frames at full alpha, skipping `except`.
+local function EnsureChildrenVisible(except, ...)
+    for i = 1, select("#", ...) do
+        local child = select(i, ...)
+        if child ~= except then
+            EnsureFrameVisible(child, false)
         end
     end
 end
 
-local function CollectPersistedBorrowedPopups(owner, found, seen, allowRecent)
-    local borrowed = owner and owner._borrowedAutoQuestPopups
+local function EnsureAutoQuestPopupVisible(popup)
+    EnsureFrameVisible(popup, true)
+
+    local contents = popup.Contents
+    EnsureFrameVisible(contents, true)
+    EnsureChildrenVisible(nil, contents:GetChildren())
+    EnsureChildrenVisible(contents, popup:GetChildren())
+end
+
+local function CollectPersistedBorrowedPopups(owner, found, seen, allowRecent, trace)
+    local borrowed = owner._borrowedAutoQuestPopups
     if not borrowed then
         return
     end
 
-    local now = GetTime and GetTime() or 0
-    for popup, _ in pairs(borrowed) do
+    local now = GetTime()
+    for popup in pairs(borrowed) do
         local renderable = IsRenderableBorrowedAutoQuestPopup(popup)
         local recent = allowRecent and IsRecentlySeenPopup(popup, now) or false
 
-        if popup
-            and not seen[popup]
+        if not seen[popup]
             and popup:GetParent() == owner.completedQuestFrame
             and (renderable or recent)
         then
             seen[popup] = true
             found[#found + 1] = popup
-            if addon.LogAt then
-                local popupName = popup.GetName and popup:GetName() or "<unnamed>"
-                addon:LogAt("trace", "[AQ-BORROW-PERSIST] keeping borrowed popup=%s parent=%s renderable=%s recent=%s", popupName, tostring(popup:GetParent()), tostring(renderable), tostring(recent))
+            if trace then
+                addon:LogAt("trace", "[AQ-BORROW-PERSIST] keeping borrowed popup=%s parent=%s renderable=%s recent=%s",
+                    popup:GetName() or "<unnamed>", tostring(popup:GetParent()), tostring(renderable), tostring(recent))
             end
         end
     end
 end
 
-local function FindCandidateAutoQuestPopups(owner, scanCount, allowRecent)
-    local found = FindAllAutoQuestPopupFrames(scanCount)
-    local seen = {}
-
-    for _, popup in ipairs(found) do
-        seen[popup] = true
-    end
-
-    CollectPersistedBorrowedPopups(owner, found, seen, allowRecent)
+local function FindCandidateAutoQuestPopups(owner, scanCount, allowRecent, trace)
+    local found, seen = FindAllAutoQuestPopupFrames(scanCount, trace)
+    CollectPersistedBorrowedPopups(owner, found, seen, allowRecent, trace)
     return found
 end
 
 FindAutoQuestPopupFrame = function(index)
-    if not index then
-        return nil
-    end
-
     for _, prefix in ipairs(AUTO_QUEST_POPUP_PREFIXES) do
-        local popup = _G and _G[prefix .. tostring(index)]
+        local popup = _G[prefix .. index]
         if popup and IsLiveAutoQuestPopupFrame(popup) then
             return popup
         end
@@ -302,10 +261,17 @@ FindAutoQuestPopupFrame = function(index)
 end
 
 local function RestoreStaleBorrowedPopups(owner, keep)
-    owner._borrowedAutoQuestPopups = owner._borrowedAutoQuestPopups or {}
-    for popup, _ in pairs(owner._borrowedAutoQuestPopups) do
+    local borrowed = owner._borrowedAutoQuestPopups
+    if not borrowed then
+        return
+    end
+    for popup in pairs(borrowed) do
         if not keep or not keep[popup] then
-            if popup._trackerPlusOriginalParent and not (popup.IsProtected and popup:IsProtected()) then
+            local restored = false
+
+            if popup._trackerPlusOriginalParent
+                and not (popup.IsProtected and popup:IsProtected())
+                and not InCombatLockdown() then
                 popup._trackerPlusAnchorLockEnabled = nil
                 popup._trackerPlusLockedAnchorX = nil
                 popup._trackerPlusLockedAnchorY = nil
@@ -334,40 +300,44 @@ local function RestoreStaleBorrowedPopups(owner, keep)
                 popup._trackerPlusOriginalParent = nil
                 popup._trackerPlusOriginalPoints = nil
                 popup._trackerPlusLastAutoQuestSeenAt = nil
+                restored = true
             end
-            owner._borrowedAutoQuestPopups[popup] = nil
-        end
-    end
 
-    if owner._stolenPopups then
-        wipe(owner._stolenPopups)
-        owner._stolenPopups = nil
+            -- Only stop tracking this popup once it has actually been handed back (or
+            -- there was never anything to hand back). A popup that is currently
+            -- protected or that we're in combat right now can't be restored yet; keep
+            -- it tracked so a later call retries, instead of silently forgetting it
+            -- while it's still reparented under completedQuestFrame with alpha/anchor
+            -- overrides in effect and no way to ever clean it up again.
+            if restored or not popup._trackerPlusOriginalParent then
+                borrowed[popup] = nil
+            end
+        end
     end
 end
 
-local function HideLegacyCompletedQuestChildren(frame, keep)
-    if not (frame and frame.GetChildren) then
-        return
-    end
-
-    for _, child in ipairs({ frame:GetChildren() }) do
-        if child and (not keep or not keep[child]) and not (child.IsProtected and child:IsProtected()) then
-            pcall(function()
-                child:Hide()
-            end)
+-- Hides each of the given frames that isn't in `keep` (or protected).
+local function HideChildrenExcept(keep, ...)
+    for i = 1, select("#", ...) do
+        local child = select(i, ...)
+        if not (keep and keep[child]) and not child:IsProtected() then
+            pcall(child.Hide, child)
         end
+    end
+end
+
+-- Hides anything left parented to the completed-quest frame other than `keep`.
+-- Runs on every render, so the usual empty case does no work at all.
+local function HideLegacyCompletedQuestChildren(frame, keep)
+    if frame:GetNumChildren() > 0 then
+        HideChildrenExcept(keep, frame:GetChildren())
     end
 end
 
 local function EnsureCompletedQuestFrameAnchor(owner)
     -- Position is managed by UpdateLayoutAnchors (completedQuestFrame is in the topSections chain).
     -- This function only ensures the frame level is elevated so popups render above sibling sections.
-    local completedQuestFrame = owner and owner.completedQuestFrame
-    local scenarioFrame = owner and owner.scenarioFrame
-    if not (completedQuestFrame and scenarioFrame) then
-        return
-    end
-    completedQuestFrame:SetFrameLevel((scenarioFrame:GetFrameLevel() or 0) + 2)
+    owner.completedQuestFrame:SetFrameLevel(owner.scenarioFrame:GetFrameLevel() + 2)
 end
 
 -------------------------------------------------------------------------------
@@ -392,27 +362,26 @@ function addon:RenderAutoQuestSection(autoQuests)
     -- If no auto quests are currently tracked, do not keep any persisted borrowed
     -- completion popup alive. This prevents stale frames from lingering after quest
     -- completion when Blizzard leaves a visible shell frame behind.
-    if not autoQuests or #autoQuests == 0 then
+    if #autoQuests == 0 then
         RestoreStaleBorrowedPopups(self, nil)
         HideLegacyCompletedQuestChildren(completedQuestFrame, nil)
         self._autoQuestBorrowSessionUntil = nil
         completedQuestFrame:SetHeight(1)
         completedQuestFrame:Hide()
-        if addon.LogAt then
-            addon:LogAt("trace", "[AQ-PATH] no tracked autoQuests, force hiding completedQuestFrame")
-        end
+        self:LogAt("trace", "[AQ-PATH] no tracked autoQuests, force hiding completedQuestFrame")
         return
     end
 
+    local trace = self:ShouldLog("trace")
     local activeBorrowed = {}
     local borrowedCount = 0
     local yOff = 0
-    local now = GetTime and GetTime() or 0
+    local now = GetTime()
     EnsureCompletedQuestFrameAnchor(self)
 
     local scanCount = max(#autoQuests, 12)
     local allowRecent = now <= (self._autoQuestBorrowSessionUntil or 0)
-    local popups = FindCandidateAutoQuestPopups(self, scanCount, allowRecent)
+    local popups = FindCandidateAutoQuestPopups(self, scanCount, allowRecent, trace)
 
     if #popups > 0 then
         -- Keep a short session window so a single missed scan frame does not
@@ -422,7 +391,7 @@ function addon:RenderAutoQuestSection(autoQuests)
     end
 
     for _, popup in ipairs(popups) do
-        if popup and not (popup.IsProtected and popup:IsProtected()) then
+        if not popup:IsProtected() then
             -- Only refresh grace timers for popups that currently have real content.
             -- If we refresh for non-renderable (empty/hidden) popups the session window
             -- and "recently seen" timers perpetually self-extend, keeping the frame alive
@@ -435,8 +404,7 @@ function addon:RenderAutoQuestSection(autoQuests)
                 popup._trackerPlusOriginalParent = popup:GetParent()
 
                 local points = {}
-                local numPoints = popup.GetNumPoints and popup:GetNumPoints() or 0
-                for i = 1, numPoints do
+                for i = 1, popup:GetNumPoints() do
                     local point, relativeTo, relativePoint, xOfs, yOfs = popup:GetPoint(i)
                     points[#points + 1] = {
                         point = point,
@@ -449,7 +417,7 @@ function addon:RenderAutoQuestSection(autoQuests)
                 popup._trackerPlusOriginalPoints = points
             end
 
-            if popup:GetParent() ~= completedQuestFrame then
+            if not InCombatLockdown() and popup:GetParent() ~= completedQuestFrame then
                 popup:SetParent(completedQuestFrame)
             end
 
@@ -490,44 +458,33 @@ function addon:RenderAutoQuestSection(autoQuests)
     RestoreStaleBorrowedPopups(self, activeBorrowed)
     HideLegacyCompletedQuestChildren(completedQuestFrame, activeBorrowed)
 
-    if addon.LogAt then
-        addon:LogAt("trace", "[AQ-BORROW] candidates=%d borrowed=%d autoQuests=%d borrowedCount=%d yOff=%d", tonumber(#popups or 0), tonumber(borrowedCount or 0), tonumber(#autoQuests or 0), tonumber(borrowedCount or 0), tonumber(yOff or 0))
+    if trace then
+        self:LogAt("trace", "[AQ-BORROW] candidates=%d autoQuests=%d borrowedCount=%d yOff=%d", #popups, #autoQuests, borrowedCount, yOff)
 
-        if borrowedCount > 0 then
-            for popup, _ in pairs(activeBorrowed) do
-                local popupName = popup.GetName and popup:GetName() or "<unnamed>"
-                local popupParent = popup:GetParent()
-                local parentName = popupParent and (popupParent.GetName and popupParent:GetName() or "parent?") or "nil"
-                local popupAlpha = popup:GetAlpha()
-                local popupShown = popup:IsShown()
-                local popupHeight = popup:GetHeight()
-                local contents = popup.Contents
-                local contentsShown = contents and contents.IsShown and contents:IsShown() or false
-                local contentsAlpha = contents and contents.GetAlpha and (contents:GetAlpha() or 0) or 0
-                local visibleChildren = CountVisibleChildren(contents)
-
-                addon:LogAt("trace", "[AQ-STATE] popup=%s parent=%s alpha=%.2f shown=%s height=%.1f cShown=%s cAlpha=%.2f cKids=%d", popupName, parentName, popupAlpha, tostring(popupShown), popupHeight, tostring(contentsShown), contentsAlpha, visibleChildren)
-            end
+        for popup in pairs(activeBorrowed) do
+            local popupParent = popup:GetParent()
+            local contents = popup.Contents
+            self:LogAt("trace", "[AQ-STATE] popup=%s parent=%s alpha=%.2f shown=%s height=%.1f cShown=%s cAlpha=%.2f cKids=%d",
+                popup:GetName() or "<unnamed>",
+                popupParent and (popupParent:GetName() or "parent?") or "nil",
+                popup:GetAlpha(), tostring(popup:IsShown()), popup:GetHeight(),
+                tostring(contents:IsShown()), contents:GetAlpha() or 0, CountVisibleChildren(contents))
         end
     end
 
     if borrowedCount > 0 then
         local targetHeight = max(1, yOff + 2)
         EnsureCompletedQuestFrameAnchor(self)
-        if addon.LogAt then
-            addon:LogAt("trace", "[AQ-PATH] taking borrowed path, setting completedQuestFrame height to %d", tonumber(targetHeight or 0))
-        end
         completedQuestFrame:SetHeight(targetHeight)
-        if addon.LogAt then
-            addon:LogAt("trace", "[AQ-POST-SET] height after SetHeight: target=%d actual=%.1f shown=%s", tonumber(targetHeight or 0), completedQuestFrame:GetHeight() or 0, tostring(completedQuestFrame:IsShown()))
+        if trace then
+            self:LogAt("trace", "[AQ-PATH] borrowed path: completedQuestFrame height target=%d actual=%.1f shown=%s",
+                targetHeight, completedQuestFrame:GetHeight() or 0, tostring(completedQuestFrame:IsShown()))
         end
         completedQuestFrame:Show()
         return
     end
 
-    if addon.LogAt then
-        addon:LogAt("trace", "[AQ-PATH] no borrowed frames, hiding completedQuestFrame")
-    end
+    self:LogAt("trace", "[AQ-PATH] no borrowed frames, hiding completedQuestFrame")
     self._autoQuestBorrowSessionUntil = nil
     completedQuestFrame:SetHeight(1)
     completedQuestFrame:Hide()

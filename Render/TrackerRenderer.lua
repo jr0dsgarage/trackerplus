@@ -1,14 +1,24 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, tostring, tonumber = ipairs, tostring, tonumber
+local ipairs, type, tostring, tonumber = ipairs, type, tostring, tonumber
+local wipe = wipe
 local format = string.format
 local max = math.max
+local GetTime = GetTime
 local C_SuperTrack = C_SuperTrack
 
--- Local aliases for addon utilities (available after RendererUtils.lua loads)
-local ClearArray = function(t) return addon.ClearArray(t) end
-local DebugLayout = function(...) return addon.DebugLayout(...) end
+local DebugLayout = addon.DebugLayout
+
+-- Per-pass categorisation buckets, reused across renders.
+local scenarios           = {}
+local autoQuests          = {}
+local superTrackedItems   = {}
+local campaignItems       = {}
+local bonusObjectives     = {}
+local worldQuestItems     = {}
+local remainingTrackables = {}
+local questItemDataByID   = {} -- keyed by quest ID
 
 -------------------------------------------------------------------------------
 -- UpdateTrackerDisplay — Main orchestrator
@@ -29,36 +39,20 @@ function addon:UpdateTrackerDisplay(trackables)
 
     local db = self.db
     local incomingCount = #trackables
+    -- Diagnostics below only build their arguments when they will be logged.
+    local layoutTrace = db.layoutDebug and self:ShouldLog("trace")
 
     --------------------------------------------------------------------------
-    -- Categorise trackables into temporary arrays
+    -- Categorise trackables
     --------------------------------------------------------------------------
-    self._tmpScenarios            = self._tmpScenarios            or {}
-    self._tmpAutoQuests           = self._tmpAutoQuests           or {}
-    self._tmpSuperTrackedItems    = self._tmpSuperTrackedItems    or {}
-    self._tmpCampaignItems        = self._tmpCampaignItems        or {}
-    self._tmpBonusObjectives      = self._tmpBonusObjectives      or {}
-    self._tmpWorldQuestItems      = self._tmpWorldQuestItems      or {}
-    self._tmpRemainingTrackables  = self._tmpRemainingTrackables  or {}
-    self._tmpQuestItemDataByID    = self._tmpQuestItemDataByID    or {}
-
-    local scenarios          = self._tmpScenarios
-    local autoQuests         = self._tmpAutoQuests
-    local superTrackedItems  = self._tmpSuperTrackedItems
-    local campaignItems      = self._tmpCampaignItems
-    local bonusObjectives    = self._tmpBonusObjectives
-    local worldQuestItems    = self._tmpWorldQuestItems
-    local remainingTrackables = self._tmpRemainingTrackables
-    local questItemDataByID  = self._tmpQuestItemDataByID
-
-    ClearArray(scenarios)
-    ClearArray(autoQuests)
-    ClearArray(superTrackedItems)
-    ClearArray(campaignItems)
-    ClearArray(bonusObjectives)
-    ClearArray(worldQuestItems)
-    ClearArray(remainingTrackables)
-    ClearArray(questItemDataByID)
+    wipe(scenarios)
+    wipe(autoQuests)
+    wipe(superTrackedItems)
+    wipe(campaignItems)
+    wipe(bonusObjectives)
+    wipe(worldQuestItems)
+    wipe(remainingTrackables)
+    wipe(questItemDataByID)
 
     local superTrackedQuestID = (C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID()) or 0
     self._cachedSuperTrackedQuestID = superTrackedQuestID
@@ -92,14 +86,11 @@ function addon:UpdateTrackerDisplay(trackables)
     end
 
     -- Ensure super-tracked items have quest-item data if available
-    if #superTrackedItems > 0 then
-        for i = 1, #superTrackedItems do
-            local item = superTrackedItems[i]
-            if item and item.id and (not item.item or (not item.item.link and not item.item.texture)) then
-                local sharedItemData = questItemDataByID[item.id]
-                if sharedItemData then
-                    item.item = sharedItemData
-                end
+    for _, item in ipairs(superTrackedItems) do
+        if not item.item or (not item.item.link and not item.item.texture) then
+            local sharedItemData = questItemDataByID[item.id]
+            if sharedItemData then
+                item.item = sharedItemData
             end
         end
     end
@@ -107,10 +98,13 @@ function addon:UpdateTrackerDisplay(trackables)
     self.currentScenarios = scenarios
     trackables = remainingTrackables
 
-    -- Group trackables if needed
-    if db.groupByZone or db.groupByCategory then
-        trackables = self:OrganizeTrackables(trackables)
-    end
+    -- Carry the last pass's viewport width in before anything measures against the
+    -- content frame, so text wrapping and row heights are computed at the width the
+    -- rows will actually be drawn at.
+    self:UpdateContentWidth()
+
+    -- Group into major (type) and minor (zone/category) headers
+    trackables = self:OrganizeTrackables(trackables)
 
     --------------------------------------------------------------------------
     -- Delegate to section renderers
@@ -137,42 +131,31 @@ function addon:UpdateTrackerDisplay(trackables)
     -- World quests
     local wqYOffset = self:RenderWorldQuestSection(worldQuestItems)
 
-    --------------------------------------------------------------------------
-    -- Update Scenario Frame Height
-    --------------------------------------------------------------------------
-    if scenarioYOffset > 0 then
-        self.scenarioFrame:SetHeight(scenarioYOffset)
-        if addon.db.minimized then
-            self.scenarioFrame:Hide()
-        else
-            self.scenarioFrame:Show()
-        end
-    else
-        self.scenarioFrame:Hide()
-    end
+    self:FinishPinnedSection(self.scenarioFrame, scenarioYOffset)
 
     --------------------------------------------------------------------------
     -- Update layout anchors (scenario, autoquest, scroll, bonus, wq)
     --------------------------------------------------------------------------
     self:UpdateLayoutAnchors()
 
-    if addon.LogAt and self.autoQuestFrame then
-        addon:LogAt("trace", "[AQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.autoQuestFrame:GetHeight() or 0, tostring(self.autoQuestFrame:IsShown()))
-    end
-    if addon.LogAt and self.completedQuestFrame then
-        addon:LogAt("trace", "[CQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.completedQuestFrame:GetHeight() or 0, tostring(self.completedQuestFrame:IsShown()))
+    -- The anchors above are what set the scroll viewport's width, so the content it
+    -- scrolls can only be matched to it afterwards. Headers and rows anchor to both
+    -- edges of the content frame, so they pick the corrected width up immediately.
+    self:UpdateContentWidth()
+
+    if self:ShouldLog("trace") then
+        self:LogAt("trace", "[AQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.autoQuestFrame:GetHeight() or 0, tostring(self.autoQuestFrame:IsShown()))
+        self:LogAt("trace", "[CQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.completedQuestFrame:GetHeight() or 0, tostring(self.completedQuestFrame:IsShown()))
     end
 
-    DebugLayout(self,
-        "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f cqH=%.1f",
-        tonumber(scenarioYOffset or 0),
-        tonumber(aqYOffset or 0),
-        tonumber(campaignYOffset or 0),
-        tonumber(bonusYOffset or 0),
-        tonumber(wqYOffset or 0),
-        tonumber((self.autoQuestFrame and self.autoQuestFrame.GetHeight and self.autoQuestFrame:GetHeight()) or 0),
-        tonumber((self.completedQuestFrame and self.completedQuestFrame.GetHeight and self.completedQuestFrame:GetHeight()) or 0)
-    )
+    if layoutTrace then
+        DebugLayout(self,
+            "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f cqH=%.1f",
+            scenarioYOffset, aqYOffset, campaignYOffset, bonusYOffset, wqYOffset,
+            self.autoQuestFrame:GetHeight() or 0,
+            self.completedQuestFrame:GetHeight() or 0
+        )
+    end
 
     --------------------------------------------------------------------------
     -- Normal trackables (headers + quest items inside scroll content frame)
@@ -184,23 +167,16 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Blank-body diagnostic logging
     --------------------------------------------------------------------------
     local bodyAppearsBlank = (renderedNormalItems == 0 and renderedHeaders == 0 and yOffset <= 7)
-    if bodyAppearsBlank then
-        local now = GetTime and GetTime() or 0
+    if bodyAppearsBlank and layoutTrace then
+        local now = GetTime()
         if not self._lastBlankLayoutLogAt or (now - self._lastBlankLayoutLogAt) > 0.75 then
             self._lastBlankLayoutLogAt = now
             DebugLayout(self,
                 "BLANK body incoming=%d organized=%d scenData=%d scenY=%d bonus=%d bonusY=%d wq=%d wqY=%d autoQ=%d scrollShown=%s contentH=%.1f",
-                tonumber(incomingCount or 0),
-                tonumber(#trackables or 0),
-                tonumber((self.currentScenarios and #self.currentScenarios) or 0),
-                tonumber(scenarioYOffset or 0),
-                tonumber(#bonusObjectives or 0),
-                tonumber(bonusYOffset or 0),
-                tonumber(#worldQuestItems or 0),
-                tonumber(wqYOffset or 0),
-                tonumber(#autoQuests or 0),
-                tostring(self.scrollFrame and self.scrollFrame:IsShown()),
-                tonumber((contentFrame and contentFrame.GetHeight and contentFrame:GetHeight()) or 0)
+                incomingCount, #trackables, #scenarios, scenarioYOffset,
+                #bonusObjectives, bonusYOffset, #worldQuestItems, wqYOffset, #autoQuests,
+                tostring(self.scrollFrame:IsShown()),
+                contentFrame:GetHeight() or 0
             )
         end
     end
@@ -208,7 +184,17 @@ function addon:UpdateTrackerDisplay(trackables)
     --------------------------------------------------------------------------
     -- Finalize
     --------------------------------------------------------------------------
-    contentFrame:SetHeight(max(yOffset, self.db.frameHeight))
+    -- Exactly the rendered height: the scroll viewport is shorter than frameHeight (the
+    -- header and pinned sections take their share), so any padding here scrolls as blank space.
+    contentFrame:SetHeight(max(yOffset, 1))
+
+    -- Content can shrink while scrolled down; keep the view inside the new range.
+    local scrollFrame = self.scrollFrame
+    scrollFrame:UpdateScrollChildRect()
+    local maxScroll = scrollFrame:GetVerticalScrollRange()
+    if scrollFrame:GetVerticalScroll() > maxScroll then
+        scrollFrame:SetVerticalScroll(maxScroll)
+    end
 
     -- Update scroll shadow gradients based on new content size
     self:UpdateScrollShadows()
@@ -222,6 +208,9 @@ function addon:UpdateTrackerDisplay(trackables)
     -- Optional visual debug overlays for section layout troubleshooting
     self:UpdateSectionDebugBoxes()
 end
+
+local TOOLTIP_DONE_COLOR = { r = 0.5, g = 1, b = 0.5 }
+local TOOLTIP_OPEN_COLOR = { r = 1, g = 1, b = 1 }
 
 -- Show trackable tooltip
 function addon:ShowTrackableTooltip(button, trackable)
@@ -240,21 +229,27 @@ function addon:ShowTrackableTooltip(button, trackable)
             tooltip:AddLine(trackable.zone, 0.5, 0.8, 1)
         end
 
-        -- Add quest short description — fetched fresh on each hover so it never goes stale
-        local shortDesc = addon:GetQuestShortDescription(trackable.id, trackable.logIndex)
-        if shortDesc and shortDesc ~= "" then
+        -- Add quest objective summary — fetched fresh on each hover so it never goes stale
+        local objectiveSummary = addon:GetQuestObjectiveText(trackable.id, trackable.logIndex)
+        if objectiveSummary and objectiveSummary ~= "" then
             tooltip:AddLine(" ")
-            tooltip:AddLine(shortDesc, 0.9, 0.9, 0.9, true)
+            tooltip:AddLine(objectiveSummary, 0.9, 0.9, 0.9, true)
         end
 
         if trackable.objectives and #trackable.objectives > 0 then
-            tooltip:AddLine(" ")
+            local addedSpacer = false
             for i, objective in ipairs(trackable.objectives) do
                 if i > 5 then
                     break
                 end
                 local text = objective and objective.text
-                if text and text ~= "" then
+                -- Quests without countable objectives show the summary as their
+                -- only objective line; don't print it twice.
+                if text and text ~= "" and text ~= objectiveSummary then
+                    if not addedSpacer then
+                        tooltip:AddLine(" ")
+                        addedSpacer = true
+                    end
                     if objective.finished then
                         tooltip:AddLine("• " .. text, 0.5, 1, 0.5, true)
                     else
@@ -277,7 +272,7 @@ function addon:ShowTrackableTooltip(button, trackable)
                 end
 
                 local parsed = addon.ParseObjectiveDisplay(trackable, objective, i)
-                local lineColor = objective.finished and { r = 0.5, g = 1, b = 0.5 } or { r = 1, g = 1, b = 1 }
+                local lineColor = objective.finished and TOOLTIP_DONE_COLOR or TOOLTIP_OPEN_COLOR
                 local bodyText = parsed.bodyText
                 local titleMatches = type(bodyText) == "string"
                     and type(trackable.title) == "string"

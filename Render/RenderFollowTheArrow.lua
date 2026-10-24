@@ -12,50 +12,50 @@ local max = math.max
 -------------------------------------------------------------------------------
 local function GetFTAData()
     if not FTACharDB then
-        if addon.LogAt then addon:LogAt("info", "[FTA] FTACharDB is nil — FollowTheArrow not installed or not yet loaded") end
+        addon:LogAt("info", "[FTA] FTACharDB is nil — FollowTheArrow not installed or not yet loaded")
         return nil
     end
     if not FTACharDB.progress then
-        if addon.LogAt then addon:LogAt("info", "[FTA] FTACharDB.progress is nil") end
+        addon:LogAt("info", "[FTA] FTACharDB.progress is nil")
         return nil
     end
 
     local api = FollowTheArrowAPI
     if not api then
-        if addon.LogAt then addon:LogAt("info", "[FTA] FollowTheArrowAPI global is nil — FTA namespace not exposed") end
+        addon:LogAt("info", "[FTA] FollowTheArrowAPI global is nil — FTA namespace not exposed")
         return nil
     end
     if not api.Modules then
-        if addon.LogAt then addon:LogAt("info", "[FTA] FollowTheArrowAPI.Modules is nil") end
+        addon:LogAt("info", "[FTA] FollowTheArrowAPI.Modules is nil")
         return nil
     end
 
     local moduleId = FTACharDB.progress.activeModuleId
     if not moduleId then
-        if addon.LogAt then addon:LogAt("info", "[FTA] no activeModuleId in FTACharDB.progress") end
+        addon:LogAt("info", "[FTA] no activeModuleId in FTACharDB.progress")
         return nil
     end
 
     local module = api.Modules[moduleId]
     if not module then
-        if addon.LogAt then addon:LogAt("info", "[FTA] moduleId=%s not found in FollowTheArrowAPI.Modules", tostring(moduleId)) end
+        addon:LogAt("info", "[FTA] moduleId=%s not found in FollowTheArrowAPI.Modules", tostring(moduleId))
         return nil
     end
 
     local stepsByModule = FTACharDB.progress.stepIndexByModule
     local stepIndex = stepsByModule and stepsByModule[moduleId]
     if not stepIndex then
-        if addon.LogAt then addon:LogAt("info", "[FTA] no stepIndex for moduleId=%s", tostring(moduleId)) end
+        addon:LogAt("info", "[FTA] no stepIndex for moduleId=%s", tostring(moduleId))
         return nil
     end
 
     local steps = module.steps
     if not steps then
-        if addon.LogAt then addon:LogAt("info", "[FTA] module.steps is nil for moduleId=%s", tostring(moduleId)) end
+        addon:LogAt("info", "[FTA] module.steps is nil for moduleId=%s", tostring(moduleId))
         return nil
     end
     if not steps[stepIndex] then
-        if addon.LogAt then addon:LogAt("info", "[FTA] stepIndex=%d out of range (total=%d) for moduleId=%s", stepIndex, #steps, tostring(moduleId)) end
+        addon:LogAt("info", "[FTA] stepIndex=%d out of range (total=%d) for moduleId=%s", stepIndex, #steps, tostring(moduleId))
         return nil
     end
 
@@ -116,11 +116,9 @@ local function GetFTAData()
         end
     end
 
-    if addon.LogAt then
-        addon:LogAt("info", "[FTA] module=%s step=%d/%d title=%s tasks=%d notes=%d",
-            tostring(moduleId), stepIndex, totalSteps,
-            tostring(step.title or step.name), #tasks, #notes)
-    end
+    addon:LogAt("trace", "[FTA] module=%s step=%d/%d title=%s tasks=%d notes=%d",
+        tostring(moduleId), stepIndex, totalSteps,
+        tostring(step.title or step.name), #tasks, #notes)
 
     return {
         zone      = zone,
@@ -136,10 +134,21 @@ end
 
 -------------------------------------------------------------------------------
 -- ApplyFTATracking — super-track the current FTA step's quest or coordinate
+-- Guard: only acts when the step actually changed, so setting a waypoint
+-- (which fires SUPER_TRACKING_CHANGED → FTA:FullRefresh → FTA.UI:Refresh)
+-- doesn't re-enter and create an infinite refresh loop.
 -------------------------------------------------------------------------------
-local function ApplyFTATracking()
-    local function log(fmt, ...) if addon.LogAt then addon:LogAt("info", "[FTA-TRACK] " .. fmt, ...) end end
+local _lastTrackedModule = nil
+local _lastTrackedStep   = nil
+local _lastTrackedMapID  = nil
+local _lastTrackedX      = nil
+local _lastTrackedY      = nil
 
+local function log(fmt, ...)
+    addon:LogAt("info", "[FTA-TRACK] " .. fmt, ...)
+end
+
+local function ApplyFTATracking(force)
     local api = FollowTheArrowAPI
     if not api then log("no FollowTheArrowAPI"); return end
     if not (FTACharDB and FTACharDB.progress) then log("no FTACharDB.progress"); return end
@@ -152,6 +161,26 @@ local function ApplyFTATracking()
     local stepsByModule = FTACharDB.progress.stepIndexByModule
     local stepIndex = stepsByModule and stepsByModule[moduleId]
     if not stepIndex then log("no stepIndex for module %s", tostring(moduleId)); return end
+
+    -- Partial early-out: skip only if step AND target haven't changed
+    -- (prevents waypoint-set → SUPER_TRACKING_CHANGED → refresh loop,
+    --  but still updates when the arrow target moves within the same step)
+    local stepSame = (moduleId == _lastTrackedModule and stepIndex == _lastTrackedStep)
+    if not force and stepSame then
+        -- Resolve the target now to compare coords before committing
+        local earlyStep = module.steps and module.steps[stepIndex]
+        local earlyTarget = earlyStep and api.Resolve and api.Resolve.GetCurrentTarget
+            and api.Resolve:GetCurrentTarget(module, earlyStep)
+        if earlyTarget
+            and earlyTarget.mapID == _lastTrackedMapID
+            and earlyTarget.x    == _lastTrackedX
+            and earlyTarget.y    == _lastTrackedY then
+            return
+        end
+    end
+    _lastTrackedModule = moduleId
+    _lastTrackedStep   = stepIndex
+
     local step = module.steps and module.steps[stepIndex]
     if not step then log("step %d not found", stepIndex); return end
 
@@ -205,6 +234,57 @@ local function ApplyFTATracking()
         log("target missing mapID/x/y"); return
     end
 
+    -- Record target so the guard can detect coordinate changes next call
+    _lastTrackedMapID = target.mapID
+    _lastTrackedX     = target.x
+    _lastTrackedY     = target.y
+
+    -- Build a descriptive name: prefer the active segment's text, fall back to step title
+    local pinName = step.title or step.name or ("Step " .. stepIndex)
+    if api.Resolve and api.Resolve.GetDisplaySegmentsForStep then
+        local displaySegs = api.Resolve:GetDisplaySegmentsForStep(step, moduleId, stepIndex)
+        for _, seg in ipairs(displaySegs) do
+            if seg.kind ~= "NOTE" and (seg.text or "") ~= "" then
+                pinName = seg.text
+                -- Substitute {progress} token same as task rendering
+                if seg.kind == "OBJECTIVE" and seg.showProgress ~= false
+                    and api.Resolve and api.Resolve.GetSegmentProgressText then
+                    local prog = api.Resolve:GetSegmentProgressText(seg)
+                    if prog then
+                        pinName = pinName:gsub("%{progress%}", (prog:gsub("%%", "%%%%")))
+                    else
+                        pinName = pinName:gsub("%{progress%}%s*", ""):gsub("%s+%.", ".")
+                    end
+                else
+                    pinName = pinName:gsub("%{progress%}%s*", ""):gsub("%s+%.", ".")
+                end
+                break
+            end
+        end
+    end
+
+    log("WaypointUIAPI=%s", tostring(WaypointUIAPI ~= nil))
+
+    -- Prefer WaypointUI's named navigation API so the pin gets a readable label
+    -- WaypointUI expects coordinates in 0–100 scale; FTA provides 0–1 normalized
+    if WaypointUIAPI and WaypointUIAPI.Navigation and WaypointUIAPI.Navigation.NewUserNavigation then
+        local ok, err = pcall(function()
+            WaypointUIAPI.Navigation.NewUserNavigation({
+                name  = pinName,
+                mapID = target.mapID,
+                x     = target.x * 100,
+                y     = target.y * 100,
+            })
+        end)
+        if ok then
+            log("WaypointUI nav set: mapID=%d x=%.4f y=%.4f name=%s", target.mapID, target.x, target.y, pinName)
+        else
+            log("WaypointUI NewUserNavigation failed: %s", tostring(err))
+        end
+        return
+    end
+
+    -- Fallback: raw Blizzard user waypoint (no custom name)
     log("UiMapPoint=%s C_Map.SetUserWaypoint=%s C_SuperTrack.SetSuperTrackedUserWaypoint=%s",
         tostring(UiMapPoint ~= nil),
         tostring(C_Map and C_Map.SetUserWaypoint ~= nil),
@@ -240,7 +320,7 @@ local function EnsureFTARefreshHook()
     local orig = api.UI.Refresh
     api.UI.Refresh = function(self, ...)
         orig(self, ...)
-        ApplyFTATracking()
+        ApplyFTATracking(false)  -- guarded: no-ops if step hasn't changed
         addon:RequestUpdate()
     end
     _ftaRefreshHooked = true
@@ -257,7 +337,7 @@ local function NavigateFTA(delta)
     else
         api.StepEngine:NextStep()
     end
-    ApplyFTATracking()
+    ApplyFTATracking(true)  -- force: step just changed via our button
     addon:RequestUpdate()
 end
 
@@ -265,7 +345,7 @@ local function ResetFTA()
     local api = FollowTheArrowAPI
     if not (api and api.StepEngine and api.StepEngine.SyncNow) then return end
     api.StepEngine:SyncNow(25)
-    ApplyFTATracking()
+    ApplyFTATracking(true)  -- force: step just changed via our button
     addon:RequestUpdate()
 end
 
@@ -278,10 +358,9 @@ function addon:RenderFollowTheArrowSection()
     local ftaFrame = self.ftaFrame
     local ftaYOffset = 0
 
-    if not ftaFrame then return 0 end
-
     local shouldShow = db.includeFTAQuests
-    if addon.LogAt then addon:LogAt("info", "[FTA] RenderFollowTheArrowSection called — includeFTAQuests=%s", tostring(shouldShow)) end
+    -- Runs on every render, hence trace rather than info.
+    self:LogAt("trace", "[FTA] RenderFollowTheArrowSection called — includeFTAQuests=%s", tostring(shouldShow))
 
     if not shouldShow then
         ftaFrame:SetHeight(1)
@@ -291,67 +370,32 @@ function addon:RenderFollowTheArrowSection()
 
     local data = GetFTAData()
     if not data then
-        if addon.LogAt then addon:LogAt("info", "[FTA] GetFTAData returned nil — hiding ftaFrame") end
+        addon:LogAt("info", "[FTA] GetFTAData returned nil — hiding ftaFrame")
         ftaFrame:SetHeight(1)
         ftaFrame:Hide()
         return 0
     end
 
-    if addon.LogAt then addon:LogAt("info", "[FTA] rendering guide=%s step=%d/%d", tostring(data.moduleId), data.stepIndex, data.totalSteps) end
+    self:LogAt("trace", "[FTA] rendering guide=%s step=%d/%d", tostring(data.moduleId), data.stepIndex, data.totalSteps)
 
     EnsureFTARefreshHook()
 
     --------------------------------------------------------------------------
     -- Header row
     --------------------------------------------------------------------------
-    local header = self:GetOrCreateButton(ftaFrame)
-    header:SetPoint("TOPLEFT",  ftaFrame, "TOPLEFT",  0, 0)
-    header:SetPoint("TOPRIGHT", ftaFrame, "TOPRIGHT", 0, 0)
+    local header = self:AcquireSectionHeader(ftaFrame, "Follow the Arrow", addon.SECTION_HEADER_GOLD)
 
-    header.text:SetFont(db.headerFontFace, db.headerFontSize + 2, db.headerFontOutline)
-    header.text:SetTextColor(1, 0.82, 0, 1) -- Gold
-    header.text:SetText(format("Follow the Arrow  |cffaaaaaa%d / %d|r", data.stepIndex, data.totalSteps))
-    header.text:SetJustifyH("LEFT")
-    header.text:ClearAllPoints()
-    header.text:SetPoint("LEFT", 5, 0)
-    header.text:SetPoint("RIGHT", -5, 0)
-
-    if header.expandBtn then header.expandBtn:Hide() end
-    if header.poiButton  then header.poiButton:Hide()  end
-    if header.itemButton then header.itemButton:Hide() end
-    if header.icon       then header.icon:Hide()       end
-    if header.objectives then for _, obj in ipairs(header.objectives) do obj:Hide() end end
-    if header.objectiveProgresses then for _, obj in ipairs(header.objectiveProgresses) do obj:Hide() end end
-    if header.progressBars then for _, bar in ipairs(header.progressBars) do bar:Hide() end end
-
-    -- Styled backdrop
-    if not header.styledBackdrop then
-        header.styledBackdrop = CreateFrame("Frame", nil, header, "BackdropTemplate")
-        if header:GetFrameLevel() > 1 then
-            header.styledBackdrop:SetFrameLevel(header:GetFrameLevel() - 1)
-        else
-            header.styledBackdrop:SetFrameLevel(1)
-            header:SetFrameLevel(2)
-        end
-        header.styledBackdrop:SetBackdrop({
-            bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        header.styledBackdrop:SetBackdropColor(0.2, 0.2, 0.2, 0.9)
-        header.styledBackdrop:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    -- Step counter: small, right-aligned, inside the header
+    if not header._ftaCounter then
+        header._ftaCounter = header:CreateFontString(nil, "OVERLAY")
     end
-
-    header.styledBackdrop:ClearAllPoints()
-    header.styledBackdrop:SetPoint("TOPLEFT",  header, "TOPLEFT",  0, 0)
-    header.styledBackdrop:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
-    header.styledBackdrop:Show()
-    header.bg:SetColorTexture(0, 0, 0, 0)
-
-    header:SetHeight(30)
-    header:Show()
-    header._scriptMode = "ftaHeader"
+    header._ftaCounter:SetFont(db.fontFace, db.fontSize - 2, db.fontOutline)
+    header._ftaCounter:SetTextColor(0.75, 0.75, 0.75, 1)
+    header._ftaCounter:SetText(format("Steps %d/%d", data.stepIndex, data.totalSteps))
+    header._ftaCounter:SetJustifyH("RIGHT")
+    header._ftaCounter:ClearAllPoints()
+    header._ftaCounter:SetPoint("RIGHT", header, "RIGHT", -6, 0)
+    header._ftaCounter:Show()
 
     ftaYOffset = ftaYOffset + 30
 
@@ -413,7 +457,7 @@ function addon:RenderFollowTheArrowSection()
             taskLabels[i] = ftaFrame:CreateFontString(nil, "OVERLAY")
         end
         local lbl = taskLabels[i]
-        lbl:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+        lbl:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
         lbl:SetTextColor(db.objectiveColor.r, db.objectiveColor.g, db.objectiveColor.b, db.objectiveColor.a)
         lbl:SetText("• " .. taskText)
         lbl:SetJustifyH("LEFT")
@@ -423,7 +467,7 @@ function addon:RenderFollowTheArrowSection()
         lbl:SetPoint("TOPRIGHT", ftaFrame, "TOPRIGHT", -5,          -ftaYOffset)
         lbl:SetHeight(0)
         lbl:Show()
-        local lblH = max(db.fontSize + 2, lbl:GetStringHeight() + 2)
+        local lblH = max(db.objectiveFontSize + 3, lbl:GetStringHeight() + 2)
         lbl:SetHeight(lblH)
         ftaYOffset = ftaYOffset + lblH + 2
     end
@@ -446,7 +490,7 @@ function addon:RenderFollowTheArrowSection()
             noteLabels[i] = ftaFrame:CreateFontString(nil, "OVERLAY")
         end
         local lbl = noteLabels[i]
-        lbl:SetFont(db.fontFace, db.fontSize - 1, db.fontOutline)
+        lbl:SetFont(db.objectiveFontFace, db.objectiveFontSize, db.fontOutline)
         lbl:SetTextColor(0.8, 0.8, 0.6, 1) -- Slightly warm for notes
         lbl:SetText(noteText)
         lbl:SetJustifyH("LEFT")
@@ -456,7 +500,7 @@ function addon:RenderFollowTheArrowSection()
         lbl:SetPoint("TOPRIGHT", ftaFrame, "TOPRIGHT", -5,          -ftaYOffset)
         lbl:SetHeight(0)
         lbl:Show()
-        local lblH = max(db.fontSize + 2, lbl:GetStringHeight() + 2)
+        local lblH = max(db.objectiveFontSize + 3, lbl:GetStringHeight() + 2)
         lbl:SetHeight(lblH)
         ftaYOffset = ftaYOffset + lblH + 2
     end
@@ -493,11 +537,11 @@ function addon:RenderFollowTheArrowSection()
         btnReset:SetText("|TInterface\\Buttons\\UI-RefreshButton:14:14:0:0|t")
         btnReset:SetScript("OnClick", function() ResetFTA() end)
         btnReset:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Reset to current step", 1, 1, 1)
-            GameTooltip:Show()
+            local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+            tooltip:SetText("Reset to current step", 1, 1, 1)
+            tooltip:Show()
         end)
-        btnReset:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btnReset:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
         ftaFrame._navRow.btnReset = btnReset
 
         local btnFTA = CreateFrame("Button", nil, ftaFrame._navRow, "UIPanelButtonTemplate")
@@ -530,12 +574,6 @@ function addon:RenderFollowTheArrowSection()
     --------------------------------------------------------------------------
     -- Size and show/hide the frame
     --------------------------------------------------------------------------
-    ftaFrame:SetHeight(max(30, ftaYOffset))
-    if addon.db.minimized then
-        ftaFrame:Hide()
-    else
-        ftaFrame:Show()
-    end
-
+    self:FinishPinnedSection(ftaFrame, max(30, ftaYOffset))
     return ftaYOffset
 end

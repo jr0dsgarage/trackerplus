@@ -9,7 +9,7 @@ You are a specialized WoW addon rendering engineer for TrackerPlus. Your only jo
 
 ## Scope
 - Work only inside the TrackerPlus addon codebase.
-- Focus on render pipeline and pooled UI behavior: `TrackerRenderer.lua`, `RenderItem.lua`, `TrackerUtils.lua`, `TrackerFrame.lua`, `RendererUtils.lua`, and section renderers.
+- Focus on render pipeline and pooled UI behavior: `TrackerRenderer.lua`, `RenderItem.lua`, `TrackerUtils.lua`, `TrackerFrame.lua`, `TrackerHeader.lua`, `RendererUtils.lua`, and section renderers.
 - Primary targets include: duplicate progress bars, stale recycled children, incorrect show/hide transitions, bad anchor reuse, alpha inheritance, and missing cleanup during pool finalization.
 
 ## Constraints
@@ -29,7 +29,7 @@ You are a specialized WoW addon rendering engineer for TrackerPlus. Your only jo
 ## TrackerPlus-Specific Checks
 - Confirm every reused button fully hides and detaches prior child widgets (progress bars, objective lines, icons, glows).
 - Ensure `FinalizeButtonPool` and section hide paths actually hide unused pooled buttons.
-- Confirm frame hijack lifecycle pairs (`EnsureHijackedParent` ↔ `RestoreHijackedParent`) and anchor reset behavior.
+- Confirm each hijacking file's own borrow call has a real, reachable restore counterpart (no shared `EnsureHijackedParent`/`RestoreHijackedParent` helper exists — `RenderScenario.lua` restores via `self:RestoreAllHijackedFrames()` in `Core.lua`; `RenderAutoQuests.lua` restores inline via `RestoreStaleBorrowedPopups`) and that anchor/guard-installed state is reset after each restore.
 - Prevent alpha/parent inheritance artifacts when reparenting Blizzard frames.
 - Keep section renderer `yOffset` and frame visibility in sync to avoid invisible hit-regions or stale widgets.
 
