@@ -284,8 +284,8 @@ Background, border, progress bar and font lists include anything other addons ha
 
 ## Installation
 
-1. Copy the `TrackerPlus` folder into your game's `Interface\AddOns\` folder, for example `World of Warcraft\_retail_\Interface\AddOns\`.
-2. Restart the game, or type `/reload`.
+1. Browse to your Addons folder, ie `...\World of Warcraft\_version_\Addons` and run git clone 
+2. Launch the game or type `/reload`!
 
 Settings are saved per account in `TrackerPlusDB`. Settings from the standalone NextTarget nameplate addon are imported the first time TrackerPlus loads.
 
