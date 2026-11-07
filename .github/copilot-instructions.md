@@ -19,6 +19,7 @@ Data/ActivityCollectors.lua             – Achievement, scenario, profession, m
 Data/QuestColors.lua                    – Quest title colors: difficulty coloring and the super-track override (shared with map pins)
 Data/TrackableSort.lua                  – Sort order of trackables within groups
 UI/TrackerUtils.lua                     – Button pooling, trackable grouping, header toggle, click handling, color picker
+UI/SpokenPlayButton.lua                 – Spoken Quests integration: Play buttons on quest rows and the Active Quest header (no-op without Spoken)
 Map/MapPOIColor.lua                     – Difficulty-coloured circles on Blizzard's world map quest pins (hooks only; draws no UI of its own)
 Map/QuestAreaHighlight.lua              – Marks the tracker row of a quest whose shaded map area the player is standing in
 Render/RendererUtils.lua                – Shared renderer utilities (debug overlays only — see note below)

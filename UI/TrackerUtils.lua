@@ -327,7 +327,10 @@ function addon:GetOrCreateButton(parent)
         btn.groupButton:Hide()
         btn.groupButton:ClearAllPoints()
     end
-    
+    -- Spoken's Play button (UI/SpokenPlayButton.lua); rows and the Active Quest
+    -- header re-show it when it applies.
+    if btn.spokenPlayButton then btn.spokenPlayButton:Hide() end
+
     return btn
 end
 

@@ -80,6 +80,7 @@ Each quest row has:
 - **Objectives** underneath, turning green when done and red when failed, with **progress bars** for percentage objectives.
 - A **quest item button** when the quest has a usable item. Click it to use the item, the same as on the game's tracker.
 - A **Find a Group** button on quests that have one.
+- A **Play button** when [Spoken](#optional-addons) has a voice for the quest: click it to hear the quest read aloud, click again to stop. It goes at the right end of the title line, or under the map pin button (**Settings → Tracking Panel → Spoken**).
 - A **tooltip** on hover with the quest's level, zone and objectives (**Show Tooltips**).
 
 An optional **row background** can be drawn behind each row (**Settings → Appearance → Row Styling**).
@@ -212,7 +213,7 @@ Enemy nameplates are highlighted when that enemy is something your quests need. 
 
 When you target an enemy that isn't a quest target, the game's normal target border is shown instead.
 
-Each highlight can be turned on or off on its own and has its own style, color, thickness and offset. The styles are **Blizzard** (the game's own target border, the default), **Outline**, **Glow** and **Rounded**.
+Each highlight can be turned on or off on its own and has its own style, color, thickness and offset. The styles are **Rounded** (the default), **Blizzard** (the game's own target border), **Outline** and **Glow**.
 
 There are also options to hide the game's target border on the health bar or on the level badge, or to redraw it 1px lower so it sits evenly around the health bar.
 
@@ -240,7 +241,7 @@ Type `/tp`, click the gear on the title bar, or open **Game Menu → Options →
 | Page | What's on it |
 | --- | --- |
 | **TrackerPlus** | Turn the tracker on or off, lock it, show tooltips; hide it in instances, in combat or when empty; Campaign in Active Quest and Follow the Arrow; reset all settings. |
-| **Tracking Panel** | Show quest level, color by difficulty, sort order, and which content types to show. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
+| **Tracking Panel** | Show quest level, color by difficulty, sort order, which content types to show, and (with Spoken loaded) the Play buttons. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
 | **Nameplates** | Everything under [Nameplate highlights](#nameplate-highlights). |
 | **Appearance** | Match Game Tracker, anchor, width, height and scale; background and border textures and colors; header icon and background; row background; quest area marker; progress bar border and texture; fonts and sizes for headers, quest names and objectives; colors for text and each content type. |
 | **Layout** | Indents and spacing. |
@@ -274,6 +275,7 @@ Background, border, progress bar and font lists include anything other addons ha
 ## Optional addons
 
 - **[FollowTheArrow](https://www.curseforge.com/wow/addons/followthearrow)**: when it's loaded, TrackerPlus can show the current guide step in its own section, between Active Quest and Campaign. Turn it on with the arrow button on the title bar or on the main settings page.
+- **Spoken** (Spoken Quests): when it's loaded, quest rows get Spoken's Play button, at the right end of the title line or on the left under the map pin, and the Active Quest section can get one beside its title. Both are set on the Tracking Panel settings page; buttons only appear on quests a Spoken voice pack covers.
 - **Auctionator**: its crafting search button is moved into the Professions section.
 - **LibSharedMedia** (bundled with many addons): its textures and fonts show up in the Appearance lists.
 

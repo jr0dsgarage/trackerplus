@@ -40,6 +40,8 @@ local ROW_BG_LEFT = -8
 local ROW_BG_PAD = 1
 -- Room between the card's top edge and the row's title and POI button.
 local ROW_BG_TOP_INSET = 2
+-- Space between the POI button and a Spoken Play button placed under it.
+local SPOKEN_POI_GAP = 3
 
 -- Shared with the quest-area highlight's card styles, which overlay this background.
 function addon:AnchorRowCard(tex, button)
@@ -422,6 +424,33 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
          end
     end
 
+    -- Spoken's Play button (UI/SpokenPlayButton.lua). Not in the Active Quest
+    -- panel: that one has its own setting and sits beside the section title.
+    local spokenButton, spokenOnLeft
+    if isQuest and db.spokenPlayButton and parent ~= self.activeQuestFrame then
+        spokenButton = self:ApplySpokenPlayButton(button, item.id, item.title)
+    elseif button.spokenPlayButton then
+        button.spokenPlayButton:Hide()
+    end
+    if spokenButton then
+        local size = addon.SPOKEN_ROW_BUTTON_SIZE
+        -- Level with the title's first line.
+        local lineTop = 2 + topInset + max(0, (db.fontSize - size) / 2)
+        if db.spokenPlayButtonPosition == "right" then
+            -- At the right edge of the title line, left of any item/group buttons
+            -- (rightPadding is where those end), and the title wraps short of it.
+            spokenButton:SetPoint("TOPRIGHT", button, "TOPRIGHT", rightPadding, -lineTop)
+            rightPadding = rightPadding - size - 4
+        else
+            spokenOnLeft = true
+            if button.poiButton:IsShown() then
+                spokenButton:SetPoint("TOP", button.poiButton, "BOTTOM", 0, -SPOKEN_POI_GAP)
+            else
+                spokenButton:SetPoint("TOPLEFT", button, "TOPLEFT", 0, -lineTop)
+            end
+        end
+    end
+
     button.text:ClearAllPoints()
     button.text:SetPoint("TOPLEFT", leftPadding, -2 - topInset)
     button.text:SetPoint("TOPRIGHT", rightPadding, -2 - topInset)
@@ -720,7 +749,21 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
             end
         end
     end
-    
+
+    -- A Play button under the POI button can reach past a short row (a collapsed
+    -- quest, or one with a single objective): grow the row to hold it.
+    if spokenOnLeft then
+        local bottom
+        if button.poiButton:IsShown() then
+            local poiScale = button.poiButton:GetScale() or 1
+            local poiTop = ((db.fontSize or 12) - 12) / 2 + topInset
+            bottom = poiTop + (button.poiButton:GetHeight() or 0) * poiScale + SPOKEN_POI_GAP
+        else
+            bottom = 2 + topInset + max(0, (db.fontSize - addon.SPOKEN_ROW_BUTTON_SIZE) / 2)
+        end
+        height = max(height, bottom + addon.SPOKEN_ROW_BUTTON_SIZE + 2)
+    end
+
     button:SetHeight(height)
     button.trackableData = item
 

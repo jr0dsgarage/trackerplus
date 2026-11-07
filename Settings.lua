@@ -60,6 +60,9 @@ local SETTING_EFFECTS = {
     rowBackgroundEnabled = Repaint,
     rowBackgroundStyle = Repaint,
     rowBackgroundAlpha = Repaint,
+    spokenPlayButton = Repaint,
+    spokenPlayButtonPosition = Repaint,
+    spokenPlayButtonActiveQuest = Repaint,
 
     fadeWhenEmpty = Recollect,
     showQuestLevel = Recollect,
@@ -713,6 +716,20 @@ local function InitUI()
     end
     sy = sy - typesPerColumn * 30
     y = y - EndSection(s, sy)
+
+    -- Only while Spoken Quests is loaded: without it there is nothing to play.
+    if addon:IsSpokenAvailable() then
+        local spokenPosition
+        s, sy = StartSection(tracking, "Spoken", y)
+        sy = CreateCheckbox(s, "Play Button on Quests", "spokenPlayButton", "Add Spoken's Play button to quest rows. Click it to hear the quest read aloud; click again to stop. Only shown on quests a Spoken voice pack has a voice for.", sy)
+        sy, spokenPosition = CreateDropdown(s, "Play Button Position", "spokenPlayButtonPosition", {
+            {text = "Left (below the map pin)", value = "left"},
+            {text = "Right (end of the title line)", value = "right"},
+        }, "Left puts the Play button under the quest's map pin button. Right puts it at the right edge of the quest's title line, next to any quest item button.", sy)
+        AddDependency(function(db) return db.spokenPlayButton end, spokenPosition)
+        sy = CreateCheckbox(s, "Show on Active Quest", "spokenPlayButtonActiveQuest", "Add a Play button beside the Active Quest section's title, for the quest shown there. Works separately from Play Button on Quests.", sy)
+        y = y - EndSection(s, sy)
+    end
 
     tracking:SetHeight(math.abs(y) + 20)
 

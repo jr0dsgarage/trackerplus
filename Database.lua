@@ -119,6 +119,11 @@ local DEFAULTS = {
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
     autoMinimizeHeaders = false, -- Collapse quest zone headers except the current zone and quest areas we stand in
+
+    -- Spoken integration (only offered while Spoken Quests is loaded; see UI/SpokenPlayButton.lua)
+    spokenPlayButton = true,             -- Play button on quest rows that a voice pack reads
+    spokenPlayButtonPosition = "right",  -- "left" (under the POI button) or "right" (right edge of the title line)
+    spokenPlayButtonActiveQuest = true,  -- Play button beside the Active Quest section's title (independent of the above)
     
     -- Sorting
     sortMethod = "difficulty_asc",  -- "difficulty_asc", "difficulty_desc", "proximity", "alphabetical"
