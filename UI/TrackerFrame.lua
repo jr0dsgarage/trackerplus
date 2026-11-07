@@ -256,9 +256,7 @@ function addon:CreateTrackerFrame()
         local pos = addon.db.framePosition
         if pos and pos.point and pos.x and pos.y then
              trackerFrame:ClearAllPoints()
-             -- Use saved relativePoint if available, otherwise fallback to point (legacy support)
-             local relativePoint = pos.relativePoint or pos.point
-             trackerFrame:SetPoint(pos.point, UIParent, relativePoint, pos.x, pos.y)
+             trackerFrame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x, pos.y)
         else
              trackerFrame:ClearAllPoints()
              trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)

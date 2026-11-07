@@ -72,8 +72,8 @@ local priorities, values = {}, {}
 function addon:SortTrackables(trackables)
     local sortMethod = self.db.sortMethod
     if sortMethod ~= "proximity" and sortMethod ~= "alphabetical" and sortMethod ~= "difficulty_desc" then
-        -- Easiest-first difficulty is the default, and the fallback for any legacy
-        -- or unrecognised value.
+        -- Easiest-first difficulty is the default, and the fallback for any
+        -- unrecognised value.
         sortMethod = "difficulty_asc"
     end
 

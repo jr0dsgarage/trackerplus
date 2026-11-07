@@ -3,9 +3,6 @@ local _, TrackerPlus = ...
 TrackerPlus.Nameplates = TrackerPlus.Nameplates or {}
 local Nameplates = TrackerPlus.Nameplates
 
--- Current database version - increment when migrations are added
-local DB_VERSION = 3
-
 local DEFAULTS = {
     enabled = true,
     debugMode = false,
@@ -47,30 +44,6 @@ local DEFAULTS = {
     bonusObjectiveStyle = "rounded",
 }
 
-local MIGRATION_MAP = {
-    showCurrentTarget = "currentTargetEnabled",
-    showQuestObjective = "questObjectiveEnabled",
-    showQuestItem = "questItemEnabled",
-    showWorldQuestHighlight = "worldQuestEnabled",
-    currentBorderThickness = "currentTargetThickness",
-    currentBorderOffset = "currentTargetOffset",
-    questObjectiveBorderThickness = "questObjectiveThickness",
-    questObjectiveBorderOffset = "questObjectiveOffset",
-    questItemBorderThickness = "questItemThickness",
-    questItemBorderOffset = "questItemOffset",
-    worldQuestBorderThickness = "worldQuestThickness",
-    worldQuestBorderOffset = "worldQuestOffset",
-}
-
-local STYLE_KEYS = {
-    "currentTargetStyle",
-    "activeQuestStyle",
-    "questObjectiveStyle",
-    "questItemStyle",
-    "worldQuestStyle",
-    "bonusObjectiveStyle",
-}
-
 -- Highlights for features Forever doesn't have; turned off there (and their rows left
 -- out of the Nameplates page), like RETAIL_ONLY_SETTINGS in Database.lua.
 local RETAIL_ONLY_KEYS = {
@@ -98,63 +71,8 @@ function Nameplates:InitializeDB()
     -- Stored beside TrackerPlus's own settings, which InitDatabase keeps under TrackerPlusDB.settings.
     TrackerPlusDB = TrackerPlusDB or {}
 
-    -- One-time import from the standalone addon this module used to be. NextTargetDB is only loaded
-    -- because TrackerPlus.toc lists it; drop it from ## SavedVariables once players have migrated.
-    if TrackerPlusDB.nameplates == nil and type(NextTargetDB) == "table" then
-        TrackerPlusDB.nameplates = NextTargetDB
-    end
-    NextTargetDB = nil
-
     TrackerPlusDB.nameplates = TrackerPlusDB.nameplates or {}
     Nameplates.db = TrackerPlusDB.nameplates
-
-    -- Only run migrations if database version is outdated or missing
-    local currentVersion = Nameplates.db.dbVersion or 0
-    if currentVersion < DB_VERSION then
-        -- Migration: Rename old keys to new keys
-        for oldKey, newKey in pairs(MIGRATION_MAP) do
-            if Nameplates.db[oldKey] ~= nil and Nameplates.db[newKey] == nil then
-                Nameplates.db[newKey] = Nameplates.db[oldKey]
-            end
-            Nameplates.db[oldKey] = nil
-        end
-
-        -- Migration: Rename "border" style to "outline"
-        for _, styleKey in ipairs(STYLE_KEYS) do
-            if Nameplates.db[styleKey] == "border" then
-                Nameplates.db[styleKey] = "outline"
-            end
-        end
-
-        -- Migration: Remove deprecated settings
-        Nameplates.db.rareEliteEnabled = nil
-        Nameplates.db.rareEliteColor = nil
-        Nameplates.db.rareEliteThickness = nil
-        Nameplates.db.rareEliteOffset = nil
-        Nameplates.db.onlyInCombat = nil
-        Nameplates.db.currentTargetAlways = nil
-
-        -- Migration: Fix old orange quest color to new yellow
-        local questColor = Nameplates.db.questObjectiveColor
-        if questColor and questColor.r == 1 and questColor.g == 0.5 and questColor.b == 0 then
-            questColor.r = DEFAULTS.questObjectiveColor.r
-            questColor.g = DEFAULTS.questObjectiveColor.g
-            questColor.b = DEFAULTS.questObjectiveColor.b
-            questColor.a = DEFAULTS.questObjectiveColor.a
-        end
-
-        -- Migration (v3): the Active Quest default changed from orange to the quest-area
-        -- blue. Profiles still on the old orange default get the new one; a profile that
-        -- picked a different color keeps it.
-        local activeColor = Nameplates.db.activeQuestColor
-        if currentVersion < 3 and activeColor and activeColor.r == 1 and activeColor.g == 0.5
-            and activeColor.b == 0 and activeColor.a == 0.9 then
-            Nameplates.db.activeQuestColor = deepCopy(DEFAULTS.activeQuestColor)
-        end
-
-        -- Mark database as migrated
-        Nameplates.db.dbVersion = DB_VERSION
-    end
 
     -- Always merge in any new defaults (doesn't overwrite existing values)
     mergeDefaults(Nameplates.db, DEFAULTS)

@@ -16,8 +16,7 @@ local addonName, addon = ...
 -- side rather than as fields written onto the pooled pin frames.
 --
 -- Color comes from addon:GetQuestTitleColorByQuestID, i.e. the exact same rules the
--- tracker panel paints quest titles with -- including the super-track gold, which is
--- laid on last -- so a pin and its tracker row always agree.
+-- tracker panel paints quest titles with -- so a pin and its tracker row always agree.
 
 local max, min, ceil = math.max, math.min, math.ceil
 

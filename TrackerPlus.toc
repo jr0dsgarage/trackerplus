@@ -4,7 +4,7 @@
 ## Author: jr0dsgarage
 ## Version: 1.0.0
 ## Category-enUS: j__r0d's garage
-## SavedVariables: TrackerPlusDB, NextTargetDB
+## SavedVariables: TrackerPlusDB
 ## IconTexture: Interface\Icons\INV_Misc_Map_01
 
 Database.lua

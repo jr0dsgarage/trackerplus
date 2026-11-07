@@ -289,13 +289,13 @@ Background, border, progress bar and font lists include anything other addons ha
 1. Browse to your Addons folder, ie `...\World of Warcraft\_version_\Addons` and run git clone 
 2. Launch the game or type `/reload`!
 
-Settings are saved per account in `TrackerPlusDB`. Settings from the standalone NextTarget nameplate addon are imported the first time TrackerPlus loads.
+Settings are saved per account in `TrackerPlusDB`.
 
 ## For developers
 
 | Folder / file | What it does |
 | --- | --- |
-| `Database.lua` | Default settings, saved-variable migrations and Retail/Forever restrictions |
+| `Database.lua` | Default settings and Retail/Forever restrictions |
 | `Core.lua` | Events, the update loop, Edit Mode handling and slash commands |
 | `Data/` | Collects quests, achievements and other trackables; parses objectives, picks quest colors and sorts trackables |
 | `Render/` | Draws each tracker section; `TrackerRenderer.lua` lays them out |

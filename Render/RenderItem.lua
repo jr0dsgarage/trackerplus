@@ -468,10 +468,9 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
     end
     
     button.text:SetFont(db.fontFace, db.fontSize, db.fontOutline)
-    -- Shared with the map pins (see Core.lua) so a quest can't be one color here and
-    -- another on the map -- the super-track gold used to be applied only here, which
-    -- left a super-tracked completed quest gold in the tracker but green on its pin.
-    local color = self:ApplySuperTrackedTitleColor(item.id, item.color or db.questColor, superTrackedQuestID)
+    -- The super-tracked quest keeps its own difficulty/status color; the POI button's
+    -- selection glow is what marks it as selected.
+    local color = item.color or db.questColor
     button.text:SetTextColor(color.r, color.g, color.b, color.a)
     button.text:SetText(titleText)
     button.text:SetJustifyH("LEFT")

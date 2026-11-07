@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 local _, addon = ...
 
--- Quest title colors: difficulty coloring and the super-track override (also used by map pins).
+-- Quest title colors: difficulty coloring (also used by map pins).
 
 -- Localize hot-path globals to avoid repeated global lookups
 local next = next
@@ -9,7 +9,6 @@ local type = type
 local band = bit.band
 local UnitLevel = UnitLevel
 local C_QuestLog = C_QuestLog
-local C_SuperTrack = C_SuperTrack
 
 -- The game's own relative-difficulty rating for a quest, as a QuestDifficultyColors
 -- entry, or nil when this client can't supply one.
@@ -163,40 +162,9 @@ function addon:GetQuestColor(info)
     end
 end
 
--- Gold: what the tracker paints whichever quest is currently super-tracked, whatever
--- that quest's own difficulty or status color would otherwise be.
-local SUPER_TRACKED_TITLE_COLOR = { r = 1, g = 0.82, b = 0, a = 1 }
-
--- Whichever quest is super-tracked right now, or 0.
-function addon:GetSuperTrackedQuestID()
-    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
-        return C_SuperTrack.GetSuperTrackedQuestID() or 0
-    end
-    return self._cachedSuperTrackedQuestID or 0
-end
-
--- The color a quest's title is *actually* painted with: GetQuestColor's answer, with
--- the super-track gold laid over the top.
---
--- This last step belongs here rather than in the row renderer because the map pins
--- need the same final color. While the override lived inline in RenderTrackableItem,
--- super-tracking a completed quest painted the tracker title gold but left the pin
--- the green GetQuestColor returns for completed quests -- which is the very same
--- db.completeColor that finished objective lines use, so the pin looked like it was
--- picking up an objective's color rather than the title's.
---
--- Pass superTrackedQuestID when the caller already has it (the row renderer caches it
--- once per pass) to keep it out of per-row work.
-function addon:ApplySuperTrackedTitleColor(questID, color, superTrackedQuestID)
-    if not questID or questID == 0 then return color end
-
-    superTrackedQuestID = superTrackedQuestID or self:GetSuperTrackedQuestID()
-    if questID == superTrackedQuestID then
-        return SUPER_TRACKED_TITLE_COLOR
-    end
-
-    return color
-end
+-- There is deliberately no super-track override here. The selected (super-tracked)
+-- quest used to be painted a flat gold, which hid its difficulty color; the POI
+-- button's selection glow already marks which quest is selected.
 
 -- The same color, for a quest known only by its ID.
 --
@@ -221,8 +189,8 @@ function addon:GetQuestColorByQuestID(questID)
     return self:GetQuestColor({ questID = questID, level = level, difficultyLevel = level })
 end
 
--- Same, but carrying the super-track override, so callers outside the render pass end
--- up with the color the tracker row is showing rather than the one underneath it.
+-- The color a quest's title is painted with, for callers outside the render pass
+-- (the map pins), so a pin and its tracker row always agree.
 function addon:GetQuestTitleColorByQuestID(questID)
-    return self:ApplySuperTrackedTitleColor(questID, self:GetQuestColorByQuestID(questID))
+    return self:GetQuestColorByQuestID(questID)
 end
