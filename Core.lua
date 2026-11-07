@@ -540,6 +540,7 @@ function addon:UpdateTracker()
     if InCombatLockdown() then
         pendingUpdate = true
         self:UpdateCombatFrameVisibility()
+        self:RefreshObjectivesInCombat()
         return
     end
 
@@ -633,6 +634,40 @@ function addon:UpdateCombatFrameVisibility()
 
     self:UpdateLayoutAnchors()
     self:UpdateScrollShadows()
+end
+
+-- Combat-safe objective refresh: collect fresh data and write it into the rows that
+-- are already drawn (see RefreshTrackableTextInPlace in RenderItem.lua). Rows are
+-- never added, removed, reordered or resized here; the full render that runs once
+-- combat ends (pendingUpdate) handles that, and it repaints because collecting here
+-- bumps _dataVersion past lastRenderedDataVersion.
+function addon:RefreshObjectivesInCombat()
+    if not self.trackerFrame or not self.trackerFrame:IsShown() then return end
+
+    local ok, err = pcall(function()
+        local trackables = self:CollectTrackables()
+        local dataVersion = self._dataVersion or 0
+        if dataVersion == self._combatRefreshVersion then return end
+        self._combatRefreshVersion = dataVersion
+
+        local byKey = {}
+        for _, item in ipairs(trackables) do
+            byKey[tostring(item.type) .. ":" .. tostring(item.id)] = item
+        end
+
+        self:ForEachActiveButton(function(button)
+            local old = button._scriptMode == "trackable" and button.trackableData
+            if not old then return end
+            local item = byKey[tostring(old.type) .. ":" .. tostring(old.id)]
+            if item and item ~= old then
+                self:RefreshTrackableTextInPlace(button, item)
+            end
+        end)
+    end)
+
+    if not ok then
+        self:LogAt("error", "Combat objective refresh failed: %s", tostring(err))
+    end
 end
 
 -- Collect all trackables (quests, achievements, etc.)

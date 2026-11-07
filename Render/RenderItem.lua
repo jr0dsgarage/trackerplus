@@ -183,6 +183,31 @@ local function ResolveAchievementObjectiveText(item, objectiveText, parsedBodyTe
     return bodyText or ""
 end
 
+-- Fill, color and label of an objective progress bar (either kind RenderTrackableItem
+-- builds). Touches no geometry, so it is also safe in combat.
+local function ApplyProgressBarValue(bar, progressValue, progressMax)
+    local percent = 0
+    if progressMax > 0 then
+        percent = floor((progressValue / progressMax) * 100)
+    end
+    local dispText = percent .. "%"
+    if progressMax > 0 and progressMax ~= 100 then
+        dispText = format("%d/%d (%d%%)", floor(progressValue), floor(progressMax), percent)
+    end
+
+    if bar.isTemplate and bar.Bar then
+        bar.Bar:SetMinMaxValues(0, progressMax)
+        bar.Bar:SetValue(progressValue)
+        bar.Bar:SetStatusBarColor(0, 0.5, 1, 1)
+        if bar.Bar.Label then bar.Bar.Label:SetText(dispText) end
+    elseif bar.SetMinMaxValues then
+        bar:SetMinMaxValues(0, progressMax)
+        bar:SetValue(progressValue)
+        bar:SetStatusBarColor(0, 0.5, 1, 1)
+        if bar.value then bar.value:SetText(dispText) end
+    end
+end
+
 -------------------------------------------------------------------------------
 -- RenderTrackableItem — renders a single quest/achievement row
 -------------------------------------------------------------------------------
@@ -716,28 +741,11 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                     bar._anchorLeft, bar._anchorTop, bar._anchorInset = barLeft, barTop, barRightInset
                 end
                 
-                local percent = 0
-                if progressMax > 0 then
-                    percent = floor((progressValue / progressMax) * 100)
-                end
-                local dispText = percent .. "%"
-                if progressMax > 0 and progressMax ~= 100 then
-                    dispText = format("%d/%d (%d%%)", floor(progressValue), floor(progressMax), percent)
-                end
-
-                if bar.isTemplate and bar.Bar then
-                    bar.Bar:SetMinMaxValues(0, progressMax)
-                    bar.Bar:SetValue(progressValue)
-                    bar.Bar:SetStatusBarColor(0, 0.5, 1, 1)
-                    if bar.Bar.Label then bar.Bar.Label:SetText(dispText) end
-                elseif bar.SetMinMaxValues then
+                if not bar.isTemplate and bar.SetMinMaxValues then
                     bar:SetHeight(15)
-                    bar:SetMinMaxValues(0, progressMax)
-                    bar:SetValue(progressValue)
-                    bar:SetStatusBarColor(0, 0.5, 1, 1)
-                    if bar.value then bar.value:SetText(dispText) end
                 end
-                
+                ApplyProgressBarValue(bar, progressValue, progressMax)
+
                 bar:Show()
 
                 local barH = 19
@@ -780,6 +788,117 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         button:SetScript("OnLeave", OnRowLeave)
         button._scriptMode = "trackable"
     end
-    
+
     return height
+end
+
+-------------------------------------------------------------------------------
+-- RefreshTrackableTextInPlace — combat-time objective update for a drawn row
+-------------------------------------------------------------------------------
+-- A full render can't run in combat: rows parent the secure quest item buttons, so
+-- neither they nor any frame above them can be moved, resized, shown or hidden.
+-- Font strings aren't frames, though -- their text, color and anchors can still
+-- change, as can a progress bar's value. This writes fresh objective data into the
+-- lines RenderTrackableItem already drew for `button`, leaving the row's size and
+-- the set of shown lines alone.
+--
+-- An objective whose shape changed (gained or lost a count prefix, became or stopped
+-- being a progress bar) is skipped, as is a row whose objective count changed (a new
+-- quest stage); the full render after combat redraws those. Text that grows enough to
+-- wrap onto another line may overlap the line below until then.
+--
+-- Returns true when every objective on the row was brought up to date.
+
+-- Parsed display data plus the bits that decide which lines the row draws.
+local function DescribeObjective(item, obj, objIndex)
+    local parsed = ParseObjectiveDisplay(item, obj, objIndex)
+    local isAchievement = (item.type == "achievement")
+    local body = parsed.bodyText
+    if isAchievement then
+        body = ResolveAchievementObjectiveText(item, obj.text, body)
+    end
+    local hasPrefix = parsed.prefixText ~= ""
+    local textThenProgress = isAchievement and hasPrefix and HasVisibleText(body)
+    local bodyShown = (not isAchievement) or HasVisibleText(body)
+    return parsed, body, hasPrefix, textThenProgress, bodyShown
+end
+
+function addon:RefreshTrackableTextInPlace(button, item)
+    local old = button.trackableData
+    local oldObjectives = old and old.objectives
+    local newObjectives = item.objectives
+    if not oldObjectives or not newObjectives or not button.objectives
+        or old.collapsed or item.collapsed
+        or #oldObjectives ~= #newObjectives then
+        return false
+    end
+
+    local db = self.db
+    local isAchievement = (item.type == "achievement")
+    local allUpdated = true
+
+    -- The title's color follows completion.
+    local titleColor = item.color or db.questColor
+    button.text:SetTextColor(titleColor.r, titleColor.g, titleColor.b, titleColor.a)
+
+    for objIndex, obj in ipairs(newObjectives) do
+        local objLine = button.objectives[objIndex]
+        local parsed, body, hasPrefix, textThenProgress, bodyShown = DescribeObjective(item, obj, objIndex)
+        local oldParsed, _, oldHasPrefix, oldTextThenProgress, oldBodyShown =
+            DescribeObjective(old, oldObjectives[objIndex], objIndex)
+
+        if not objLine
+            or hasPrefix ~= oldHasPrefix
+            or textThenProgress ~= oldTextThenProgress
+            or bodyShown ~= oldBodyShown
+            or parsed.isProgressBar ~= oldParsed.isProgressBar then
+            allUpdated = false
+        else
+            local c = obj.finished and db.completeColor or db.objectiveColor
+
+            local bullet = button.objectiveBullets and button.objectiveBullets[objIndex]
+            if bullet then bullet:SetTextColor(c.r, c.g, c.b, c.a) end
+
+            if textThenProgress then
+                local progressLine = button.objectiveProgresses and button.objectiveProgresses[objIndex]
+                if progressLine then
+                    progressLine:SetTextColor(c.r, c.g, c.b, c.a)
+                    progressLine:SetText(" - " .. parsed.prefixText)
+                end
+            elseif hasPrefix then
+                local prefixLine = button.objectivePrefixes[objIndex]
+                local oldWidth = prefixLine:GetStringWidth()
+                prefixLine:SetTextColor(c.r, c.g, c.b, c.a)
+                prefixLine:SetText(parsed.prefixText)
+
+                -- "9/10" -> "10/10" widens the prefix; slide the body along with it.
+                -- Achievement bodies use a fixed indent instead.
+                local shift = prefixLine:GetStringWidth() - oldWidth
+                if shift ~= 0 and not isAchievement then
+                    local point, relativeTo, relativePoint, x, y = objLine:GetPoint(1)
+                    if point then
+                        objLine:SetPoint(point, relativeTo, relativePoint, x + shift, y)
+                        objLine:SetWidth(max(objLine:GetWidth() - shift, 1))
+                    end
+                end
+            end
+
+            objLine:SetTextColor(c.r, c.g, c.b, c.a)
+            objLine:SetText(body)
+
+            if parsed.isProgressBar then
+                local bar = button.progressBars and button.progressBars[objIndex]
+                if bar then
+                    ApplyProgressBarValue(bar, parsed.progressValue, parsed.progressMax)
+                end
+            end
+        end
+    end
+
+    -- Only adopt the new data once the row fully matches it, so the next combat
+    -- refresh still compares skipped objectives against what's actually on screen.
+    if allUpdated then
+        button.trackableData = item
+    end
+    return allUpdated
 end
