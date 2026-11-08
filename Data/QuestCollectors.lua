@@ -11,6 +11,24 @@ local band = bit.band
 local GetRealZoneText = GetRealZoneText
 local C_QuestLog = C_QuestLog
 local C_SuperTrack = C_SuperTrack
+local GetNumSubgroupMembers = GetNumSubgroupMembers
+
+-- Unit tokens ("party1".."party4") of the party members who have questID in their
+-- quest log, or nil when there are none (or you're not grouped). The same check the
+-- game's quest log uses for its "Party members on quest" tooltip. In a raid,
+-- party1-4 are the members of your own subgroup.
+function addon:GetPartyMembersOnQuest(questID)
+    if not questID or not C_QuestLog.IsUnitOnQuest then return nil end
+    local units
+    for i = 1, GetNumSubgroupMembers() do
+        local unit = "party" .. i
+        if C_QuestLog.IsUnitOnQuest(unit, questID) then
+            units = units or {}
+            units[#units + 1] = unit
+        end
+    end
+    return units
+end
 
 local function ShouldForceObjectiveIncomplete(objectiveText)
     if type(objectiveText) ~= "string" then
@@ -106,6 +124,13 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
         objectives = {},
         color = self:GetQuestColor(info),
     }
+
+    -- Drives the "(+N)" after the title. Collected rather than looked up at paint
+    -- time so a change in the count bumps the data version and repaints the row.
+    if self.db.showPartyMembersOnQuest then
+        local partyUnits = self:GetPartyMembersOnQuest(questID)
+        questInfo.partyCount = partyUnits and #partyUnits or 0
+    end
 
     -- Get Quest Item Info
     local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)

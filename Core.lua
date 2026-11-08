@@ -326,7 +326,9 @@ function addon:RegisterEvents()
     frame:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
     frame:RegisterEvent("SUPER_TRACKING_CHANGED")
     frame:RegisterEvent("QUEST_AUTOCOMPLETE")
-    
+    -- Party joins/leaves change the "(+N)" party counts on quest titles.
+    frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+
     -- World quest events
     frame:RegisterEvent("QUEST_WATCH_UPDATE")
     frame:RegisterEvent("WORLD_QUEST_COMPLETED_BY_SPELL")
@@ -443,6 +445,7 @@ function addon:OnEvent(event, ...)
             or event == "UNIT_QUEST_LOG_CHANGED"
             or event == "SUPER_TRACKING_CHANGED"
             or event == "QUEST_AUTOCOMPLETE"
+            or event == "GROUP_ROSTER_UPDATE"
             or event == "QUEST_WATCH_UPDATE"
             or event == "WORLD_QUEST_COMPLETED_BY_SPELL"
             or event == "QUEST_POI_UPDATE"

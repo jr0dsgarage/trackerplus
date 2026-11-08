@@ -491,7 +491,12 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
         and not IsQuestTypeRedundant(item, item.questType) then
         titleText = titleText .. " (" .. item.questType .. ")"
     end
-    
+
+    -- How many party members are also on this quest (names are in the tooltip).
+    if db.showPartyMembersOnQuest and (item.partyCount or 0) > 0 then
+        titleText = format("%s (+%d)", titleText, item.partyCount)
+    end
+
     button.text:SetFont(db.fontFace, db.fontSize, db.fontOutline)
     -- The super-tracked quest keeps its own difficulty/status color; the POI button's
     -- selection glow is what marks it as selected.

@@ -212,6 +212,30 @@ end
 local TOOLTIP_DONE_COLOR = { r = 0.5, g = 1, b = 0.5 }
 local TOOLTIP_OPEN_COLOR = { r = 1, g = 1, b = 1 }
 
+local function GetClassColor(unit)
+    local _, classFile = UnitClass(unit)
+    if classFile then
+        local color = (C_ClassColor and C_ClassColor.GetClassColor(classFile))
+            or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile])
+        if color then return color.r, color.g, color.b end
+    end
+    return 1, 1, 1
+end
+
+-- "Party members on quest:" followed by each name in its class color. Looked up
+-- fresh on hover, so it's current even when the row's (+N) is waiting on a repaint.
+local function AddPartyMembersOnQuest(tooltip, questID)
+    local units = addon:GetPartyMembersOnQuest(questID)
+    if not units then return end
+
+    tooltip:AddLine(" ")
+    tooltip:AddLine(PARTY_QUEST_STATUS_ON or "Party members on quest:", 1, 0.82, 0)
+    for _, unit in ipairs(units) do
+        local name = GetUnitName(unit, true) or UNKNOWN or "Unknown"
+        tooltip:AddLine(name, GetClassColor(unit))
+    end
+end
+
 -- Show trackable tooltip
 function addon:ShowTrackableTooltip(button, trackable)
     if not trackable then return end
@@ -257,6 +281,10 @@ function addon:ShowTrackableTooltip(button, trackable)
                     end
                 end
             end
+        end
+
+        if addon.db.showPartyMembersOnQuest then
+            AddPartyMembersOnQuest(tooltip, trackable.id)
         end
     elseif trackable.type == "achievement" then
         tooltip:SetText(trackable.title)

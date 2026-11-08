@@ -66,6 +66,7 @@ local SETTING_EFFECTS = {
 
     fadeWhenEmpty = Recollect,
     showQuestLevel = Recollect,
+    showPartyMembersOnQuest = Recollect,
     sortMethod = Recollect,
     colorQuestsByDifficulty = Recollect,
     includeCampaignQuestInActiveQuest = Recollect,
@@ -675,6 +676,7 @@ local function InitUI()
 
     left, leftY = StartSection(tracking, "Quest Display", y)
     leftY = CreateCheckbox(left, "Show Quest Level", "showQuestLevel", "Show each quest's level before its name, e.g. [28+] for a group quest.", leftY)
+    leftY = CreateCheckbox(left, "Show Party Members on Quest", "showPartyMembersOnQuest", "Add (+N) after a quest's name for how many party members are also on it. Hover the quest to see who, colored by class.", leftY)
     leftY = CreateCheckbox(left, "Color by Difficulty", "colorQuestsByDifficulty", "Color quest names by how hard each quest is for you, matching the default quest log (grey, green, yellow, orange, red). Turn off to use the flat Quest Text color from Appearance instead.", leftY)
     leftY = CreateDropdown(left, "Sort Order", "sortMethod", {
         {text = "Difficulty (Easiest First)", value = "difficulty_asc"},

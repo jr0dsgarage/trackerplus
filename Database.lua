@@ -108,6 +108,7 @@ local DEFAULTS = {
     
     -- Display Options
     showQuestLevel = true,
+    showPartyMembersOnQuest = true, -- "(+N)" after the quest name; the names are in its tooltip
     colorQuestsByDifficulty = true, -- Color quest text using the client's own GetQuestDifficultyColor(level)
     colorMapPOIsByDifficulty = true, -- Outline the game's own world map quest pins in that same difficulty color
     mapPOIOutlineStyle = "glow", -- "glow" (the game's soft ring) or "circle" (hard ring)

@@ -77,6 +77,7 @@ Each quest row has:
 
 - The game's own **map pin button** on the left. Click it to focus that quest, or to stop focusing it.
 - The **quest level** before the name, e.g. `[28+]` for a group quest (**Show Quest Level**).
+- A **party count** after the name, e.g. `(+2)` when two party members are also on the quest. The tooltip lists their names in class colors (**Show Party Members on Quest**).
 - **Objectives** underneath, turning green when done and red when failed, with **progress bars** for percentage objectives.
 - A **quest item button** when the quest has a usable item. Click it to use the item, the same as on the game's tracker.
 - A **Find a Group** button on quests that have one.
@@ -241,7 +242,7 @@ Type `/tp`, click the gear on the title bar, or open **Game Menu → Options →
 | Page | What's on it |
 | --- | --- |
 | **TrackerPlus** | Turn the tracker on or off, lock it, show tooltips; hide it in instances, in combat or when empty; Campaign in Active Quest and Follow the Arrow; reset all settings. |
-| **Tracking Panel** | Show quest level, color by difficulty, sort order, which content types to show, and (with Spoken loaded) the Play buttons. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
+| **Tracking Panel** | Show quest level, show party members on quest, color by difficulty, sort order, which content types to show, and (with Spoken loaded) the Play buttons. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
 | **Nameplates** | Everything under [Nameplate highlights](#nameplate-highlights). |
 | **Appearance** | Match Game Tracker, anchor, width, height and scale; background and border textures and colors; header icon and background; row background; quest area marker; progress bar border and texture; fonts and sizes for headers, quest names and objectives; colors for text and each content type. |
 | **Layout** | Indents and spacing. |
