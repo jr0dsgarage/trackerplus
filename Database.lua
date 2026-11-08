@@ -17,7 +17,6 @@ local RETAIL_ONLY_SETTINGS = {
     showWorldQuests = true,
     showBonusObjectives = true,
     showScenarios = true,
-    showDungeonObjectives = true,
     showAchievements = true,
     showMonthlyActivities = true,
     showEndeavors = true,
@@ -48,7 +47,7 @@ end
 local DEFAULTS = {
     enabled = true,
     locked = false,
-    
+
     -- Frame Position & Size
     framePosition = nil,  -- {point, x, y}
     frameWidth = 250,
@@ -60,7 +59,7 @@ local DEFAULTS = {
     -- size (including changes made in the game's Edit Mode). Automatically cleared
     -- the first time the player drags or resizes the tracker themselves.
     matchBlizzardTracker = true,
-    
+
     -- Appearance
     backgroundColor = {r = 0, g = 0, b = 0, a = 0.7},
     borderEnabled = false,
@@ -90,14 +89,14 @@ local DEFAULTS = {
     headerFontSize = 14,
     headerFontFace = "Fonts\\FRIZQT__.TTF",
     headerFontOutline = "OUTLINE",
-    
+
     -- Colors
     headerColor = {r = 1, g = 0.82, b = 0, a = 1},  -- Gold
     questColor = {r = 1, g = 1, b = 1, a = 1},       -- White
     objectiveColor = {r = 0.9, g = 0.9, b = 0.9, a = 1},  -- Light gray
     completeColor = {r = 0, g = 1, b = 0, a = 1},    -- Green
     failedColor = {r = 1, g = 0, b = 0, a = 1},      -- Red
-    
+
     -- Trackable Type Colors
     achievementColor = {r = 1, g = 0.82, b = 0, a = 1},     -- Gold/Yellow
     scenarioColor = {r = 1, g = 1, b = 1, a = 1},           -- White
@@ -105,11 +104,11 @@ local DEFAULTS = {
     professionColor = {r = 0.5, g = 1, b = 0.5, a = 1},     -- Greenish
     monthlyColor = {r = 0.4, g = 0.6, b = 1, a = 1},        -- Blue
     endeavorColor = {r = 1, g = 0.4, b = 0.8, a = 1},       -- Pink
-    
+
     -- Display Options
     showQuestLevel = true,
     showPartyMembersOnQuest = true, -- "(+N)" after the quest name; the names are in its tooltip
-    colorQuestsByDifficulty = true, -- Color quest text using the client's own GetQuestDifficultyColor(level)
+    colorQuestsByDifficulty = true, -- Color quest names by the game's own difficulty rating for the player (see QuestColors.lua)
     colorMapPOIsByDifficulty = true, -- Outline the game's own world map quest pins in that same difficulty color
     mapPOIOutlineStyle = "glow", -- "glow" (the game's soft ring) or "circle" (hard ring)
     mapPOIOutlineThickness = 2, -- How far the circle/glow reaches past the pin, in pixels (1-10)
@@ -125,38 +124,37 @@ local DEFAULTS = {
     spokenPlayButton = true,             -- Play button on quest rows that a voice pack reads
     spokenPlayButtonPosition = "right",  -- "left" (under the POI button) or "right" (right edge of the title line)
     spokenPlayButtonActiveQuest = true,  -- Play button beside the Active Quest section's title (independent of the above)
-    
+
     -- Sorting
     sortMethod = "difficulty_asc",  -- "difficulty_asc", "difficulty_desc", "proximity", "alphabetical"
-    
+
     -- State
     collapsedHeaders = {},
     collapsedSections = {},
-    
+
     -- Trackable Types
     showQuests = true,
     showAchievements = true,
     showWorldQuests = true,
     showBonusObjectives = true,
     showProfessions = true,
-    showScenarios = true,
-    showDungeonObjectives = true,
+    showScenarios = true, -- scenarios, delves and dungeons
     showMonthlyActivities = true,
     showEndeavors = true,
-    
+
     -- Advanced Features
     hideInInstance = false,
     hideInCombat = false,
     fadeWhenEmpty = true,
-    
+
     -- Quest Type Colors
     questTypeColors = {
         worldQuest = {r = 0.25, g = 0.78, b = 0.92, a = 1},
     },
-    
+
     -- Interaction
     showTooltips = true,
-    
+
     -- Performance
     updateInterval = 0.15,
 
@@ -165,10 +163,10 @@ local DEFAULTS = {
     debugLevel = "error", -- off | error | warn | info | trace
     layoutDebug = false,
     debugSectionBoxes = false,
-    
+
     -- Cache
     endeavorCache = {}, -- Stores last known tracked endeavors {id=true}
-    
+
     -- Spacing & Layout
     spacingMajorHeaderIndent = 0,      -- Indent for major category headers (Quests, Achievements, etc.)
     spacingMinorHeaderIndent = 5,      -- Indent for minor zone headers
@@ -180,7 +178,7 @@ local DEFAULTS = {
     spacingMinorHeaderAfter = 22,      -- Vertical space after minor headers
     spacingProgressBarInset = 20,      -- Horizontal inset for progress bars from edges
     spacingProgressBarPadding = 5,     -- Vertical padding above progress bars (below text)
-    
+
     -- Progress Bar Styling
     barTexture = "Blizzard",          -- Texture for progress bars
     barBorderSize = 1,                -- Border thickness in pixels (0 hides border)
@@ -230,7 +228,7 @@ function addon:InitDatabase()
             end
         end
     end
-    
+
     ApplyClientRestrictions(TrackerPlusDB.settings)
 
     -- Create reference to settings

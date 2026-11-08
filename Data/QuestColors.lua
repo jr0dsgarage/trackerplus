@@ -6,7 +6,6 @@ local _, addon = ...
 -- Localize hot-path globals to avoid repeated global lookups
 local next = next
 local type = type
-local band = bit.band
 local UnitLevel = UnitLevel
 local C_QuestLog = C_QuestLog
 
@@ -166,14 +165,15 @@ end
 -- quest used to be painted a flat gold, which hid its difficulty color; the POI
 -- button's selection glow already marks which quest is selected.
 
--- The same color, for a quest known only by its ID.
+-- The color a quest's title is painted with, for a quest known only by its ID, so a
+-- map pin and its tracker row always agree.
 --
 -- GetQuestColor works from the C_QuestLog.GetInfo table the collection pass already
 -- holds. Callers outside that pass -- the world map pins -- only have a questID, so
 -- rebuild that input rather than duplicating the color rules and letting the two
 -- drift apart. A quest the map pins but the log no longer lists falls back to the
 -- client's own difficulty level for it.
-function addon:GetQuestColorByQuestID(questID)
+function addon:GetQuestTitleColorByQuestID(questID)
     if not questID then return nil end
 
     local logIndex = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
@@ -187,10 +187,4 @@ function addon:GetQuestColorByQuestID(questID)
     local level = C_QuestLog.GetQuestDifficultyLevel and C_QuestLog.GetQuestDifficultyLevel(questID)
     level = tonumber(level) or 0
     return self:GetQuestColor({ questID = questID, level = level, difficultyLevel = level })
-end
-
--- The color a quest's title is painted with, for callers outside the render pass
--- (the map pins), so a pin and its tracker row always agree.
-function addon:GetQuestTitleColorByQuestID(questID)
-    return self:GetQuestColorByQuestID(questID)
 end

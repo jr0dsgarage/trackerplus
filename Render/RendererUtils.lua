@@ -107,7 +107,6 @@ local TOP_RIGHT_LABEL = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -3, y =
 -- `frame` names the addon field holding each section's frame.
 local DEBUG_SECTIONS = {
     { key = "tracker", frame = "trackerFrame", color = {1.0, 0.35, 0.35}, anchor = TOP_LEFT_LABEL },
-    { key = "autoquest", frame = "autoQuestFrame", color = {1.0, 0.65, 0.25}, anchor = TOP_RIGHT_LABEL },
     { key = "completedquest", frame = "completedQuestFrame", color = {0.8, 0.8, 0.2}, anchor = TOP_RIGHT_LABEL },
     { key = "scenario", frame = "scenarioFrame", color = {0.35, 0.95, 1.0}, anchor = TOP_LEFT_LABEL },
     { key = "activequest", frame = "activeQuestFrame", color = {1.0, 0.85, 0.2}, anchor = TOP_LEFT_LABEL },

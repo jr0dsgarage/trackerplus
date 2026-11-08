@@ -19,7 +19,10 @@ local function GetObjectiveParseKey(item, obj, objIndex)
     -- some signal of text identity in the key, the cache would keep serving the previous
     -- stage's parsed text forever (see ParseObjectiveDisplay regression notes). String
     -- length is a plain number, not the protected value itself, so it carries no taint.
-    return format("%s\31%s\31%s\31%s\31%s\31%d\31%d",
+    -- The item's type is included because IDs are only unique within a type (an
+    -- achievement can share its number with a quest), and parsing differs by type.
+    return format("%s\31%s\31%s\31%s\31%s\31%s\31%d\31%d",
+        tostring(item.type or ""),
         tostring(item.id or 0),
         tostring(objIndex),
         tostring(obj.type or ""),
@@ -174,9 +177,16 @@ end
 function addon.ResolveTrackableItemData(item)
     if not item then return nil end
 
+    -- Only quest rows carry a log index, and only quests have quest items. Every
+    -- other row's id (achievement, recipe, activity...) is not a quest ID, and looking
+    -- it up as one would put some unrelated quest's item button on that row.
+    local logIndex = item.logIndex
+    if not logIndex then
+        return nil
+    end
+
     -- Always re-resolve logIndex from questID to guard against stale indices
     -- caused by quest log reordering (quest accept/abandon/complete since last collect).
-    local logIndex = item.logIndex
     if item.id then
         local freshIndex = C_QuestLog.GetLogIndexForQuestID(item.id)
         if freshIndex and freshIndex > 0 then
@@ -186,7 +196,7 @@ function addon.ResolveTrackableItemData(item)
     end
 
     -- Re-fetch from the API to catch cases where data wasn't loaded at collection time.
-    if logIndex and logIndex > 0 then
+    if logIndex > 0 then
         local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
         if itemLink or itemTexture then
             local itemData = item.item or {}

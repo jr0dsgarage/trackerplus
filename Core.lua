@@ -36,7 +36,7 @@ local BUCKETS = {
     { name = "achievements", collector = "CollectAchievements",
       enabled = function(db) return db.showAchievements end },
     { name = "scenarios", collector = "CollectScenarioObjectives",
-      enabled = function(db) return db.showScenarios or db.showDungeonObjectives end },
+      enabled = function(db) return db.showScenarios end },
     { name = "autoQuests", collector = "CollectAutoQuests" },
     { name = "superTracked", collector = "CollectSuperTrackedQuest" },
     { name = "professions", collector = "CollectProfessionTracking",
@@ -120,13 +120,13 @@ end
 function addon:Initialize()
     -- Initialize database
     self:InitDatabase()
-    
+
     -- Create tracker frame
     self:CreateTrackerFrame()
-    
+
     -- Register events
     self:RegisterEvents()
-    
+
     -- Register slash commands
     self:RegisterSlashCommands()
 
@@ -145,7 +145,7 @@ function addon:Initialize()
     -- Initial update
     self:RequestUpdate()
     self._layoutDirty = true
-    
+
     -- Manage default Blizzard tracker
     if ObjectiveTrackerFrame then
         -- Hook Show to control visibility based on our enabled state
@@ -232,17 +232,12 @@ local function RestoreTracker(tracker)
 end
 
 function addon:RestoreAllHijackedFrames()
-    if not InCombatLockdown() then
-        for _, name in ipairs(SCENARIO_TRACKER_NAMES) do
-            local tracker = _G[name]
-            if tracker then
-                pcall(RestoreTracker, tracker)
-            end
+    if InCombatLockdown() then return end
+    for _, name in ipairs(SCENARIO_TRACKER_NAMES) do
+        local tracker = _G[name]
+        if tracker then
+            pcall(RestoreTracker, tracker)
         end
-    end
-
-    if self.scenarioFrame then
-        self.scenarioFrame.borrowedFrame = nil
     end
 end
 
@@ -316,7 +311,7 @@ end
 function addon:RegisterEvents()
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-    
+
     -- Quest events
     frame:RegisterEvent("QUEST_ACCEPTED")
     frame:RegisterEvent("QUEST_REMOVED")
@@ -332,32 +327,32 @@ function addon:RegisterEvents()
     -- World quest events
     frame:RegisterEvent("QUEST_WATCH_UPDATE")
     frame:RegisterEvent("WORLD_QUEST_COMPLETED_BY_SPELL")
-    
+
     -- Bonus objective / Task quest events
     RegisterOptionalEvent("QUEST_POI_UPDATE")
     RegisterOptionalEvent("TASK_PROGRESS_UPDATE")
     RegisterOptionalEvent("QUEST_PROGRESS_UPDATE")
     RegisterOptionalEvent("QUEST_LOG_CRITERIA_UPDATE")
-    
+
     -- Achievement events
     frame:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     frame:RegisterEvent("ACHIEVEMENT_EARNED")
     frame:RegisterEvent("CRITERIA_UPDATE")
-    
+
     -- Scenario/Dungeon events
     frame:RegisterEvent("SCENARIO_UPDATE")
     frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
     frame:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
-    
+
     -- Zone change events
     frame:RegisterEvent("ZONE_CHANGED")
     frame:RegisterEvent("ZONE_CHANGED_INDOORS")
     frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    
+
     -- Combat events
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    
+
     -- Profession events
     frame:RegisterEvent("SKILL_LINES_CHANGED")
     frame:RegisterEvent("TRADE_SKILL_SHOW")
@@ -375,13 +370,13 @@ function addon:RegisterEvents()
     if C_PerksProgram then
         RegisterOptionalEvent("PERKS_PROGRAM_DATA_REFRESH")
     end
-    
+
     -- Endeavors (Housing)
     if C_NeighborhoodInitiative then
         RegisterOptionalEvent("INITIATIVE_TASKS_TRACKED_UPDATED")
         RegisterOptionalEvent("INITIATIVE_TASKS_TRACKED_LIST_CHANGED")
     end
-    
+
     -- General Content Tracking (Modern API)
     RegisterOptionalEvent("CONTENT_TRACKING_UPDATE")
     RegisterOptionalEvent("TRACKABLE_INFO_UPDATE")
@@ -394,7 +389,7 @@ function addon:RegisterEvents()
     frame:SetScript("OnEvent", function(_, event, ...)
         addon:OnEvent(event, ...)
     end)
-    
+
     frame:SetScript("OnUpdate", function(_, elapsed)
         addon:OnUpdate(elapsed)
     end)
@@ -403,7 +398,7 @@ end
 -- Event handler
 function addon:OnEvent(event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
-        self.RestorePosition()
+        self:RestorePosition()
         self:UpdateDefaultTrackerVisibility()
         self:RequestUpdate("full")
 
@@ -417,21 +412,19 @@ function addon:OnEvent(event, ...)
         -- unless they've already positioned TrackerPlus themselves.
         self:SyncWithBlizzardTracker()
     elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat
+        -- Entering combat. This fires just before the lockdown starts, so the tracker
+        -- can still be hidden even while it holds secure quest item buttons.
         if self.db.hideInCombat then
             self:SetTrackerVisible(false)
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Leaving combat
-        if self.db.hideInCombat then
-            self:SetTrackerVisible(true)
-        end
-
         -- Re-assert suppression now that combat restrictions are lifted.
         self:UpdateDefaultTrackerVisibility()
-        
-        -- Process pending updates
-        if pendingUpdate then
+
+        -- Catch up on whatever combat deferred. This is also what brings back a
+        -- tracker Hide in Combat hid: UpdateTracker decides whether it should show at
+        -- all (disabled, empty, in an instance) rather than it being shown blindly.
+        if pendingUpdate or self.db.hideInCombat then
             pendingUpdate = false
             self:RequestUpdate()
         end
@@ -484,6 +477,9 @@ function addon:OnEvent(event, ...)
             self:RequestUpdate("monthly")
         elseif event == "INITIATIVE_TASKS_TRACKED_UPDATED"
             or event == "INITIATIVE_TASKS_TRACKED_LIST_CHANGED" then
+            -- The game has now said which endeavors are tracked, so an empty list
+            -- means none rather than "not loaded yet" (see CollectEndeavors).
+            self._endeavorListKnown = true
             self:RequestUpdate("endeavors")
         else
             -- Includes CONTENT_TRACKING_UPDATE / TRACKABLE_INFO_UPDATE, which can
@@ -511,7 +507,7 @@ function addon:OnUpdate(elapsed)
     if self.trackerFrame and not self.trackerFrame:IsShown() then
         updateInterval = max(updateInterval, 0.25)
     end
-    
+
     if updateTimer >= updateInterval then
         updateTimer = 0
         frame:Hide()
@@ -539,6 +535,25 @@ end
 
 -- Main update function
 function addon:UpdateTracker()
+    if not self.trackerFrame then
+        return
+    end
+
+    local db = self.db
+
+    -- Disabled: stay hidden, and hand back everything borrowed from the game's
+    -- tracker so it shows complete. Borrowed frames can only move out of combat.
+    if not db.enabled then
+        if InCombatLockdown() then
+            pendingUpdate = true
+        else
+            self:ReleaseScenarioTracker()
+            self:ReleaseAutoQuestPopups()
+        end
+        self:SetTrackerVisible(false)
+        return
+    end
+
     -- In combat, run a minimal layout-only refresh to avoid protected UI mutations.
     if InCombatLockdown() then
         pendingUpdate = true
@@ -547,19 +562,12 @@ function addon:UpdateTracker()
         return
     end
 
-    if not self.trackerFrame then
-        return
-    end
-
-    local db = self.db
-
     -- Check if we should hide
-    local inInstance = IsInInstance()
-    if db.hideInInstance and inInstance then
+    if db.hideInInstance and IsInInstance() then
         self:SetTrackerVisible(false)
         return
     end
-    
+
     -- Track layout changes independently from data changes
     if db.frameWidth ~= lastFrameWidth or db.frameHeight ~= lastFrameHeight or db.frameScale ~= lastFrameScale then
         lastFrameWidth, lastFrameHeight, lastFrameScale = db.frameWidth, db.frameHeight, db.frameScale
@@ -573,7 +581,7 @@ function addon:UpdateTracker()
     -- Scenario/Delve visuals are hijacked from Blizzard frames and may change without
     -- mutating our collected dataVersion, so skipping paint can leave stale/empty UI.
     local forceDisplayRefresh = false
-    if addon:IsAnyScenarioTrackerActive() then
+    if db.showScenarios and self:IsAnyScenarioTrackerActive() then
         local now = GetTime()
         if self._nextScenarioRefreshAt == nil or now >= self._nextScenarioRefreshAt then
             forceDisplayRefresh = true
@@ -605,23 +613,15 @@ function addon:UpdateTracker()
             end
         end
     end
-    
-    -- Handle fade when empty
-    -- If unlocked, always show so user can move it
-    if not db.locked then
-        self:SetTrackerVisible(true)
-        -- Add a visual indicator that it's empty but unlocked
-        if #trackables == 0 and self.trackerFrame and self.trackerFrame.title then
-             self.trackerFrame.title:SetText("Tracker Plus (Empty - Drag to Move)")
-        end
-    elseif db.fadeWhenEmpty and #trackables == 0 then
-        self:SetTrackerVisible(false)
-    else
-        if self.trackerFrame and self.trackerFrame.title then
-             self.trackerFrame.title:SetText("Tracker Plus")
-        end
-        self:SetTrackerVisible(db.enabled)
+
+    -- Unlocked, the tracker always shows so it can be dragged into place, with a hint
+    -- in the title while it's empty. Locked, Hide When Empty can hide it.
+    local isEmpty = #trackables == 0
+    local title = self.trackerFrame.title
+    if title then
+        title:SetText((isEmpty and not db.locked) and "Tracker Plus (Empty - Drag to Move)" or "Tracker Plus")
     end
+    self:SetTrackerVisible(not (db.locked and db.fadeWhenEmpty and isEmpty))
 end
 
 -- Combat-safe refresh: update top-level frame visibility/size and layout only.
@@ -697,7 +697,7 @@ function addon:CollectTrackables()
         end
         AppendBucket(trackables, bucket.items)
     end
-    
+
     -- Sort trackables
     self:SortTrackables(trackables)
 
@@ -707,39 +707,54 @@ function addon:CollectTrackables()
 
     -- Done applying this dirty batch
     wipe(dirtySections)
-    
+
     return trackables
 end
 
 -- Set tracker visibility
 function addon:SetTrackerVisible(visible)
-    if self.trackerFrame then
-        -- While Edit Mode is open and we're mirroring the game's tracker, stay
-        -- hidden regardless of what the regular update loop asks for.
-        if visible and not self._hideForEditMode then
-            self.trackerFrame:Show()
-        else
-            self.trackerFrame:Hide()
-        end
+    local trackerFrame = self.trackerFrame
+    if not trackerFrame then return end
+
+    -- While Edit Mode is open and we're mirroring the game's tracker, stay
+    -- hidden regardless of what the regular update loop asks for.
+    visible = (visible and not self._hideForEditMode) and true or false
+    if trackerFrame:IsShown() == visible then return end
+
+    -- The secure quest item buttons make the tracker protected while it holds any,
+    -- so in combat it can't be shown or hidden; the update after combat applies it.
+    if InCombatLockdown() and trackerFrame:IsProtected() then
+        pendingUpdate = true
+        return
     end
+    trackerFrame:SetShown(visible)
+end
+
+-- Applies db.enabled: TrackerPlus or the game's own tracker, never both.
+function addon:ApplyEnabledState()
+    if not self.db.enabled then
+        self:SetTrackerVisible(false)
+    end
+    self:UpdateDefaultTrackerVisibility()
+    -- While disabled, UpdateTracker hands back what it borrowed from the game's
+    -- tracker; once re-enabled, it repaints everything and shows the tracker again.
+    self:RefreshDisplay()
 end
 
 -- Slash commands
 function addon:RegisterSlashCommands()
     SLASH_TRACKERPLUS1 = "/trackerplus"
     SLASH_TRACKERPLUS2 = "/tp"
-    
+
     SlashCmdList["TRACKERPLUS"] = function(msg)
         msg = msg:lower():trim()
-        
+
         if msg == "" or msg == "config" or msg == "settings" or msg == "options" then
             addon.OpenSettings()
         elseif msg == "toggle" then
-            local enabled = not addon.db.enabled
-            addon:SetSetting("enabled", enabled)
-            addon:SetTrackerVisible(enabled)
-            addon:UpdateDefaultTrackerVisibility()
-            Print(enabled and "Enabled" or "Disabled")
+            addon:SetSetting("enabled", not addon.db.enabled)
+            addon:ApplyEnabledState()
+            Print(addon.db.enabled and "Enabled" or "Disabled")
         elseif msg == "lock" then
             addon:SetSetting("locked", true)
             addon:UpdateTrackerLock()
@@ -749,9 +764,9 @@ function addon:RegisterSlashCommands()
             addon:UpdateTrackerLock()
             Print("Tracker unlocked")
         elseif msg == "reset" then
-            addon:ResetDatabase()
-            addon:RequestUpdate()
-            Print("Settings reset to defaults")
+            -- The same confirmation as the Settings button. Accepting reloads the UI,
+            -- the only way every frame, watcher and setting widget picks up the defaults.
+            StaticPopup_Show("TRACKERPLUS_RESET_CONFIRM")
         elseif msg == "nameplates" or msg:find("^nameplates ") then
             addon.Nameplates:HandleCommand(msg:sub(#"nameplates" + 2))
         else

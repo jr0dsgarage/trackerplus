@@ -43,29 +43,29 @@ function addon:CreateBorderLines(bar, size)
     size = tonumber(size) or 1
     if size < 0 then size = 0 end
     local pixelSize = floor(size + 0.5)
-    
+
     -- Create border frame if it doesn't exist
     if not bar.border then
         bar.border = CreateFrame("Frame", nil, bar)
-        
-        local function CreateLine(p) 
-            local t = p:CreateTexture(nil, "BORDER") 
-            t:SetColorTexture(1, 1, 1, 1) 
-            return t 
+
+        local function CreateLine(p)
+            local t = p:CreateTexture(nil, "BORDER")
+            t:SetColorTexture(1, 1, 1, 1)
+            return t
         end
-        
+
         bar.border.top = CreateLine(bar.border)
         bar.border.top:SetPoint("TOPLEFT")
         bar.border.top:SetPoint("TOPRIGHT")
-        
+
         bar.border.bottom = CreateLine(bar.border)
         bar.border.bottom:SetPoint("BOTTOMLEFT")
         bar.border.bottom:SetPoint("BOTTOMRIGHT")
-        
+
         bar.border.left = CreateLine(bar.border)
         bar.border.left:SetPoint("TOPLEFT")
         bar.border.left:SetPoint("BOTTOMLEFT")
-        
+
         bar.border.right = CreateLine(bar.border)
         bar.border.right:SetPoint("TOPRIGHT")
         bar.border.right:SetPoint("BOTTOMRIGHT")
@@ -77,20 +77,21 @@ function addon:CreateBorderLines(bar, size)
         return
     end
     bar.border:Show()
-    
+
     -- Update Size & Anchors
     bar.border:ClearAllPoints()
     bar.border:SetPoint("TOPLEFT", -pixelSize, pixelSize)
     bar.border:SetPoint("BOTTOMRIGHT", pixelSize, -pixelSize)
-    
+
     bar.border.top:SetHeight(pixelSize)
     bar.border.bottom:SetHeight(pixelSize)
     bar.border.left:SetWidth(pixelSize)
     bar.border.right:SetWidth(pixelSize)
 end
 
--- Major header order and titles. Scenarios are rendered separately, and campaign
--- items are typed "quest" with questType="campaign", so they fall into Quests.
+-- Major header order and titles of the scrolling list. Everything else (scenarios,
+-- the Active Quest, campaign, bonus and world quests, quest popups) has its own pinned
+-- section, so its type has no bucket here.
 local ORGANIZE_ORDER = {
     { type = "quest", title = "Quests" },
     { type = "achievement", title = "Achievements" },
@@ -243,7 +244,7 @@ local OBJECTIVE_PART_KEYS = { "objectiveBullets", "objectivePrefixes", "objectiv
 -- part another renderer might have added hidden or reset.
 function addon:GetOrCreateButton(parent)
     activeButtons = activeButtons + 1
-    
+
     local btn
     if trackableButtons[activeButtons] then
         btn = trackableButtons[activeButtons]
@@ -254,26 +255,26 @@ function addon:GetOrCreateButton(parent)
     else
         btn = CreateFrame("Button", nil, parent)
         btn:SetHeight(20)
-        
+
         -- Background
         btn.bg = btn:CreateTexture(nil, "BACKGROUND")
         btn.bg:SetAllPoints()
         btn.bg:SetColorTexture(0, 0, 0, 0)
-        
+
         -- Text
         btn.text = btn:CreateFontString(nil, "OVERLAY")
         btn.text:SetPoint("TOPLEFT", 2, -2)
         btn.text:SetPoint("TOPRIGHT", -2, -2)
         btn.text:SetJustifyH("LEFT")
         btn.text:SetWordWrap(true)
-        
+
         -- Enable mouse
         btn:EnableMouse(true)
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        
+
         table.insert(trackableButtons, btn)
     end
-    
+
     -- Reset parts other renderers add to pooled buttons
     if btn._ftaCounter then btn._ftaCounter:Hide() end
     -- Only trackable rows draw a row background (RenderTrackableItem re-shows it).
@@ -281,11 +282,11 @@ function addon:GetOrCreateButton(parent)
     -- The quest-area highlight belongs to whichever quest last used this button; the
     -- quest renderer re-applies it, every other renderer must not inherit it.
     if btn._areaLit or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end
-    
+
     -- IMPORTANT: Clear points on reuse to prevent anchor conflicts
     btn:ClearAllPoints()
     btn:Show()
-    
+
     -- Hide any lingering children like progress bars
     if btn.progressBars then
         for _, frame in pairs(btn.progressBars) do
@@ -337,7 +338,7 @@ end
 -- Get or create a secure button for Queue/Item use
 function addon:GetOrCreateSecureButton(parent)
     activeSecureButtons = activeSecureButtons + 1
-    
+
     local button
     if secureButtons[activeSecureButtons] then
         button = secureButtons[activeSecureButtons]
@@ -345,30 +346,30 @@ function addon:GetOrCreateSecureButton(parent)
         -- Create new secure button
         button = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
         button:SetSize(20, 20)
-        
+
         -- Icon
         button.icon = button:CreateTexture(nil, "ARTWORK")
         button.icon:SetAllPoints()
-        
+
         -- Cooldown
         button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
         button.cooldown:SetAllPoints()
         button.cooldown:SetHideCountdownNumbers(false)
-        
+
         -- Hover
         button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
-        
+
         -- Register
         button:RegisterForClicks("AnyUp", "AnyDown")
-        
+
         table.insert(secureButtons, button)
     end
-    
+
     -- Secure frames can't be reparented in combat; renders then reuse the old parent.
     if not InCombatLockdown() then
         button:SetParent(parent)
     end
-    
+
     return button
 end
 
@@ -431,6 +432,8 @@ function addon:StopTrackingTrackable(trackable)
     elseif t == "endeavor" then
         if not (C_NeighborhoodInitiative and C_NeighborhoodInitiative.RemoveTrackedInitiativeTask) then return false end
         C_NeighborhoodInitiative.RemoveTrackedInitiativeTask(id)
+        -- Or the login fallback in CollectEndeavors would keep showing it.
+        self.db.endeavorCache[id] = nil
     else
         return false
     end
@@ -575,7 +578,7 @@ end
 -- Handle trackable click
 function addon:OnTrackableClick(trackable, mouseButton)
     if not trackable then return end
-    
+
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
             -- Shift+Left: Link to Chat (untracking lives in the right-click menu)
@@ -623,11 +626,16 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     C_Timer.After(0.5, TryOpenRecipe)
                 end
             elseif trackable.type == "monthly" then
-                if not EncounterJournal then EncounterJournal_LoadUI() end
-                if not EncounterJournal:IsShown() then ToggleEncounterJournal() end
-                -- Switch to the Traveler's Log tab where the client supports it.
-                if EncounterJournal_DisplayMonthlyActivities then
-                    EncounterJournal_DisplayMonthlyActivities()
+                if not EncounterJournal and EncounterJournal_LoadUI then EncounterJournal_LoadUI() end
+                if MonthlyActivitiesFrame_OpenFrameToActivity then
+                    -- What the game's own tracker does: the Traveler's Log, on this activity.
+                    MonthlyActivitiesFrame_OpenFrameToActivity(trackable.id)
+                elseif EncounterJournal then
+                    if not EncounterJournal:IsShown() then ToggleEncounterJournal() end
+                    -- Switch to the Traveler's Log tab where the client supports it.
+                    if EncounterJournal_DisplayMonthlyActivities then
+                        EncounterJournal_DisplayMonthlyActivities()
+                    end
                 end
             elseif trackable.type == "endeavor" then
                 if HousingFramesUtil and HousingFramesUtil.OpenFrameToTaskID then
@@ -642,36 +650,36 @@ function addon:OnTrackableClick(trackable, mouseButton)
             if not questID then return end
             MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
                 rootDescription:CreateTitle(trackable.title)
-                
+
                 -- Focus (Super Track)
                 rootDescription:CreateButton("Focus Quest", function()
                     C_SuperTrack.SetSuperTrackedQuestID(questID)
                 end)
-                
+
                 -- Stop Tracking
                 rootDescription:CreateButton("Stop Tracking", function()
                     C_QuestLog.RemoveQuestWatch(questID)
                     addon:RequestUpdate()
                 end)
-                
+
                 -- Open Quest Log (Show in Map)
                 rootDescription:CreateButton("Show in Quest Log", function()
                     addon:OpenMapToQuest(questID)
                 end)
-                
-                -- Share
-                if IsInGroup() then
+
+                -- Share (as the game's quest log offers it: in a group, for a shareable quest)
+                if IsInGroup() and (not C_QuestLog.IsPushableQuest or C_QuestLog.IsPushableQuest(questID)) then
                     rootDescription:CreateButton("Share Quest", function()
                         C_QuestLog.SetSelectedQuest(questID)
                         QuestLogPushQuest()
                     end)
                 end
-                
+
                 -- Link to Chat
                 rootDescription:CreateButton("Link to Chat", function()
                     addon:LinkQuestToChat(questID)
                 end)
-                
+
                 -- Abandon (Cautious)
                 rootDescription:CreateButton("Abandon Quest", function()
                     C_QuestLog.SetSelectedQuest(questID)
@@ -736,6 +744,9 @@ function addon:ToggleHeader(key, recursive)
     else
         collapsedHeaders[key] = not collapsedHeaders[key]
     end
-    
-    self:RequestUpdate()
+
+    -- Collapse state only changes the paint, not the collected data, so this has to
+    -- force a repaint: a plain RequestUpdate is skipped when another pending section
+    -- re-collects without changing anything.
+    self:RefreshDisplay()
 end

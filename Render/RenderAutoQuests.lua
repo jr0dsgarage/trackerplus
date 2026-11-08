@@ -340,35 +340,29 @@ local function EnsureCompletedQuestFrameAnchor(owner)
     owner.completedQuestFrame:SetFrameLevel(owner.scenarioFrame:GetFrameLevel() + 2)
 end
 
+-- Hands every borrowed popup back to the game's tracker and empties the section. A
+-- popup that can't go back yet (protected, or in combat) stays tracked for a retry.
+function addon:ReleaseAutoQuestPopups()
+    local completedQuestFrame = self.completedQuestFrame
+    RestoreStaleBorrowedPopups(self, nil)
+    HideLegacyCompletedQuestChildren(completedQuestFrame, nil)
+    self._autoQuestBorrowSessionUntil = nil
+    completedQuestFrame:SetHeight(1)
+    completedQuestFrame:Hide()
+end
+
 -------------------------------------------------------------------------------
 -- RenderAutoQuestSection — borrows Blizzard auto-quest popups when possible
 -------------------------------------------------------------------------------
 function addon:RenderAutoQuestSection(autoQuests)
     local completedQuestFrame = self.completedQuestFrame
-    local autoQuestFrame = self.autoQuestFrame
 
-    autoQuestFrame:SetHeight(1)
-    autoQuestFrame:Hide()
-
-    if addon.db.minimized then
-        RestoreStaleBorrowedPopups(self, nil)
-        HideLegacyCompletedQuestChildren(completedQuestFrame, nil)
-        self._autoQuestBorrowSessionUntil = nil
-        completedQuestFrame:SetHeight(1)
-        completedQuestFrame:Hide()
-        return
-    end
-
-    -- If no auto quests are currently tracked, do not keep any persisted borrowed
-    -- completion popup alive. This prevents stale frames from lingering after quest
-    -- completion when Blizzard leaves a visible shell frame behind.
-    if #autoQuests == 0 then
-        RestoreStaleBorrowedPopups(self, nil)
-        HideLegacyCompletedQuestChildren(completedQuestFrame, nil)
-        self._autoQuestBorrowSessionUntil = nil
-        completedQuestFrame:SetHeight(1)
-        completedQuestFrame:Hide()
-        self:LogAt("trace", "[AQ-PATH] no tracked autoQuests, force hiding completedQuestFrame")
+    -- With no auto quests currently tracked, don't keep any persisted borrowed
+    -- completion popup alive either. This prevents stale frames from lingering after
+    -- quest completion when Blizzard leaves a visible shell frame behind.
+    if self.db.minimized or #autoQuests == 0 then
+        self:ReleaseAutoQuestPopups()
+        self:LogAt("trace", "[AQ-PATH] minimized or no tracked autoQuests, force hiding completedQuestFrame")
         return
     end
 

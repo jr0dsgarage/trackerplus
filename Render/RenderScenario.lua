@@ -170,6 +170,19 @@ local function DescribeAnchor(frame)
     )
 end
 
+-- Hands the borrowed scenario tracker back to the game's own tracker.
+-- addon:RestoreAllHijackedFrames (Core.lua) is the real restore implementation; it
+-- walks the same candidate tracker names and restores anything carrying the
+-- _trackerPlusOriginal* fields RenderScenarioSection sets.
+function addon:ReleaseScenarioTracker()
+    local borrowed = self._activeScenarioBorrowedTracker
+    if borrowed then
+        borrowed._trackerPlusAnchorLockEnabled = nil
+    end
+    self:RestoreAllHijackedFrames()
+    self._activeScenarioBorrowedTracker = nil
+end
+
 -------------------------------------------------------------------------------
 -- RenderScenarioSection — borrows the Blizzard scenario/delve/dungeon tracker frame
 -- Returns: scenarioYOffset (total height consumed by scenario section)
@@ -199,8 +212,10 @@ function addon:RenderScenarioSection()
         inScenario = self:IsAnyScenarioTrackerActive()
     end
 
-    -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons)
-    for _, name in ipairs(addon.SCENARIO_TRACKER_NAMES) do
+    -- Detect active Blizzard scenario tracker (Delves, Scenarios, Dungeons). With the
+    -- Scenarios setting off nothing is borrowed, and anything borrowed is handed back
+    -- below, exactly as when no scenario is running.
+    for _, name in ipairs(self.db.showScenarios and addon.SCENARIO_TRACKER_NAMES or {}) do
         local tracker = _G[name]
         local contents = tracker and tracker.ContentsFrame
         if contents then
@@ -220,7 +235,7 @@ function addon:RenderScenarioSection()
             end
         end
     end
-    
+
     if trace then
         self:LogAt("trace", "[SCN-BORROW] selected=%s inScenario=%s scenarioCount=%d",
             tostring(scenarioTrackerName), tostring(inScenario), self.currentScenarios and #self.currentScenarios or 0)
@@ -235,7 +250,7 @@ function addon:RenderScenarioSection()
         local contents = scenarioTracker.ContentsFrame
         local borrowedFrame = scenarioTracker
         local trackerChanged = self._activeScenarioBorrowedTracker ~= borrowedFrame
-        
+
         if trace then
             self:LogAt("trace", "[SCN-BORROW] borrowing full tracker=%s trackerShown=%s trackerH=%.1f contentsShown=%s contentsH=%.1f",
                 scenarioTrackerName, tostring(scenarioTracker:IsShown()), scenarioTracker:GetHeight() or 0,
@@ -244,13 +259,9 @@ function addon:RenderScenarioSection()
 
         -- Borrow full tracker frame so its internal subtree remains coherent.
         do
+            -- Hand back the one borrowed before; this one is borrowed below.
             if trackerChanged and self._activeScenarioBorrowedTracker then
-                -- addon:RestoreAllHijackedFrames (Core.lua) is the real restore
-                -- implementation; it walks the same candidate tracker names and
-                -- restores anything carrying the _trackerPlusOriginal* fields set
-                -- below, which match its expectations exactly.
-                self._activeScenarioBorrowedTracker._trackerPlusAnchorLockEnabled = nil
-                self:RestoreAllHijackedFrames()
+                self:ReleaseScenarioTracker()
             end
 
             -- Store original parent for later restoration
@@ -267,7 +278,7 @@ function addon:RenderScenarioSection()
                         borrowedFrame:GetName() or "<unnamed>")
                 end
             end
-            
+
             -- Reparent/anchor only when needed to avoid visible popping from
             -- repeated mutation each render tick.
             if not InCombatLockdown() and borrowedFrame:GetParent() ~= self.scenarioFrame then
@@ -286,7 +297,7 @@ function addon:RenderScenarioSection()
             EnsureVisible(contents)
 
             self._activeScenarioBorrowedTracker = borrowedFrame
-            
+
             -- Use the larger of tracker/contents heights so the slot doesn't collapse.
             local trackerHeight = borrowedFrame:GetHeight() or 0
             local contentsHeight = contents:GetHeight() or 0
@@ -298,7 +309,7 @@ function addon:RenderScenarioSection()
             end
             if widgetHeight < 40 then widgetHeight = 40 end
             scenarioYOffset = widgetHeight + 5
-            
+
             if trace then
                 self:LogAt("trace", "[SCN-BORROW] active frame=%s trackerChanged=%s trackerH=%.1f contentsH=%.1f yOffset=%.1f",
                     borrowedFrame:GetName() or "<unnamed>",
@@ -311,9 +322,7 @@ function addon:RenderScenarioSection()
     end
 
     if (not scenarioTracker or not inScenario) and self._activeScenarioBorrowedTracker then
-        self._activeScenarioBorrowedTracker._trackerPlusAnchorLockEnabled = nil
-        self:RestoreAllHijackedFrames()
-        self._activeScenarioBorrowedTracker = nil
+        self:ReleaseScenarioTracker()
     end
 
     if not scenarioTracker and trace then

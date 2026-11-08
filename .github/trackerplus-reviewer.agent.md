@@ -18,7 +18,7 @@ You are a senior engineer specializing in World of Warcraft addon development (L
 
 ## Project Context
 
-**TrackerPlus** (`TrackerPlus.toc`, Interface 120000) is a full replacement for the Blizzard objective tracker. Key architectural pillars:
+**TrackerPlus** (`TrackerPlus.toc`, Interface 120007, 120100 and WoW Forever's 16001) is a full replacement for the Blizzard objective tracker. Key architectural pillars:
 
 - **Dirty-bucket update system** (`Core.lua`): Events mark sections dirty (`dirtySections`), a debounced `OnUpdate` timer (the driver frame is only shown while an update is pending) calls `UpdateTracker`, which calls `CollectTrackables` (respecting dirty flags) then `UpdateTrackerDisplay`.
 - **Blizzard frame hijacking**: only `RenderScenario.lua` (scenario/delve/dungeon tracker) and `RenderAutoQuests.lua` (auto-quest popups) reparent Blizzard frames; World Quest and Bonus Objective sections are pure manual renderers and never hijack. There is no shared `RendererUtils.lua` hijack helper API — each of the two files implements its own borrow/restore/anchor-guard logic. Must always guard `SetParent`/`ClearAllPoints`/`SetPoint` with `InCombatLockdown()` and restore on hide via `addon:RestoreAllHijackedFrames` (`Core.lua`) or the file's own inline restore.

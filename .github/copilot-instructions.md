@@ -1,7 +1,7 @@
 # TrackerPlus - Development Instructions
 
 ## Project Overview
-TrackerPlus is an advanced quest and objective tracker replacement for World of Warcraft. The `.toc` declares Interface versions `120007, 120100, 16001` (the addon is currently installed/developed under `_classic_beta_`, not exclusively Retail). It compiles quests, achievements, scenarios, and monthly activities into a unified, customizable, scrollable UI.
+TrackerPlus is an advanced quest and objective tracker replacement for World of Warcraft. The `.toc` declares Interface versions `120007, 120100, 16001` (the addon is currently installed/developed under `_forever_`, not exclusively Retail). It compiles quests, achievements, scenarios, and monthly activities into a unified, customizable, scrollable UI.
 
 ## Architecture
 
@@ -14,12 +14,15 @@ Database.lua                            – Saved variables, defaults, deep-copy
 Nameplates/NameplatesDatabase.lua       – Nameplates settings (TrackerPlusDB.nameplates), defaults
 DebugFrame.lua                          – In-game debug log window (/tpdebug toggles logging; window opens from Settings)
 Core.lua                                – Initialization, event handling, update loop, CollectTrackables (dirty-section cache), slash commands
+SettingsWidgets.lua                     – Settings-panel controls; shared by the garage addons, kept identical across them
 Data/QuestCollectors.lua                – Quest collectors: GetQuestData, CollectQuests, CollectAutoQuests, CollectSuperTrackedQuest
 Data/ActivityCollectors.lua             – Achievement, scenario, profession, monthly-activity and endeavor collectors
 Data/QuestColors.lua                    – Quest title colors: difficulty coloring and the super-track override (shared with map pins)
 Data/TrackableSort.lua                  – Sort order of trackables within groups
 UI/TrackerUtils.lua                     – Button pooling, trackable grouping, header toggle, click handling, color picker
 UI/SpokenPlayButton.lua                 – Spoken Quests integration: Play buttons on quest rows and the Active Quest header (no-op without Spoken)
+UI/PanelMedia.lua                       – Panel border/background textures: the game's own plus LibSharedMedia's
+UI/AutoMinimizeHeaders.lua              – Auto-minimize ("A" button): collapses quest zone headers except the current zone/quest area
 Map/MapPOIColor.lua                     – Difficulty-coloured circles on Blizzard's world map quest pins (hooks only; draws no UI of its own)
 Map/QuestAreaHighlight.lua              – Marks the tracker row of a quest whose shaded map area the player is standing in
 Render/RendererUtils.lua                – Shared renderer utilities (debug overlays only — see note below)
@@ -90,7 +93,7 @@ The rendering pipeline is split into an orchestrator and specialised section fil
 4. **Rendering**: `TrackerRenderer.lua` orchestrates: categorises trackables → delegates to section renderers → finalises layout via `FinalizeButtonPool`, `UpdateTrackerAppearance`, `UpdateSectionDebugBoxes`.
 
 ### Blizzard Frame Hijacking
-Only two sections actually reparent a Blizzard native tracker frame into a TrackerPlus container: **Scenario** (`RenderScenario.lua`, borrows `ScenarioObjectiveTracker`/`DelvesObjectiveTracker`/`DelveObjectiveTracker`) and **Auto-Quest Popups** (`RenderAutoQuests.lua`, borrows the popup frames). Bonus Objectives and World Quests are pure from-scratch manual renderers and never touch a Blizzard tracker frame. There is no shared hijack-helper API — each of the two hijacking files implements its own borrow/restore/anchor-guard logic (see `addon:RestoreAllHijackedFrames` in `Core.lua` for the real cross-file restore entry point used by `RenderScenario.lua`).
+Only two sections actually reparent a Blizzard native tracker frame into a TrackerPlus container: **Scenario** (`RenderScenario.lua`, borrows `ScenarioObjectiveTracker`/`DelvesObjectiveTracker`/`DelveObjectiveTracker`) and **Auto-Quest Popups** (`RenderAutoQuests.lua`, borrows the popup frames). Bonus Objectives and World Quests are pure from-scratch manual renderers and never touch a Blizzard tracker frame. There is no shared hijack-helper API — each of the two hijacking files implements its own borrow/restore/anchor-guard logic, and exposes one function that hands everything back: `addon:ReleaseScenarioTracker()` (`RenderScenario.lua`, which calls the real restore, `addon:RestoreAllHijackedFrames` in `Core.lua`) and `addon:ReleaseAutoQuestPopups()` (`RenderAutoQuests.lua`). While TrackerPlus is disabled, `UpdateTracker` calls both on every update, so the game's own tracker is handed back complete.
 
 ## Developer Workflow
 
@@ -107,7 +110,7 @@ Only two sections actually reparent a Blizzard native tracker frame into a Track
   - `/tp`, `/tp config`, `/tp settings`, or `/tp options`: Opens settings.
   - `/tp toggle`: Toggles visibility.
   - `/tp lock` / `/tp unlock`: Locks/unlocks the frame position.
-  - `/tp reset`: Resets the database to defaults immediately — unlike the Settings-panel reset button, this skips the confirmation dialog.
+  - `/tp reset`: Opens the same confirmation dialog as the Settings-panel reset button; accepting resets the database and reloads the UI (the only way every frame, watcher and settings widget picks up the defaults).
   - `/tpdebug [on|off]`: Toggles debug logging (see above).
 
 ## Coding Conventions
@@ -138,7 +141,7 @@ local addonName, addon = ...
 - Trigger updates via `addon:RequestUpdate()` to ensure coalescing.
 
 ## Integration & APIs
-- **Target Interface**: `## Interface: 120007, 120100, 16001` per `TrackerPlus.toc` — this build targets both current Retail-family interface versions and a Classic-family (16xxx) one; the addon is currently developed/installed under `_classic_beta_`.
+- **Target Interface**: `## Interface: 120007, 120100, 16001` per `TrackerPlus.toc` — this build targets both current Retail-family interface versions and WoW Forever's (16xxx); the addon is currently developed/installed under `_forever_`. `addon.IsForever` / `addon.IsRetail` (`Database.lua`) tell them apart, and `RETAIL_ONLY_SETTINGS` lists the settings forced off (and left out of the Settings panel) on Forever.
 - **Key APIs**:
   - `C_QuestLog`: GetInfo, GetQuestObjectives, IsComplete.
   - `C_Scenario`: GetInfo, GetStepInfo, IsInScenario.
@@ -188,7 +191,7 @@ Two sections of TrackerPlus "borrow" Blizzard's native tracker frames — the sc
        frameToRestore._trackerPlusOriginal* = nil
    end
    ```
-   `RenderScenario.lua` performs this restoration by calling `self:RestoreAllHijackedFrames()` (`Core.lua`), which walks the same candidate tracker names and restores anything carrying these `_trackerPlusOriginal*` fields — **not** a per-file `RestoreBorrowedFrames` method (no such method exists; a prior version called it anyway, so the borrowed frame was silently never returned — fixed). `RenderAutoQuests.lua` restores its own borrowed popups inline via `RestoreStaleBorrowedPopups`, which only clears a popup's tracking entry once the restore has actually happened (a popup that is currently protected, or that we're in combat during, stays tracked so a later call retries instead of the frame being silently forgotten while still reparented).
+   `RenderScenario.lua` performs this restoration through `addon:ReleaseScenarioTracker()`, which clears the anchor lock and calls `self:RestoreAllHijackedFrames()` (`Core.lua`); that walks the same candidate tracker names and restores anything carrying these `_trackerPlusOriginal*` fields — **not** a per-file `RestoreBorrowedFrames` method (no such method exists; a prior version called it anyway, so the borrowed frame was silently never returned — fixed). `RenderAutoQuests.lua` restores its own borrowed popups inline via `RestoreStaleBorrowedPopups`, which only clears a popup's tracking entry once the restore has actually happened (a popup that is currently protected, or that we're in combat during, stays tracked so a later call retries instead of the frame being silently forgotten while still reparented).
 
 ### Key Files
 - [TrackerPlus.toc](../TrackerPlus.toc): Manifest and load order.
@@ -224,7 +227,7 @@ Highlights enemy nameplates that are quest targets. Everything lives on `addon.N
 - The floating/dangling `World Quests` text must never remain after a world quest ends.
 - In `QuestCollectors.lua` `CollectQuests`, treat quests under the quest-log `WORLD_QUESTS` header as world-quest entries even if `C_QuestLog.IsWorldQuest` is transiently false.
 - Completed/ended world quests should be excluded from collection immediately so the grouped header cannot linger.
-- `RenderWorldQuests.lua` restores hijacked Blizzard frames when no world quests are tracked.
+- `RenderWorldQuests.lua` hides its section when no world quests are collected. Like Bonus Objectives, it never borrows a Blizzard frame, so there is nothing to restore.
 
 ### Borrowed Blizzard Frame Anchor Stability (Critical)
 **Problem**: When borrowing a Blizzard frame (e.g., ScenarioObjectiveTracker) into a TrackerPlus parent, Blizzard's internal update code **continuously injects secondary anchor points** each frame. If we only enforce our primary anchor conditionally, the frame drifts/jumps as competing anchors fight for control.
@@ -253,8 +256,14 @@ Highlights enemy nameplates that are quest targets. Everything lives on `addon.N
 - All secure item-button geometry/attribute mutation (`ClearAllPoints`/`SetPoint`/`SetSize`/`SetFrameLevel`/`SetAttribute`) in `RenderItem.lua` must be skipped entirely while `InCombatLockdown()` is true — an actionable `SecureActionButtonTemplate` button cannot have these safely mutated mid-combat. Leave existing state as-is; the next out-of-combat render catches up.
 
 ### Scenario hijack restore correctness (Critical)
-- `RenderScenario.lua`'s restore call sites must invoke `self:RestoreAllHijackedFrames()` (the real implementation, in `Core.lua`) — never a `self.RestoreBorrowedFrames`-named method, which does not exist anywhere in the codebase. A prior version silently no-op'd here, permanently orphaning the borrowed Blizzard scenario tracker frame.
+- `RenderScenario.lua`'s restore call sites go through `addon:ReleaseScenarioTracker()`, which invokes `self:RestoreAllHijackedFrames()` (the real implementation, in `Core.lua`) — never a `self.RestoreBorrowedFrames`-named method, which does not exist anywhere in the codebase. A prior version silently no-op'd here, permanently orphaning the borrowed Blizzard scenario tracker frame.
 - The borrowed scenario tracker's alpha must be asserted (`SetAlpha(1)` + `SetIgnoreParentAlpha(true)`, on both the tracker and its `ContentsFrame`) every render, not just anchored — Blizzard's own stage-complete/criteria fade animations can otherwise leave it invisible while the section still reports a valid height.
+- The Scenarios setting (`showScenarios`) gates both the collector bucket in `Core.lua` and the borrow in `RenderScenarioSection`. With it off, nothing is borrowed and anything already borrowed is handed back. (A `showDungeonObjectives` key used to OR into the bucket check with no UI behind it, which made the Scenarios checkbox do nothing; it has been removed.)
+
+### Repaint vs. recollect
+- A change that only affects the paint (header/section collapse, minimize, Follow the Arrow steps, styles) must call `addon:RefreshDisplay()`, which marks the layout dirty. A bare `addon:RequestUpdate()` only escalates to a full collect when nothing else is pending: if another section is already dirty and re-collects without changing anything, the paint is skipped and the click looks lost.
+- A change to what gets collected uses `addon:RequestUpdate("full")` (`Recollect` in `Settings.lua`).
+- `addon:ApplyEnabledState()` (`Core.lua`) is the one place that applies `db.enabled`; the Settings checkbox and `/tp toggle` both go through it. `UpdateTracker` itself keeps a disabled tracker hidden, so nothing else should show it unconditionally (the unlocked-frame and Hide in Combat paths both used to).
 
 ### Rendering ownership notes
 - Pinned section rendering lives in dedicated section files (`RenderActiveQuest.lua`, `RenderBonusObjectives.lua`, `RenderWorldQuests.lua`), **not** in `TrackerFrame.lua`.

@@ -9,53 +9,54 @@ local max = math.max
 -- GetFTAData — safely extract current guide/step info from FollowTheArrow
 -- Returns: data table or nil if FTA is not available/active
 -- Requires FollowTheArrow's Init.lua to expose: FollowTheArrowAPI = FTA
+-- Runs on every render, so its diagnostics log at trace level.
 -------------------------------------------------------------------------------
 local function GetFTAData()
     if not FTACharDB then
-        addon:LogAt("info", "[FTA] FTACharDB is nil — FollowTheArrow not installed or not yet loaded")
+        addon:LogAt("trace", "[FTA] FTACharDB is nil — FollowTheArrow not installed or not yet loaded")
         return nil
     end
     if not FTACharDB.progress then
-        addon:LogAt("info", "[FTA] FTACharDB.progress is nil")
+        addon:LogAt("trace", "[FTA] FTACharDB.progress is nil")
         return nil
     end
 
     local api = FollowTheArrowAPI
     if not api then
-        addon:LogAt("info", "[FTA] FollowTheArrowAPI global is nil — FTA namespace not exposed")
+        addon:LogAt("trace", "[FTA] FollowTheArrowAPI global is nil — FTA namespace not exposed")
         return nil
     end
     if not api.Modules then
-        addon:LogAt("info", "[FTA] FollowTheArrowAPI.Modules is nil")
+        addon:LogAt("trace", "[FTA] FollowTheArrowAPI.Modules is nil")
         return nil
     end
 
     local moduleId = FTACharDB.progress.activeModuleId
     if not moduleId then
-        addon:LogAt("info", "[FTA] no activeModuleId in FTACharDB.progress")
+        addon:LogAt("trace", "[FTA] no activeModuleId in FTACharDB.progress")
         return nil
     end
 
     local module = api.Modules[moduleId]
     if not module then
-        addon:LogAt("info", "[FTA] moduleId=%s not found in FollowTheArrowAPI.Modules", tostring(moduleId))
+        addon:LogAt("trace", "[FTA] moduleId=%s not found in FollowTheArrowAPI.Modules", tostring(moduleId))
         return nil
     end
 
     local stepsByModule = FTACharDB.progress.stepIndexByModule
     local stepIndex = stepsByModule and stepsByModule[moduleId]
     if not stepIndex then
-        addon:LogAt("info", "[FTA] no stepIndex for moduleId=%s", tostring(moduleId))
+        addon:LogAt("trace", "[FTA] no stepIndex for moduleId=%s", tostring(moduleId))
         return nil
     end
 
     local steps = module.steps
     if not steps then
-        addon:LogAt("info", "[FTA] module.steps is nil for moduleId=%s", tostring(moduleId))
+        addon:LogAt("trace", "[FTA] module.steps is nil for moduleId=%s", tostring(moduleId))
         return nil
     end
     if not steps[stepIndex] then
-        addon:LogAt("info", "[FTA] stepIndex=%d out of range (total=%d) for moduleId=%s", stepIndex, #steps, tostring(moduleId))
+        addon:LogAt("trace", "[FTA] stepIndex=%d out of range (total=%d) for moduleId=%s", stepIndex, #steps, tostring(moduleId))
         return nil
     end
 
@@ -188,7 +189,6 @@ local function ApplyFTATracking(force)
         step.segments and #step.segments or 0)
 
     -- Try to super-track the active segment's quest
-    local questTracked = false
     if api.Resolve and api.Resolve.GetActiveSegment then
         local segIdx, seg = api.Resolve:GetActiveSegment(module, step, moduleId, stepIndex)
         if seg then
@@ -203,7 +203,6 @@ local function ApplyFTATracking(force)
                     if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
                         C_SuperTrack.SetSuperTrackedQuestID(qid)
                         log("super-tracked questID=%d", qid)
-                        questTracked = true
                     else
                         log("C_SuperTrack.SetSuperTrackedQuestID not available")
                     end
@@ -309,21 +308,23 @@ end
 
 -------------------------------------------------------------------------------
 -- FTA UI refresh hook — ensures TrackerPlus re-renders whenever FTA refreshes
--- (covers FTA's own Prev/Next buttons, sync events, etc.)
+-- (covers FTA's own Prev/Next buttons, sync events, etc.). Installed the first time
+-- the section renders and never removed, so it checks the setting itself: with the
+-- section turned off, FTA's steps must stop steering super-tracking and waypoints.
+-- The step data is read at render time, so a repaint (not a recollect) is what's needed.
 -------------------------------------------------------------------------------
-local _ftaRefreshHooked = false
+local ftaRefreshHooked = false
 local function EnsureFTARefreshHook()
-    if _ftaRefreshHooked then return end
+    if ftaRefreshHooked then return end
     local api = FollowTheArrowAPI
     if not (api and api.UI and type(api.UI.Refresh) == "function") then return end
 
-    local orig = api.UI.Refresh
-    api.UI.Refresh = function(self, ...)
-        orig(self, ...)
+    ftaRefreshHooked = true
+    hooksecurefunc(api.UI, "Refresh", function()
+        if not addon.db.includeFTAQuests then return end
         ApplyFTATracking(false)  -- guarded: no-ops if step hasn't changed
-        addon:RequestUpdate()
-    end
-    _ftaRefreshHooked = true
+        addon:RefreshDisplay()
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -338,7 +339,7 @@ local function NavigateFTA(delta)
         api.StepEngine:NextStep()
     end
     ApplyFTATracking(true)  -- force: step just changed via our button
-    addon:RequestUpdate()
+    addon:RefreshDisplay()
 end
 
 local function ResetFTA()
@@ -346,7 +347,7 @@ local function ResetFTA()
     if not (api and api.StepEngine and api.StepEngine.SyncNow) then return end
     api.StepEngine:SyncNow(25)
     ApplyFTATracking(true)  -- force: step just changed via our button
-    addon:RequestUpdate()
+    addon:RefreshDisplay()
 end
 
 -------------------------------------------------------------------------------
@@ -370,7 +371,7 @@ function addon:RenderFollowTheArrowSection()
 
     local data = GetFTAData()
     if not data then
-        addon:LogAt("info", "[FTA] GetFTAData returned nil — hiding ftaFrame")
+        addon:LogAt("trace", "[FTA] GetFTAData returned nil — hiding ftaFrame")
         ftaFrame:SetHeight(1)
         ftaFrame:Hide()
         return 0

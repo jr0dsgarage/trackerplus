@@ -29,10 +29,7 @@ local function RefreshDebugBoxes()
 end
 
 local SETTING_EFFECTS = {
-    enabled = function(enabled)
-        addon:SetTrackerVisible(enabled)
-        addon:UpdateDefaultTrackerVisibility()
-    end,
+    enabled = function() addon:ApplyEnabledState() end,
     locked = function() addon:UpdateTrackerLock() end,
     -- Re-checking it should snap back onto the game's tracker immediately.
     matchBlizzardTracker = function(enabled)
@@ -68,7 +65,11 @@ local SETTING_EFFECTS = {
     showQuestLevel = Recollect,
     showPartyMembersOnQuest = Recollect,
     sortMethod = Recollect,
-    colorQuestsByDifficulty = Recollect,
+    -- The map pins are ringed in the same colors as the quest names.
+    colorQuestsByDifficulty = function()
+        Recollect()
+        addon:RefreshMapPOIOutlines()
+    end,
     includeCampaignQuestInActiveQuest = Recollect,
     includeFTAQuests = Recollect,
     showQuests = Recollect,
@@ -171,7 +172,7 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
     cb.tpKind = "checkbox"
     cb.tpLabel = cb.Text
     cb.tpLabel:SetText(text)
-    
+
     -- Load saved state, and re-read it whenever the page opens: slash commands
     -- (/tpdebug, /tp lock, /tp toggle) change settings while the panel is closed.
     cb:SetChecked(addon.db[dbKey])
@@ -183,7 +184,7 @@ local function CreateCheckbox(parent, text, dbKey, tooltip, yOffset)
         ChangeSetting(dbKey, self:GetChecked())
     end)
     AttachTooltip(cb, text, tooltip)
-    
+
     return yOffset - 30, cb
 end
 
@@ -422,27 +423,27 @@ local function CreateColorPicker(parent, text, dbKey, callback, yOffset, width)
     container:SetSize(width or 300, 24)
     container:SetPoint("TOPLEFT", 16, yOffset)
     container.tpKind = "colorPicker"
-    
+
     -- Color swatch
     local swatch = CreateFrame("Frame", nil, container)
     swatch:SetSize(20, 20)
     swatch:SetPoint("LEFT", 0, 0)
-    
+
     -- Swatch border
     local bg = swatch:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(1, 1, 1, 1) -- White border check
-    
+
     -- Swatch color
     local colorTex = swatch:CreateTexture(nil, "OVERLAY")
     colorTex:SetPoint("TOPLEFT", 1, -1)
     colorTex:SetPoint("BOTTOMRIGHT", -1, 1)
-    
+
     -- Label
     local label = container:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     label:SetPoint("LEFT", swatch, "RIGHT", 5, 0)
     label:SetText(text)
-    
+
     -- Update function
     local function UpdateSwatch()
         local c = addon.db[dbKey]
@@ -451,7 +452,7 @@ local function CreateColorPicker(parent, text, dbKey, callback, yOffset, width)
         end
     end
     UpdateSwatch()
-    
+
     -- Click handler
     container:SetScript("OnClick", function()
         addon:OpenColorPicker(addon.db[dbKey], function()
@@ -482,7 +483,7 @@ local function StartSection(parent, title, yOffset)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yOffset) -- Anchor relative to parent
     frame:SetPoint("RIGHT", parent, "RIGHT", -15, 0) -- Stretch to right
-    
+
     frame:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -491,11 +492,11 @@ local function StartSection(parent, title, yOffset)
     })
     frame:SetBackdropColor(0.1, 0.1, 0.1, 0.4)
     frame:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
-    
+
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     label:SetPoint("TOPLEFT", 10, -10)
     label:SetText(title)
-    
+
     return frame, -35 -- Initial innerY for content inside
 end
 
@@ -619,7 +620,7 @@ local function InitUI()
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("TrackerPlus")
-    
+
     local version = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     version:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 8, 2)
     -- Read from the .toc rather than hardcoding, so it can't drift out of date.
@@ -844,7 +845,7 @@ local function InitUI()
     sy = CreateSlider(s, "Border Size", "barBorderSize", 0, 10, 1, "Thickness of the progress bar border in pixels (0 hides it).", sy)
     sy = CreateDropdown(s, "Texture", "barTexture", GetBarTextureOptions, "Texture used for progress bars. Lists the textures other addons registered with LibSharedMedia.", sy)
     y = y - EndSection(s, sy)
-    
+
     -- Fonts: one row per text type, font picker on the left and its size on the right
     s, sy = StartSection(appearance, "Fonts", y)
     local fontLeft = CreateFrame("Frame", nil, s)
@@ -865,7 +866,7 @@ local function InitUI()
         sy = sy - 60
     end
     y = y - EndSection(s, sy)
-    
+
     -- Colors: three labeled columns inside one section.
     s, sy = StartSection(appearance, "Colors", y)
     local COLOR_COLUMN_WIDTH = 190
@@ -918,15 +919,15 @@ local function InitUI()
     end
     sy = colorsBottom
     y = y - EndSection(s, sy)
-    
+
     appearance:SetHeight(math.abs(y) + 20)
-    
+
     ---------------------------------------------------------------------------
     -- Layout
     ---------------------------------------------------------------------------
     local layout = CreateSettingsPage("Layout", "Layout", "Fine-tune horizontal and vertical spacing.")
     y = -5
-    
+
     left, leftY = StartColumnSection(layout, "Horizontal Spacing", y, 1)
     leftY = CreateSlider(left, "Major Header Indent", "spacingMajorHeaderIndent", 0, 50, 1, "Left indent for major category headers (Quests, Achievements).", leftY)
     leftY = CreateSlider(left, "Minor Header Indent", "spacingMinorHeaderIndent", 0, 50, 1, "Left indent for zone/subgroup headers.", leftY)
@@ -941,7 +942,7 @@ local function InitUI()
     sy = CreateSlider(s, "Major Header Gap", "spacingMajorHeaderAfter", 10, 50, 1, "Vertical space after major category headers.", sy)
     sy = CreateSlider(s, "Minor Header Gap", "spacingMinorHeaderAfter", 10, 50, 1, "Vertical space after zone/subgroup headers.", sy)
     y = y - EndColumnRow(left, leftY, s, sy)
-    
+
     layout:SetHeight(math.abs(y) + 20)
 
     ---------------------------------------------------------------------------
@@ -1016,9 +1017,9 @@ settingsFrame:SetScript("OnEvent", function(self)
         if not addon.db then
             addon:InitDatabase()
         end
-        
-        InitUI() 
-        
+
+        InitUI()
+
         -- Register with modern Settings API (parent + subpages)
         if Settings and Settings.RegisterCanvasLayoutCategory then
             local category = Settings.RegisterCanvasLayoutCategory(panel, "TrackerPlus")
@@ -1037,7 +1038,7 @@ settingsFrame:SetScript("OnEvent", function(self)
                 InterfaceOptions_AddCategory(page.frame)
             end
         end
-        
+
         -- Opens a settings page by id ("Tracking", "Nameplates", ...), or the top-level
         -- TrackerPlus page when nil; used by /tp and /tp nameplates.
         addon.OpenSettings = function(pageID)

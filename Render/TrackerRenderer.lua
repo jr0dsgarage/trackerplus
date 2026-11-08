@@ -1,7 +1,7 @@
 local addonName, addon = ...
 
 -- Localize hot-path globals
-local ipairs, type, tostring, tonumber = ipairs, type, tostring, tonumber
+local ipairs, type, tostring = ipairs, type, tostring
 local wipe = wipe
 local format = string.format
 local max = math.max
@@ -144,15 +144,13 @@ function addon:UpdateTrackerDisplay(trackables)
     self:UpdateContentWidth()
 
     if self:ShouldLog("trace") then
-        self:LogAt("trace", "[AQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.autoQuestFrame:GetHeight() or 0, tostring(self.autoQuestFrame:IsShown()))
         self:LogAt("trace", "[CQ-POST-LAYOUT] height after UpdateLayoutAnchors: %.1f shown=%s", self.completedQuestFrame:GetHeight() or 0, tostring(self.completedQuestFrame:IsShown()))
     end
 
     if layoutTrace then
         DebugLayout(self,
-            "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d autoQH=%.1f cqH=%.1f",
+            "anchors scenY=%d aqY=%d campY=%d bonusY=%d wqY=%d cqH=%.1f",
             scenarioYOffset, aqYOffset, campaignYOffset, bonusYOffset, wqYOffset,
-            self.autoQuestFrame:GetHeight() or 0,
             self.completedQuestFrame:GetHeight() or 0
         )
     end
@@ -236,13 +234,20 @@ local function AddPartyMembersOnQuest(tooltip, questID)
     end
 end
 
+-- Trackable types with a tooltip. The rest (professions, monthly activities, endeavors)
+-- already show everything they have on the row, and a tooltip with no lines would
+-- still draw an empty box.
+local QUEST_TOOLTIP_TYPES = { quest = true, campaign = true, supertrack = true, worldquest = true, bonus = true }
+
 -- Show trackable tooltip
 function addon:ShowTrackableTooltip(button, trackable)
     if not trackable then return end
+    local isQuest = QUEST_TOOLTIP_TYPES[trackable.type]
+    if not isQuest and trackable.type ~= "achievement" then return end
 
     local tooltip = addon:AcquireTooltip(button, "ANCHOR_RIGHT")
 
-    if trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" or trackable.type == "worldquest" then
+    if isQuest then
         tooltip:SetText(trackable.title or "Quest")
 
         if trackable.level then

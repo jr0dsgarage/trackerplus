@@ -36,23 +36,23 @@ Works on Retail and on WoW Forever. Features that Forever doesn't have (campaign
 
 ### Sections
 
-Each kind of content gets its own section, top to bottom:
+Each kind of content gets its own section, top to bottom. The sections above the quest list stay pinned at the top, Bonus Objectives and World Quests stay pinned at the bottom, and the list in between scrolls.
 
 | Section | Version(s) | What's in it |
 | --- | --- | --- |
-| **Quest popups** | Retail | Auto-accept and auto-complete quest popups. Click one to accept or turn in. |
 | **Scenario** | Retail | The current scenario, delve or dungeon objectives. |
 | **Active Quest** | Retail, Forever | The quest you're focused on (super-tracked). |
 | **Follow the Arrow** | Retail | The current step of a [FollowTheArrow](#optional-addons) guide. Off by default. |
 | **Campaign** | Retail | Campaign quests. |
-| **Bonus Objectives** | Retail | Area bonus objectives you're working on. |
-| **World Quests** | Retail | Tracked and in-progress world quests. |
+| **Quest popups** | Retail | Auto-accept and auto-complete quest popups. Click one to accept or turn in. |
 | **Quest Timers** | Retail, Forever | Countdowns for timed quests, just above the quest list. Click one to make it your Active quest. |
 | **Quests** | Retail, Forever | All other tracked quests, grouped under zone headers. |
 | **Achievements** | Retail | Tracked achievements and their criteria. |
 | **Professions** | Retail, Forever | Tracked recipes and their reagents. |
 | **Monthly Activities** | Retail | Tracked Trading Post / Traveler's Log activities. |
 | **Endeavors** | Retail | Tracked housing endeavors. |
+| **Bonus Objectives** | Retail | Area bonus objectives you're working on. |
+| **World Quests** | Retail | Tracked and in-progress world quests. |
 
 Each type can be turned off under **Settings → Tracking Panel**. A campaign quest that is also your Active quest can be shown in both sections (**Campaign in Active Quest** on the main settings page).
 
@@ -80,7 +80,7 @@ Each quest row has:
 - A **party count** after the name, e.g. `(+2)` when two party members are also on the quest. The tooltip lists their names in class colors (**Show Party Members on Quest**).
 - **Objectives** underneath, turning green when done and red when failed, with **progress bars** for percentage objectives.
 - A **quest item button** when the quest has a usable item. Click it to use the item, the same as on the game's tracker.
-- A **Find a Group** button on quests that have one.
+- A **Find a Group** button on world quests and bonus objectives that have one.
 - A **Play button** when [Spoken](#optional-addons) has a voice for the quest: click it to hear the quest read aloud, click again to stop. It goes at the right end of the title line, or under the map pin button (**Settings → Tracking Panel → Spoken**).
 - A **tooltip** on hover with the quest's level, zone and objectives (**Show Tooltips**).
 
@@ -93,11 +93,11 @@ An optional **row background** can be drawn behind each row (**Settings → Appe
 ### Quest colors
 
 - **By difficulty.** Quest names are colored gray, green, yellow, orange or red the same way the quest log colors them. The game decides how hard each quest is for you, so scaling quests get the right color. Turn **Color by Difficulty** off to use one flat quest color instead.
-- **Focused quest.** The quest you're focused on is always gold.
+- **Focused quest.** Keeps its difficulty color. The glow on its map pin button is what marks it as the quest you're focused on.
 - **Other content.** Achievements, professions, monthly activities, endeavors, scenarios and bonus objectives each have their own color, set under **Settings → Appearance → Colors**.
 
 <!-- SCREENSHOT: docs/screenshots/difficulty-colors.png
-     A zone with quests of several difficulties (gray, green, yellow, orange, red) and the gold focused quest.
+     A zone with quests of several difficulties (gray, green, yellow, orange, red), one of them focused (glowing map pin button).
 ![Difficulty colors](docs/screenshots/difficulty-colors.png)
 -->
 
@@ -268,7 +268,7 @@ Background, border, progress bar and font lists include anything other addons ha
 | `/tp` or `/trackerplus` | Open settings |
 | `/tp toggle` | Turn the tracker on or off |
 | `/tp lock` / `/tp unlock` | Lock or unlock the frame |
-| `/tp reset` | Reset all settings to their defaults |
+| `/tp reset` | Reset all settings to their defaults (asks first, then reloads the UI) |
 | `/tp nameplates` | Open the Nameplates settings page |
 | `/tp nameplates toggle` | Turn nameplate highlights on or off |
 | `/tp nameplates debug` | Show or hide the nameplate debug window |
@@ -287,8 +287,9 @@ Background, border, progress bar and font lists include anything other addons ha
 
 ## Installation
 
-1. Browse to your Addons folder, ie `...\World of Warcraft\_version_\Addons` and run git clone 
-2. Launch the game or type `/reload`!
+1. Open a terminal in your AddOns folder: `...\World of Warcraft\_retail_\Interface\AddOns`, or `_forever_` in place of `_retail_` for WoW Forever.
+2. Run `git clone https://github.com/jr0dsgarage/trackerplus.git TrackerPlus`. The folder has to be named `TrackerPlus`, to match the addon's `.toc` file.
+3. Launch the game, or type `/reload` if it's already running.
 
 Settings are saved per account in `TrackerPlusDB`.
 

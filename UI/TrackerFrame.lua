@@ -145,6 +145,25 @@ function addon:ApplyTrackerAnchor()
     ApplyTrackerAnchor()
 end
 
+-- Puts the tracker where it belongs. Run on creation and on every PLAYER_ENTERING_WORLD.
+function addon:RestorePosition()
+    if not trackerFrame then return end
+
+    -- Until the player positions the tracker themselves, sit exactly on top of
+    -- the game's own tracker so this is a drop-in replacement on first load.
+    if self:SyncWithBlizzardTracker() then
+        return
+    end
+
+    local pos = self.db.framePosition
+    trackerFrame:ClearAllPoints()
+    if pos and pos.point and pos.x and pos.y then
+        trackerFrame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x, pos.y)
+    else
+        trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)
+    end
+end
+
 -- Create the main tracker frame
 -- We keep Blizzard's tracker alive but invisible (alpha 0) so the sections that
 -- borrow its frames keep updating, and an alive frame still hit-tests: its quest
@@ -224,7 +243,7 @@ function addon:CreateTrackerFrame()
     if trackerFrame then
         return trackerFrame
     end
-    
+
     -- Main frame
     trackerFrame = CreateFrame("Frame", "TrackerPlusFrame", UIParent)
     -- Published now, not at the end: RestorePosition (below) already needs it.
@@ -237,33 +256,16 @@ function addon:CreateTrackerFrame()
     -- GetFrameLevel(), so the relative layering inside the tracker is unchanged.
     trackerFrame:SetFrameLevel(10)
     trackerFrame:SetClampedToScreen(true)
-    
+
     -- Make draggable & resizable (Must be set before SetUserPlaced)
     trackerFrame:SetMovable(true)
     trackerFrame:SetResizable(true)
-    
+
     -- Ensure position is managed by addon, not layout cache
     trackerFrame:SetUserPlaced(false)
-    
-    -- Restore position (also re-run on every PLAYER_ENTERING_WORLD)
-    addon.RestorePosition = function()
-        -- Until the player positions the tracker themselves, sit exactly on top of
-        -- the game's own tracker so this is a drop-in replacement on first load.
-        if addon:SyncWithBlizzardTracker() then
-            return
-        end
 
-        local pos = addon.db.framePosition
-        if pos and pos.point and pos.x and pos.y then
-             trackerFrame:ClearAllPoints()
-             trackerFrame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x, pos.y)
-        else
-             trackerFrame:ClearAllPoints()
-             trackerFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -50, -200)
-        end
-    end
-    addon.RestorePosition()
-    
+    self:RestorePosition()
+
     -- Background
     trackerFrame.bg = trackerFrame:CreateTexture(nil, "BACKGROUND")
     trackerFrame.bg:SetAllPoints()
@@ -273,11 +275,11 @@ function addon:CreateTrackerFrame()
         self.db.backgroundColor.b,
         self.db.backgroundColor.a
     )
-    
+
     -- The optional border is created by UpdateTrackerAppearance on the first render.
 
     trackerFrame:EnableMouse(true)
-    
+
     -- Dragging
     trackerFrame:RegisterForDrag("LeftButton")
     trackerFrame:SetScript("OnDragStart", function(self)
@@ -294,11 +296,11 @@ function addon:CreateTrackerFrame()
         addon:ApplyTrackerAnchor()
         addon:ClaimManualGeometry()
     end)
-    
+
     -- Resizing Handles (Triangles)
     trackerFrame.resizeBR = CreateResizeGrip("BOTTOMRIGHT", false)
     trackerFrame.resizeBL = CreateResizeGrip("BOTTOMLEFT", true)
-    
+
     -- Mouse wheel scrolling
     trackerFrame:EnableMouseWheel(true)
     trackerFrame:SetScript("OnMouseWheel", function(self, delta)
@@ -310,11 +312,11 @@ function addon:CreateTrackerFrame()
             addon:UpdateScrollShadows()
         end
     end)
-    
+
     -- Top-pinned sections outside the scroll frame, chained by UpdateLayoutAnchors:
-    -- Scenario -> Active Quest (super-tracked) -> Follow the Arrow -> Campaign -> ...
-    -- -> Quest Timers ("Quest Timer: MM:SS" rows, filled by RenderQuestTimers.lua,
-    -- last so it sits directly above the quest list).
+    -- Scenario -> Active Quest (super-tracked) -> Follow the Arrow -> Campaign ->
+    -- quest popups -> Quest Timers ("Quest Timer: MM:SS" rows, filled by
+    -- RenderQuestTimers.lua, last so it sits directly above the quest list).
     local scenarioFrame = CreatePinnedSection(trackerFrame, false)
     self.scenarioFrame = scenarioFrame
     self.activeQuestFrame = CreatePinnedSection(trackerFrame, true)
@@ -322,14 +324,9 @@ function addon:CreateTrackerFrame()
     self.campaignFrame = CreatePinnedSection(trackerFrame, true)
     self.questTimerFrame = CreatePinnedSection(trackerFrame, true)
 
-    -- Auto Quest Frame (Below scenario/active-quest if visible, outside scroll frame)
-    local autoQuestFrame = CreateFrame("Frame", nil, trackerFrame)
-    autoQuestFrame:SetPoint("TOPLEFT", scenarioFrame, "BOTTOMLEFT", 0, 0)
-    autoQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "BOTTOMRIGHT", 0, 0)
-    autoQuestFrame:SetHeight(1) -- Dynamic, set by renderer + layout
-    self.autoQuestFrame = autoQuestFrame
-    
-    -- Completed Quest Frame (Pinned to the scenario frame so borrowed popups stay fixed)
+    -- Quest popups (auto-accept / auto-complete), borrowed from the game's tracker by
+    -- RenderAutoQuests.lua. Starts on the scenario frame; UpdateLayoutAnchors moves it
+    -- into the top-section chain.
     completedQuestFrame = CreateFrame("Frame", nil, trackerFrame)
     completedQuestFrame:SetPoint("TOPRIGHT", scenarioFrame, "TOPRIGHT", 0, 0)
     completedQuestFrame:SetWidth(self.db.frameWidth - 10)
@@ -349,10 +346,10 @@ function addon:CreateTrackerFrame()
     local bonusFrame = CreateFrame("Frame", nil, trackerFrame)
     bonusFrame:SetPoint("BOTTOMLEFT", worldQuestFrame, "TOPLEFT", 0, 0)
     bonusFrame:SetPoint("BOTTOMRIGHT", worldQuestFrame, "TOPRIGHT", 0, 0)
-    bonusFrame:SetHeight(1) 
+    bonusFrame:SetHeight(1)
     bonusFrame:Hide()
     self.bonusFrame = bonusFrame
-    
+
     -- Create scroll frame (fills middle area, anchored dynamically by layout)
     scrollFrame = CreateFrame("ScrollFrame", nil, trackerFrame)
     self.scrollFrame = scrollFrame
@@ -360,7 +357,7 @@ function addon:CreateTrackerFrame()
     scrollFrame:SetPoint("BOTTOMRIGHT", bonusFrame, "TOPRIGHT", 0, 0)
     scrollFrame:EnableMouse(false)
     scrollFrame:EnableMouseWheel(false)
-    
+
     -- Content frame (child of scroll frame)
     contentFrame = CreateFrame("Frame", nil, scrollFrame)
     self.contentFrame = contentFrame
@@ -415,14 +412,14 @@ function addon:CreateTrackerFrame()
     trackerFrame:Show()
     self:UpdateTrackerLock()
     self:InitQuestTimerSection()
-    
+
     return trackerFrame
 end
 
 -- Update tracker lock state
 function addon:UpdateTrackerLock()
     if not trackerFrame then return end
-    
+
     local locked = self.db.locked
     trackerFrame:EnableMouse(not locked)
     trackerFrame.resizeBR:SetShown(not locked)
@@ -476,12 +473,12 @@ end
 -- Dynamic Layout Engine
 -- Call this after setting section heights and visibility in the render cycle.
 -- Top-pinned, in order (TOP_SECTIONS): Scenario -> Active Quest -> FTA -> Campaign
--- -> Auto Quest -> Completed Quest -> Quest Timer, then the ScrollFrame.
+-- -> quest popups (completedQuestFrame) -> Quest Timer, then the ScrollFrame.
 -- Bottom-pinned: BonusFrame (if needed) -> WorldQuestFrame (always last)
 ------------------------------------------------------------------------------
 local TOP_SECTIONS = {
     "scenarioFrame", "activeQuestFrame", "ftaFrame", "campaignFrame",
-    "autoQuestFrame", "completedQuestFrame", "questTimerFrame",
+    "completedQuestFrame", "questTimerFrame",
 }
 local LAYOUT_PAD  = 4    -- vertical gap between sections
 local LAYOUT_SIDE = 5    -- horizontal inset from tracker edges
@@ -578,7 +575,7 @@ end
 -- Update tracker appearance (colors, fonts, etc.)
 function addon:UpdateTrackerAppearance()
     if not trackerFrame then return end
-    
+
     local db = self.db
 
     self._appearanceState = self._appearanceState or {}
@@ -648,7 +645,7 @@ function addon:UpdateTrackerAppearance()
         trackerFrame:SetScale(db.frameScale)
         return
     end
-    
+
     local borderFile, _, borderInnerEdge = self:ResolvePanelMedia("border", db.borderStyle)
 
     -- Update background
@@ -670,7 +667,7 @@ function addon:UpdateTrackerAppearance()
             bg:SetVertexColor(1, 1, 1, 1)
         end
     end
-    
+
     -- Update border
     if db.borderEnabled then
         local border = trackerFrame.border
@@ -707,28 +704,28 @@ function addon:UpdateTrackerAppearance()
             trackerFrame.border:Hide()
         end
     end
-    
+
     -- Update size, keeping the chosen anchor point where it is
     ApplyTrackerAnchor()
     trackerFrame:SetSize(db.frameWidth, db.frameHeight)
-    
+
     -- Update content width synchronously
     self:UpdateContentWidth()
-    
+
     -- Update scale
     trackerFrame:SetScale(db.frameScale)
-    
+
     -- Update title
     if trackerFrame.title then
         trackerFrame.title:SetFont(db.headerFontFace, db.headerFontSize, db.headerFontOutline)
         trackerFrame.title:SetTextColor(db.headerColor.r, db.headerColor.g, db.headerColor.b, db.headerColor.a)
     end
-    
+
     -- Update Main Header Background
     if trackerFrame.headerBg then
-        
+
         trackerFrame.headerBg:ClearAllPoints()
-        
+
         if bgStyle == "none" then
             trackerFrame.headerBg:SetPoint("TOPLEFT", 0, -HEADER_TOP_INSET)
             trackerFrame.headerBg:SetPoint("TOPRIGHT", 0, -HEADER_TOP_INSET)
@@ -737,7 +734,7 @@ function addon:UpdateTrackerAppearance()
             -- Initial Quest Log style adjustments (shrink width by 4px total)
             trackerFrame.headerBg:SetPoint("TOPLEFT", 2, -HEADER_TOP_INSET)
             trackerFrame.headerBg:SetPoint("TOPRIGHT", -2, -HEADER_TOP_INSET)
-            
+
             if trackerFrame.headerBg.SetAtlas then
                 trackerFrame.headerBg:SetAtlas("QuestLog-tab")
                 trackerFrame.headerBg:SetVertexColor(1, 1, 1, 1)

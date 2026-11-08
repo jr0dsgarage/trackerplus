@@ -28,7 +28,7 @@ function addon:CollectAchievements(trackables)
         trackedAchievements = {GetTrackedAchievements()}
     end
     if not trackedAchievements then return end
-    
+
     for _, achievementID in ipairs(trackedAchievements) do
         local id, name, points, completed, _, _, _, description = GetAchievementInfo(achievementID)
 
@@ -48,7 +48,7 @@ function addon:CollectAchievements(trackables)
                 zone = categoryName,
                 color = self.db.achievementColor,
             }
-            
+
             -- Get criteria
             for i = 1, GetAchievementNumCriteria(achievementID) or 0 do
                 local criteriaString, _, criteriaCompleted, quantity, reqQuantity = GetAchievementCriteriaInfo(achievementID, i)
@@ -75,7 +75,7 @@ function addon:CollectScenarioObjectives(trackables)
     if not self:IsAnyScenarioTrackerActive() then
         return
     end
-    
+
     -- Insert a placeholder item so the Scenario section activates. RenderScenario.lua
     -- draws the borrowed Blizzard frame, not this data.
     trackables[#trackables + 1] = {
@@ -210,6 +210,17 @@ local function GetReagentOwnedCount(reagent)
     return 0
 end
 
+-- How many of a slot's reagent the player has. Each quality tier of a reagent is its
+-- own item in the slot's list, and any of them fills the slot, so they're summed, as
+-- the game's own recipe tracker counts them.
+local function GetSlotOwnedCount(reagentSlotSchematic)
+    local owned = 0
+    for _, reagent in ipairs(reagentSlotSchematic.reagents) do
+        owned = owned + GetReagentOwnedCount(reagent)
+    end
+    return owned
+end
+
 local function GetSlotQuantityRequired(reagentSlotSchematic, reagent)
     if reagentSlotSchematic.GetQuantityRequired then
         local ok, quantity = pcall(reagentSlotSchematic.GetQuantityRequired, reagentSlotSchematic, reagent)
@@ -252,7 +263,7 @@ local function BuildRecipeObjectives(schematic)
 
                     local total = reagentTotals[reagentKey]
                     if not total then
-                        total = { name = reagentName, required = 0, owned = GetReagentOwnedCount(reagent) }
+                        total = { name = reagentName, required = 0, owned = GetSlotOwnedCount(reagentSlotSchematic) }
                         reagentTotals[reagentKey] = total
                     end
                     total.required = total.required + quantityRequired
@@ -320,22 +331,36 @@ function addon:CollectMonthlyActivities(trackables)
     local getActivityInfo = activities and activities.GetPerksActivityInfo
     if not getActivityInfo then return end
 
-    local trackedIDs
+    local tracked
     if activities.GetTrackedPerksActivities then
-        trackedIDs = activities.GetTrackedPerksActivities()
+        tracked = activities.GetTrackedPerksActivities()
     elseif C_ContentTracking and C_ContentTracking.GetTrackedIDs and Enum and Enum.ContentTrackingType and Enum.ContentTrackingType.PerksActivity then
-        trackedIDs = C_ContentTracking.GetTrackedIDs(Enum.ContentTrackingType.PerksActivity)
+        tracked = C_ContentTracking.GetTrackedIDs(Enum.ContentTrackingType.PerksActivity)
     end
 
+    -- GetTrackedPerksActivities answers with a { trackedIDs = { ... } } table, like
+    -- GetTrackedInitiativeTasks below; ContentTracking with a bare list.
+    local trackedIDs = type(tracked) == "table" and (tracked.trackedIDs or tracked) or nil
     if not trackedIDs then return end
 
     for _, activityID in ipairs(trackedIDs) do
         local info = getActivityInfo(activityID)
         if info then
             local objectives = {}
-            
-            -- If not complete, show progress
-            if not info.completed then
+
+            -- What's left to do, from the activity's requirement lines ("0/5 Kill ..."),
+            -- as the game's own tracker shows them.
+            if not info.completed and info.requirementsList then
+                for _, req in ipairs(info.requirementsList) do
+                    if req.requirementText and not req.completed then
+                        objectives[#objectives + 1] = {
+                            text = gsub(req.requirementText, " / ", "/"),
+                            finished = false,
+                        }
+                    end
+                end
+            end
+            if not info.completed and #objectives == 0 then
                 objectives[1] = {
                     text = info.activityName,
                     finished = false,
@@ -343,7 +368,7 @@ function addon:CollectMonthlyActivities(trackables)
                     numRequired = info.threshold or 1,
                 }
             end
-            
+
             trackables[#trackables + 1] = {
                 type = "monthly",
                 id = activityID,
@@ -365,12 +390,17 @@ function addon:CollectEndeavors(trackables)
     end
 
     local trackerData = C_NeighborhoodInitiative.GetTrackedInitiativeTasks()
+    local liveIDs = trackerData and trackerData.trackedIDs
     local trackedIDs
     local cache = self.db.endeavorCache
 
-    if trackerData and trackerData.trackedIDs and #trackerData.trackedIDs > 0 then
+    -- An empty live list is only believed once the game has shown it has the data (a
+    -- non-empty answer, or a tracking event; see Core.lua). Before that it can just
+    -- mean not loaded yet; after, it means the last endeavor was untracked.
+    if liveIDs and (#liveIDs > 0 or self._endeavorListKnown) then
         -- Live data: remember it for next login.
-        trackedIDs = trackerData.trackedIDs
+        self._endeavorListKnown = true
+        trackedIDs = liveIDs
         wipe(cache)
         for _, id in ipairs(trackedIDs) do
             cache[id] = true

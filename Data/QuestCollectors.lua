@@ -82,9 +82,9 @@ end
 function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
     info = info or C_QuestLog.GetInfo(logIndex)
     if not info then return nil end
-    
+
     local questID = info.questID
-    
+
     local isWorldQuest = C_QuestLog.IsWorldQuest(questID)
     local isTask = C_QuestLog.IsQuestTask(questID)
     local isBonusObjective = isTask and not isWorldQuest
@@ -132,6 +132,12 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
         questInfo.partyCount = partyUnits and #partyUnits or 0
     end
 
+    -- Drives the Find a Group button that world quests and bonus objectives get, the
+    -- same check the game's own tracker makes for that button.
+    if (isWorldQuest or isBonusObjective) and C_LFGList and C_LFGList.CanCreateQuestGroup then
+        questInfo.canCreateGroup = C_LFGList.CanCreateQuestGroup(questID) == true
+    end
+
     -- Get Quest Item Info
     local itemLink, itemTexture = GetQuestLogSpecialItemInfo(logIndex)
     if itemLink or itemTexture then
@@ -140,7 +146,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
             texture = itemTexture,
         }
     end
-    
+
     -- Get objectives
     local objectives = C_QuestLog.GetQuestObjectives(questID) or {}
     local hasObjectives = false
@@ -150,7 +156,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
         -- Keep text objectives even when the quest also has a progress bar; tasks
         -- usually say "Assault X" with the bar separate, and the text gives context.
         hasObjectives = true
-        
+
         local isFlagged = band(obj.flags or 0, 1) == 1
         if obj.type == "progressbar" or isFlagged or (obj.text and obj.text:find("%", 1, true)) then
             hasProgressBarObj = true
@@ -161,7 +167,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
         if objectiveFinished and ShouldForceObjectiveIncomplete(obj.text) then
             objectiveFinished = false
         end
-        
+
         questInfo.objectives[#questInfo.objectives + 1] = {
             text = obj.text,
             type = obj.type,
@@ -187,7 +193,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
              }
         end
     end
-    
+
     -- Legacy leaderboard fallback, only reached when C_QuestLog.GetQuestObjectives
     -- returned nothing. Both globals are absent on clients that have moved on, and
     -- this runs during every collection pass, so guard rather than risk erroring
@@ -195,7 +201,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
     if not hasObjectives and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
         local numLeaderBoards = GetNumQuestLeaderBoards(logIndex) or 0
         for j=1, numLeaderBoards do
-             local text, type, finished = GetQuestLogLeaderBoard(j, logIndex)
+             local text, objectiveType, finished = GetQuestLogLeaderBoard(j, logIndex)
              if text then
                  local objectiveFinished = (finished == true)
                  if objectiveFinished and ShouldForceObjectiveIncomplete(text) then
@@ -203,7 +209,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
                  end
                  questInfo.objectives[#questInfo.objectives + 1] = {
                      text = text,
-                     type = type,
+                     type = objectiveType,
                      finished = objectiveFinished,
                      numFulfilled = 0,
                      numRequired = 0,
@@ -211,7 +217,7 @@ function addon:GetQuestData(logIndex, typeOverride, zoneOverride, info)
              end
         end
     end
-    
+
     return questInfo
 end
 
@@ -358,7 +364,7 @@ end
 -- Collect Auto Quest PopUps
 function addon:CollectAutoQuests(trackables)
     if not GetNumAutoQuestPopUps then return end
-    
+
     for i = 1, GetNumAutoQuestPopUps() do
         local questID, popUpType = GetAutoQuestPopUp(i)
         if questID then
@@ -379,7 +385,7 @@ function addon:CollectAutoQuests(trackables)
                      color = {r=1, g=0.8, b=0, a=1}, -- Orange/Goldish title
                      -- Use a specific structure for objectives to show the message
                      objectives = {{
-                         text = (popUpType == "COMPLETE" and "Click to Complete" or "New Quest Available"), 
+                         text = (popUpType == "COMPLETE" and "Click to Complete" or "New Quest Available"),
                          finished = false
                      }}
                  }
@@ -401,7 +407,16 @@ function addon:CollectSuperTrackedQuest(trackables)
         return
     end
 
-    local questInfo = self:GetQuestData(logIndex, "supertrack", "Pinned")
+    -- The quest log header it sits under (its zone or category), as its normal row
+    -- gets; the tooltip shows it.
+    local zone
+    if C_QuestLog.GetHeaderIndexForQuest then
+        local headerIndex = C_QuestLog.GetHeaderIndexForQuest(superTrackedQuestID)
+        local headerInfo = headerIndex and C_QuestLog.GetInfo(headerIndex)
+        zone = headerInfo and headerInfo.title
+    end
+
+    local questInfo = self:GetQuestData(logIndex, "supertrack", zone or "")
     if questInfo then
          trackables[#trackables + 1] = questInfo
     end

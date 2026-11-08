@@ -282,19 +282,19 @@ local function hasQuestItemIcon(unit)
     if not nameplate then
         return false
     end
-    
+
     -- Try multiple possible locations for the SoftTargetFrame
     local softTargetFrame = nil
     if nameplate.UnitFrame then
         softTargetFrame = nameplate.UnitFrame.SoftTargetFrame
                       or nameplate.UnitFrame.softTargetFrame
     end
-    
+
     -- Also check direct child of nameplate
     if not softTargetFrame then
         softTargetFrame = nameplate.SoftTargetFrame or nameplate.softTargetFrame
     end
-    
+
     if softTargetFrame and softTargetFrame:IsShown() then
         -- Only return true if icon exists and is shown
         if softTargetFrame.Icon and softTargetFrame.Icon:IsShown() then

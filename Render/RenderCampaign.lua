@@ -8,7 +8,8 @@ local SECTION_KEY = "Campaign Quests"
 local function OnExpandClick()
     local collapsed = addon.db.collapsedSections
     collapsed[SECTION_KEY] = not collapsed[SECTION_KEY]
-    addon:RequestUpdate()
+    -- Only the paint changes, so force one (see ToggleHeader).
+    addon:RefreshDisplay()
 end
 
 local function OnExpandEnter(self)

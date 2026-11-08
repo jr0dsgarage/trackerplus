@@ -161,7 +161,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     local settingsBtn = CreateChromeButton(trackerFrame, -34, function()
         return "Open Settings"
     end)
-    trackerFrame.settingsParam = settingsBtn
+    trackerFrame.settingsBtn = settingsBtn
     settingsBtn:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
     settingsBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
     settingsBtn:SetScript("OnClick", function()
@@ -186,7 +186,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
     trackerFrame.autoMinBtn:SetFrameLevel(chromeLevel)
     trackerFrame.lockBtn:SetFrameLevel(chromeLevel)
-    trackerFrame.settingsParam:SetFrameLevel(chromeLevel)
+    trackerFrame.settingsBtn:SetFrameLevel(chromeLevel)
     trackerFrame.minMaxBtn:SetFrameLevel(chromeLevel)
 
     local function UpdateMinMaxState()
@@ -236,15 +236,15 @@ function addon:CreateTrackerHeader(trackerFrame)
 
             -- Size to fit just the button (plus defined border padding)
             -- 34x34 box allows 24x24 button to sit with 5px padding (34-24)/2 = 5
-            trackerFrame:SetSize(34, 34) 
-            
+            trackerFrame:SetSize(34, 34)
+
             -- Gold-only textures (Plus)
             -- Quest Log option (Atlas)
             trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Expand")
-            trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Expand") 
-            
+            trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Expand")
+
             -- Hide Elements
-            trackerFrame.settingsParam:Hide()
+            trackerFrame.settingsBtn:Hide()
             trackerFrame.lockBtn:Hide()
             trackerFrame.autoMinBtn:Hide()
             trackerFrame.ftaToggleBtn:Hide()
@@ -259,20 +259,20 @@ function addon:CreateTrackerHeader(trackerFrame)
             self.scrollShadowBottom:Hide()
             self.scenarioFrame:Hide()
             self.activeQuestFrame:Hide()
+            self.ftaFrame:Hide()
             self.campaignFrame:Hide()
-            self.autoQuestFrame:Hide()
             self.completedQuestFrame:Hide()
             self.bonusFrame:Hide()
             self.worldQuestFrame:Hide()
             self.questTimerFrame:Hide()
-            
+
             -- Center button
             trackerFrame.minMaxBtn:ClearAllPoints()
             trackerFrame.minMaxBtn:SetPoint("CENTER", trackerFrame, "CENTER", 0, 0)
         else
             -- Restored State
             trackerFrame:SetSize(addon.db.savedWidth or 300, addon.db.savedHeight or 400)
-            
+
             -- Restore Position if saved
             if addon.db.savedPoint then
                  trackerFrame:ClearAllPoints()
@@ -283,13 +283,13 @@ function addon:CreateTrackerHeader(trackerFrame)
                  trackerFrame:SetPoint(point, UIParent, relativePoint, x, y)
                  addon.db.savedPoint = nil
             end
-            
+
             -- Gold-only textures (Minus)
             trackerFrame.minMaxBtn:SetNormalAtlas("UI-QuestTrackerButton-Secondary-Collapse")
             trackerFrame.minMaxBtn:SetPushedAtlas("UI-QuestTrackerButton-Secondary-Collapse")
 
             -- Show Elements
-            trackerFrame.settingsParam:Show()
+            trackerFrame.settingsBtn:Show()
             trackerFrame.lockBtn:Show()
             trackerFrame.autoMinBtn:Show()
             -- Stays hidden when FollowTheArrow isn't loaded.
@@ -301,31 +301,30 @@ function addon:CreateTrackerHeader(trackerFrame)
             self.scrollFrame:Show()
             self.scrollShadowTop:Show()
             self.scrollShadowBottom:Show()
+            -- Sections come back with their last content straight away; the repaint
+            -- requested below then brings each up to date.
             self.scenarioFrame:Show()
             if self.activeQuestFrame:GetHeight() > 1 then self.activeQuestFrame:Show() end
+            if self.ftaFrame:GetHeight() > 1 then self.ftaFrame:Show() end
             if self.campaignFrame:GetHeight() > 1 then self.campaignFrame:Show() end
-            if self.autoQuestFrame:GetHeight() > 1 then self.autoQuestFrame:Show() end
             if self.completedQuestFrame:GetHeight() > 1 then self.completedQuestFrame:Show() end
             if self.bonusFrame:GetNumChildren() > 0 then self.bonusFrame:Show() end
             if self.worldQuestFrame:GetNumChildren() > 0 then self.worldQuestFrame:Show() end
-            
-            -- Always right-aligned, matching where the button is first anchored and
-            -- keeping it in the same chrome row as the settings, lock, auto-minimize and
-            -- Follow the Arrow buttons (anchored RIGHT at -34, -54, -74 and -94). This used to follow
-            -- db.headerIconPosition, but that setting controls which side the
-            -- expand/collapse arrows sit on for headers inside the quest list, not the
-            -- tracker window's own chrome. Since it defaults to "left", the button
-            -- jumped to the left edge on first load and broke up that row.
+
+            -- Always right-aligned, in the same chrome row as the settings, lock,
+            -- auto-minimize and Follow the Arrow buttons (anchored RIGHT at -34, -54, -74
+            -- and -94). Not db.headerIconPosition: that places the expand/collapse icons
+            -- on headers inside the list, not the tracker window's own chrome.
             trackerFrame.minMaxBtn:ClearAllPoints()
             trackerFrame.minMaxBtn:SetPoint("RIGHT", trackerFrame.headerBg, "RIGHT", -5, 0)
-            
-            addon:RequestUpdate()
+
+            addon:RefreshDisplay()
             addon:RefreshQuestTimers()
-            
+
             -- Restore lock state (handles resize buttons)
             addon:UpdateTrackerLock()
         end
-        
+
         -- After manipulation, ensure position is saved so reloading keeps the anchor choice
         local point, relativeTo, relativePoint, x, y = trackerFrame:GetPoint()
         addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
