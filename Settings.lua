@@ -626,7 +626,13 @@ local function InitUI()
     -- Read from the .toc rather than hardcoding, so it can't drift out of date.
     local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
     local addonVersion = getMetadata and getMetadata(addonName, "Version")
-    version:SetText(addonVersion and ("v" .. addonVersion) or "")
+    -- The packager substitutes the release tag for the @project-version@ token;
+    -- running straight from a git checkout leaves the raw token in place.
+    if addonVersion and addonVersion:find("@", 1, true) then
+        version:SetText("dev")
+    else
+        version:SetText(addonVersion and ("v" .. addonVersion) or "")
+    end
     panel:HookScript("OnShow", RefreshDependencies)
 
     y = -45
