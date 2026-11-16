@@ -89,6 +89,14 @@ end
 -- minimized. A section with nothing to show (height 0) is hidden, and set to
 -- `emptyHeight` when given.
 function addon:FinishPinnedSection(frame, height, emptyHeight)
+    -- The scenario section is also finished in combat. Holding a secure quest item
+    -- button, a section can't be resized, shown or hidden then; it keeps its last
+    -- size until the repaint after combat.
+    if self:IsCombatLocked(frame) then
+        self:RepaintAfterCombat()
+        return
+    end
+
     if height > 0 then
         frame:SetHeight(height)
         frame:SetShown(not self.db.minimized)

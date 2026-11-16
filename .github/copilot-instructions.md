@@ -244,7 +244,7 @@ Highlights enemy nameplates that are quest targets. Everything lives on `addon.N
    end
    ```
 2. **Multi-point detection**: Check `GetNumPoints()` on every call. If > 1, strip immediately.
-3. **Protected calls**: Wrap anchor operations in `pcall()` to avoid errors when frames are protected during combat.
+3. **Protected calls**: `pcall()` does not stop a blocked call: the game reports `ADDON_ACTION_BLOCKED` instead of raising a Lua error. Skip the anchor operation when `addon:IsCombatLocked(frame)` is true (see "Combat lockdown on protected frames" below).
 4. **Periodic call is dirty-gated, and that's fine**: the periodic per-render call to the normalize function (as opposed to the reactive hooks above) *does* early-return when nothing is dirty — this is a deliberate optimization, not a bug, because the hooks in point 1 already catch Blizzard's own anchor injections as they happen. Do not remove the dirty-gate as a "fix"; do make sure all three of `SetPoint`/`ClearAllPoints`/`SetAllPoints` are hooked.
 
 **Why this works**: the reactive hooks suppress Blizzard's secondary anchor additions at the moment they happen, so the periodic call only needs to catch cases the hooks didn't (e.g. first borrow).
@@ -254,6 +254,14 @@ Highlights enemy nameplates that are quest targets. Everything lives on `addon.N
 ### Secure item-button pool aliasing (Critical)
 - The secure-button pool (`secureButtons[]` in `TrackerUtils.lua`) is indexed by a flat per-render counter that only advances for rows with resolved item data. A row widget's `button.itemButton` reference must be set to `nil` (not just hidden) whenever that row has no item this render — leaving a stale non-nil reference lets it alias a secure button a *different* row legitimately claims later in the same or a later pass, hiding that other row's active item button out from under it.
 - All secure item-button geometry/attribute mutation (`ClearAllPoints`/`SetPoint`/`SetSize`/`SetFrameLevel`/`SetAttribute`) in `RenderItem.lua` must be skipped entirely while `InCombatLockdown()` is true — an actionable `SecureActionButtonTemplate` button cannot have these safely mutated mid-combat. Leave existing state as-is; the next out-of-combat render catches up.
+
+### Combat lockdown on protected frames (Critical)
+- A secure quest item button makes every frame above it protected: its row, the pinned section or scroll content holding the row, `scrollFrame` and `trackerFrame`. In combat, `Show`/`Hide`/`SetPoint`/`ClearAllPoints`/`SetSize`/`SetScale`/`SetFrameStrata`/`EnableMouse`/`StartMoving`/`StartSizing`/`SetVerticalScroll` on any of them is blocked and reported as `ADDON_ACTION_BLOCKED`. Wheel-scrolling the list in combat once triggered exactly this.
+- Any code that can run in combat (wheel, drag/resize, header buttons, settings effects, event and timer handlers, `UpdateCombatFrameVisibility`'s layout pass, and anchor hooks on borrowed Blizzard frames) checks `addon:IsCombatLocked(frame)` (`Core.lua`) before such a call. When it returns true, skip the call and either:
+  - call `addon:RepaintAfterCombat()` when the post-combat repaint redoes the change (it re-anchors, re-sizes and re-styles everything), or
+  - call `addon:AfterCombat(key, func)` for work a repaint doesn't do, such as the lock state, strata, position restore and Blizzard tracker sync.
+- Player actions that can't wait (drag, resize, minimize) are refused with `addon:NotifyCombatBlocked()`. A drag or resize still running when combat starts is ended on `PLAYER_REGEN_DISABLED` (`addon:FinishTrackerDrag()`), before the lockdown begins.
+- Scrolling stays unavailable in combat while the scroll content holds an item button. Supporting it would mean replacing the `ScrollFrame` with a secure-handler-driven clip frame.
 
 ### Scenario hijack restore correctness (Critical)
 - `RenderScenario.lua`'s restore call sites go through `addon:ReleaseScenarioTracker()`, which invokes `self:RestoreAllHijackedFrames()` (the real implementation, in `Core.lua`) — never a `self.RestoreBorrowedFrames`-named method, which does not exist anywhere in the codebase. A prior version silently no-op'd here, permanently orphaning the borrowed Blizzard scenario tracker frame.

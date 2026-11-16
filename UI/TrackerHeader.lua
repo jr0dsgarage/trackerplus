@@ -331,6 +331,12 @@ function addon:CreateTrackerHeader(trackerFrame)
     end
 
     trackerFrame.minMaxBtn:SetScript("OnClick", function()
+        -- Minimizing resizes the tracker and hides its sections, which combat blocks
+        -- while it's protected (see IsCombatLocked in Core.lua).
+        if addon:IsCombatLocked(trackerFrame) then
+            addon:NotifyCombatBlocked()
+            return
+        end
         addon.db.minimized = not addon.db.minimized
         UpdateMinMaxState()
     end)

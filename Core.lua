@@ -2,7 +2,7 @@
 local _, addon = ...
 
 -- Localize hot-path globals to avoid repeated global lookups
-local ipairs, next, tostring = ipairs, next, tostring
+local ipairs, pairs, next, tostring = ipairs, pairs, next, tostring
 local wipe = wipe
 local format = string.format
 local max, min = math.max, math.min
@@ -116,6 +116,53 @@ function addon:HideSharedTooltip()
     GameTooltip:Hide()
 end
 
+-------------------------------------------------------------------------------
+-- Combat lockdown
+--
+-- A secure quest item button makes every frame above it protected: its row, the
+-- section or scroll content holding that row, the scroll frame and the tracker
+-- itself. In combat, moving, sizing, showing, hiding or scrolling a protected frame
+-- is blocked (ADDON_ACTION_BLOCKED), so anything that does must check
+-- IsCombatLocked first and leave the change to AfterCombat or RepaintAfterCombat.
+-------------------------------------------------------------------------------
+local afterCombat = {}
+
+-- True when `target` can't be moved, sized, shown, hidden or scrolled right now.
+function addon:IsCombatLocked(target)
+    if not (target and InCombatLockdown()) then return false end
+    return (target:IsProtected())
+end
+
+-- Repaints the whole tracker once combat ends. A repaint re-anchors, re-sizes and
+-- re-styles every frame, which catches up whatever a combat-time update skipped.
+function addon:RepaintAfterCombat()
+    self._layoutDirty = true
+    pendingUpdate = true
+end
+
+-- Runs func(addon) once combat ends, ahead of that repaint, for changes a repaint
+-- doesn't make by itself. Keyed, so the same work requested again still runs once.
+function addon:AfterCombat(key, func)
+    afterCombat[key] = func
+    self:RepaintAfterCombat()
+end
+
+local function RunAfterCombatQueue()
+    if next(afterCombat) == nil then return end
+    local queued = afterCombat
+    afterCombat = {}
+    -- One failing entry is reported without stopping the rest.
+    local handler = geterrorhandler()
+    for _, func in pairs(queued) do
+        xpcall(function() func(addon) end, handler)
+    end
+end
+
+-- The game's own "can't do that in combat" error, for actions the player tried.
+function addon:NotifyCombatBlocked()
+    UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1, 0.1, 0.1)
+end
+
 -- Initialize addon
 function addon:Initialize()
     -- Initialize database
@@ -153,7 +200,11 @@ function addon:Initialize()
             -- While Edit Mode is open the player needs to see and drag the
             -- real tracker, so suppression is suspended (see OnEditModeEnter).
             if addon.db.enabled and not addon._editModeActive then
-                self:EnableMouse(false)
+                -- The game's tracker can hold protected frames too. If it can't be
+                -- changed now, PLAYER_REGEN_ENABLED re-applies this.
+                if not addon:IsCombatLocked(self) then
+                    self:EnableMouse(false)
+                end
                 if not InCombatLockdown() then
                     self:SetAlpha(0)
                 end
@@ -163,7 +214,8 @@ function addon:Initialize()
         -- If any code path flips ObjectiveTracker mouse back on while TrackerPlus is enabled,
         -- immediately turn it back off to prevent click-through behavior.
         hooksecurefunc(ObjectiveTrackerFrame, "EnableMouse", function(self, enabled)
-            if addon.db.enabled and enabled and not addon._editModeActive then
+            if addon.db.enabled and enabled and not addon._editModeActive
+                and not addon:IsCombatLocked(self) then
                 self:EnableMouse(false)
             end
         end)
@@ -288,7 +340,10 @@ function addon:UpdateDefaultTrackerVisibility()
     self:LogAt("trace", "UpdateDefaultTrackerVisibility called. enabled=%s", tostring(self.db.enabled))
 
     if self.db.enabled then
-        ObjectiveTrackerFrame:EnableMouse(false)
+        -- Left for PLAYER_REGEN_ENABLED, which runs this again, if combat blocks it.
+        if not self:IsCombatLocked(ObjectiveTrackerFrame) then
+            ObjectiveTrackerFrame:EnableMouse(false)
+        end
         if not InCombatLockdown() then
             ObjectiveTrackerFrame:SetAlpha(0)
             self:LogAt("trace", "ObjectiveTrackerFrame hidden")
@@ -413,13 +468,18 @@ function addon:OnEvent(event, ...)
         self:SyncWithBlizzardTracker()
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat. This fires just before the lockdown starts, so the tracker
-        -- can still be hidden even while it holds secure quest item buttons.
+        -- can still be hidden even while it holds secure quest item buttons, and a
+        -- drag or resize in progress can still be ended (it couldn't be once locked).
+        self:FinishTrackerDrag()
         if self.db.hideInCombat then
             self:SetTrackerVisible(false)
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Re-assert suppression now that combat restrictions are lifted.
         self:UpdateDefaultTrackerVisibility()
+
+        -- Apply the changes combat blocked (see AfterCombat).
+        RunAfterCombatQueue()
 
         -- Catch up on whatever combat deferred. This is also what brings back a
         -- tracker Hide in Combat hid: UpdateTracker decides whether it should show at
@@ -723,7 +783,7 @@ function addon:SetTrackerVisible(visible)
 
     -- The secure quest item buttons make the tracker protected while it holds any,
     -- so in combat it can't be shown or hidden; the update after combat applies it.
-    if InCombatLockdown() and trackerFrame:IsProtected() then
+    if self:IsCombatLocked(trackerFrame) then
         pendingUpdate = true
         return
     end

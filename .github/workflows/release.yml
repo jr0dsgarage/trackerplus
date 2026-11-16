@@ -40,6 +40,7 @@ jobs:
           fetch-depth: 0
 
       - name: Tag next version
+        id: version
         run: |
           set -euo pipefail
           pattern='[0-9]*.[0-9]*.[0-9]*'
@@ -47,6 +48,7 @@ jobs:
           existing=$(git tag --points-at HEAD --list "$pattern" | head -n1)
           if [ -n "$existing" ]; then
             echo "HEAD is already tagged $existing; re-packaging that version."
+            echo "tag=$existing" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -70,9 +72,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$next" -m "Release $next"
           git push origin "$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
 
+      # Not `uses: BigWigsMods/packager@v2`: on a branch push, the packager quits
+      # without building when HEAD already has a tag ("Found future tag"), expecting
+      # the tag's own push to start a second run. Tags pushed with GITHUB_TOKEN never
+      # start workflows, so that run never comes; this is why 1.0.0 was never packaged.
+      # Running the same script with a tag push's refs builds and uploads the tag here.
       - name: Package and publish
-        uses: BigWigsMods/packager@v2
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/BigWigsMods/packager/v2/release.sh -o "$RUNNER_TEMP/release.sh"
+          GITHUB_REF="refs/tags/$TAG" GITHUB_REF_NAME="$TAG" bash "$RUNNER_TEMP/release.sh"

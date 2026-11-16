@@ -10,6 +10,14 @@ local hooksecurefunc = hooksecurefunc
 -- Repair only when dirty to minimize churn, but strip immediately if Blizzard injects
 -- extra points or wrong offsets.
 local function NormalizeScenarioBorrowAnchor(scenarioFrame, borrowedFrame)
+    -- Runs in combat too (render ticks and the anchor guards below). The game's
+    -- scenario tracker can hold protected frames, and then can't be re-anchored
+    -- until combat ends; the next render after that repairs it. (The pcall around
+    -- this doesn't help: a blocked call is reported, not raised as an error.)
+    if addon:IsCombatLocked(borrowedFrame) then
+        return
+    end
+
     local parent = borrowedFrame:GetParent()
     local numPoints = borrowedFrame:GetNumPoints()
     local point, relativeTo, relativePoint, xOfs, yOfs = borrowedFrame:GetPoint(1)

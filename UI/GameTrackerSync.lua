@@ -80,6 +80,12 @@ function addon:SyncWithBlizzardTracker()
     if not db.matchBlizzardTracker then return false end
     if db.minimized then return false end
 
+    -- Sizing and moving the tracker is blocked in combat while it's protected.
+    if self:IsCombatLocked(trackerFrame) then
+        self:AfterCombat("syncWithBlizzardTracker", self.SyncWithBlizzardTracker)
+        return false
+    end
+
     local geo = self:GetBlizzardTrackerGeometry()
     if not geo then return false end
 

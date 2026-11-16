@@ -38,6 +38,7 @@ When reviewing code, always evaluate every item below. Report findings grouped b
 
 ### 2. Combat Lockdown Correctness (Critical)
 - Every frame-geometry-mutating call must either be gated by `if InCombatLockdown() then return end` or deferred to `pendingUpdate = true`.
+- Calls on our own frames that can run in combat (show/hide, anchor, size, scale, strata, `EnableMouse`, `StartMoving`/`StartSizing`, `SetVerticalScroll`) must check `addon:IsCombatLocked(frame)` and defer through `RepaintAfterCombat`/`AfterCombat`. A secure quest item button anywhere below the frame makes it protected. `pcall` does not catch `ADDON_ACTION_BLOCKED`.
 - `PLAYER_REGEN_ENABLED` handler must flush `pendingUpdate` after combat to avoid missed refreshes.
 - Slash command handlers that modify frames must be gated.
 

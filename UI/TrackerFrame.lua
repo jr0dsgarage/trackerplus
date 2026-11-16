@@ -1,6 +1,7 @@
 ---@diagnostic disable: undefined-global
 local addonName, addon = ...
 local ipairs, wipe = ipairs, wipe
+local InCombatLockdown = InCombatLockdown
 local max, min, floor = math.max, math.min, math.floor
 
 -- Tracker frame UI with scrollable content (no visible scrollbar)
@@ -142,12 +143,20 @@ end
 function addon:ApplyTrackerAnchor()
     -- Minimized, the frame is a button-sized box anchored by the button itself.
     if self.db.minimized then return end
+    if self:IsCombatLocked(trackerFrame) then
+        self:AfterCombat("applyTrackerAnchor", self.ApplyTrackerAnchor)
+        return
+    end
     ApplyTrackerAnchor()
 end
 
 -- Puts the tracker where it belongs. Run on creation and on every PLAYER_ENTERING_WORLD.
 function addon:RestorePosition()
     if not trackerFrame then return end
+    if self:IsCombatLocked(trackerFrame) then
+        self:AfterCombat("restorePosition", self.RestorePosition)
+        return
+    end
 
     -- Until the player positions the tracker themselves, sit exactly on top of
     -- the game's own tracker so this is a drop-in replacement on first load.
@@ -184,6 +193,10 @@ function addon:MatchBlizzardTrackerStrata()
     end
 
     if self.trackerFrame:GetFrameStrata() ~= strata then
+        if self:IsCombatLocked(self.trackerFrame) then
+            self:AfterCombat("matchStrata", self.MatchBlizzardTrackerStrata)
+            return
+        end
         self.trackerFrame:SetFrameStrata(strata)
     end
 end
@@ -207,7 +220,43 @@ local function CreatePinnedSection(parent, hidden)
     return section
 end
 
+-- What the player is doing to the tracker with the mouse: "move", "size" or nil.
+-- Only a move or resize that actually started is finished: one refused in combat
+-- never began, and one still running when combat starts is ended early.
+local activeDrag = nil
+
+-- Moving or resizing the tracker while it's protected is blocked in combat (see
+-- IsCombatLocked in Core.lua), so a drag isn't started then.
+local function CanStartDrag()
+    if addon.db.locked then return false end
+    if addon:IsCombatLocked(trackerFrame) then
+        addon:NotifyCombatBlocked()
+        return false
+    end
+    return true
+end
+
+local function OnDragStart()
+    if not CanStartDrag() then return end
+    activeDrag = "move"
+    trackerFrame:StartMoving()
+end
+
+local function OnDragStop()
+    if activeDrag ~= "move" then return end
+    activeDrag = nil
+    trackerFrame:StopMovingOrSizing()
+    -- Save position including relativePoint
+    local point, _, relativePoint, x, y = trackerFrame:GetPoint()
+    addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
+    -- Swap to the chosen anchor (and save that) so later resizes keep it fixed.
+    addon:ApplyTrackerAnchor()
+    addon:ClaimManualGeometry()
+end
+
 local function OnResizeGripUp()
+    if activeDrag ~= "size" then return end
+    activeDrag = nil
     trackerFrame:StopMovingOrSizing()
     SaveDraggedSize()
     addon:ApplyTrackerAnchor()
@@ -215,6 +264,16 @@ local function OnResizeGripUp()
     addon:UpdateContentWidth()
     addon:RequestUpdate()
     addon:UpdateSettingWidgets()
+end
+
+-- Ends a move or resize in progress. Core runs this as combat starts, the last
+-- moment it can be: once locked, the tracker couldn't be let go of.
+function addon:FinishTrackerDrag()
+    if activeDrag == "move" then
+        OnDragStop()
+    elseif activeDrag == "size" then
+        OnResizeGripUp()
+    end
 end
 
 -- A corner drag-to-resize grip. `flip` mirrors the art for the left corner.
@@ -231,9 +290,9 @@ local function CreateResizeGrip(corner, flip)
         grip:GetPushedTexture():SetTexCoord(1, 0, 0, 1)
     end
     grip:SetScript("OnMouseDown", function()
-        if not addon.db.locked then
-            trackerFrame:StartSizing(corner)
-        end
+        if not CanStartDrag() then return end
+        activeDrag = "size"
+        trackerFrame:StartSizing(corner)
     end)
     grip:SetScript("OnMouseUp", OnResizeGripUp)
     return grip
@@ -282,20 +341,8 @@ function addon:CreateTrackerFrame()
 
     -- Dragging
     trackerFrame:RegisterForDrag("LeftButton")
-    trackerFrame:SetScript("OnDragStart", function(self)
-        if not addon.db.locked then
-            self:StartMoving()
-        end
-    end)
-    trackerFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        -- Save position including relativePoint
-        local point, _, relativePoint, x, y = self:GetPoint()
-        addon.db.framePosition = {point = point, relativePoint = relativePoint, x = x, y = y}
-        -- Swap to the chosen anchor (and save that) so later resizes keep it fixed.
-        addon:ApplyTrackerAnchor()
-        addon:ClaimManualGeometry()
-    end)
+    trackerFrame:SetScript("OnDragStart", OnDragStart)
+    trackerFrame:SetScript("OnDragStop", OnDragStop)
 
     -- Resizing Handles (Triangles)
     trackerFrame.resizeBR = CreateResizeGrip("BOTTOMRIGHT", false)
@@ -303,8 +350,10 @@ function addon:CreateTrackerFrame()
 
     -- Mouse wheel scrolling
     trackerFrame:EnableMouseWheel(true)
-    trackerFrame:SetScript("OnMouseWheel", function(self, delta)
-        if scrollFrame then
+    trackerFrame:SetScript("OnMouseWheel", function(_, delta)
+        -- The scroll content parents the secure quest item buttons, and while it holds
+        -- any the scroll frame is protected: SetVerticalScroll is blocked in combat.
+        if scrollFrame and not addon:IsCombatLocked(scrollFrame) then
             local current = scrollFrame:GetVerticalScroll()
             local maxScroll = scrollFrame:GetVerticalScrollRange()
             local newScroll = max(0, min(maxScroll, current - (delta * 20)))
@@ -421,7 +470,12 @@ function addon:UpdateTrackerLock()
     if not trackerFrame then return end
 
     local locked = self.db.locked
-    trackerFrame:EnableMouse(not locked)
+    -- Mouse input on a protected frame can't be switched in combat.
+    if self:IsCombatLocked(trackerFrame) then
+        self:AfterCombat("updateTrackerLock", self.UpdateTrackerLock)
+    else
+        trackerFrame:EnableMouse(not locked)
+    end
     trackerFrame.resizeBR:SetShown(not locked)
     trackerFrame.resizeBL:SetShown(not locked)
 
@@ -508,7 +562,8 @@ end
 function addon:UpdateLayoutAnchors()
     if not self.trackerFrame then return end
 
-    -- A nil signature (set by the renderer) forces a full re-anchor.
+    -- A nil signature (set by the renderer, or by a pass combat cut short) forces a
+    -- full re-anchor.
     local changed = self._layoutSignature == nil
 
     wipe(visibleTop)
@@ -526,6 +581,12 @@ function addon:UpdateLayoutAnchors()
     if not changed then return end
     self._layoutSignature = true
 
+    -- This runs in combat too (scenario sections resize mid-fight). A section or
+    -- scroll frame holding a secure quest item button can't be re-anchored then, so
+    -- it keeps its old anchor -- still attached to the frame above it, which moves
+    -- with any height change -- and is re-anchored by the repaint after combat.
+    local deferred = false
+
     ---------------------------------------------------------------------------
     -- Top-anchored sections, chained in order
     ---------------------------------------------------------------------------
@@ -537,15 +598,19 @@ function addon:UpdateLayoutAnchors()
         -- previous section. Re-anchoring unchanged sections (scenarioFrame
         -- especially) momentarily detached them and produced a visible flash/drop.
         if section._tpLayoutAnchorPrev ~= prevFrame then
-            section:ClearAllPoints()
-            if prevFrame == self.trackerFrame then
-                section:SetPoint("TOPLEFT", prevFrame, "TOPLEFT", LAYOUT_SIDE, -HEADER_H)
-                section:SetPoint("TOPRIGHT", prevFrame, "TOPRIGHT", -LAYOUT_SIDE, -HEADER_H)
+            if self:IsCombatLocked(section) then
+                deferred = true
             else
-                section:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
-                section:SetPoint("TOPRIGHT", prevFrame, "BOTTOMRIGHT", 0, -LAYOUT_PAD)
+                section:ClearAllPoints()
+                if prevFrame == self.trackerFrame then
+                    section:SetPoint("TOPLEFT", prevFrame, "TOPLEFT", LAYOUT_SIDE, -HEADER_H)
+                    section:SetPoint("TOPRIGHT", prevFrame, "TOPRIGHT", -LAYOUT_SIDE, -HEADER_H)
+                else
+                    section:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
+                    section:SetPoint("TOPRIGHT", prevFrame, "BOTTOMRIGHT", 0, -LAYOUT_PAD)
+                end
+                section._tpLayoutAnchorPrev = prevFrame
             end
-            section._tpLayoutAnchorPrev = prevFrame
         end
         prevFrame = section
     end
@@ -554,27 +619,43 @@ function addon:UpdateLayoutAnchors()
     -- ScrollFrame — fills between last top section and first bottom section
     ---------------------------------------------------------------------------
     local scroll = self.scrollFrame
-    scroll:ClearAllPoints()
-
-    if prevFrame == self.trackerFrame then
-        -- No top sections visible; scroll starts right below the header
-        scroll:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -HEADER_H)
+    if self:IsCombatLocked(scroll) then
+        deferred = true
     else
-        scroll:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
+        scroll:ClearAllPoints()
+
+        if prevFrame == self.trackerFrame then
+            -- No top sections visible; scroll starts right below the header
+            scroll:SetPoint("TOPLEFT", self.trackerFrame, "TOPLEFT", 0, -HEADER_H)
+        else
+            scroll:SetPoint("TOPLEFT", prevFrame, "BOTTOMLEFT", 0, -LAYOUT_PAD)
+        end
+
+        if bonusVisible then
+            scroll:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
+        elseif wqVisible then
+            scroll:SetPoint("BOTTOMRIGHT", self.worldQuestFrame, "TOPRIGHT", 0, 0)
+        else
+            scroll:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -LAYOUT_SIDE, LAYOUT_SIDE)
+        end
     end
 
-    if bonusVisible then
-        scroll:SetPoint("BOTTOMRIGHT", self.bonusFrame, "TOPRIGHT", 0, 0)
-    elseif wqVisible then
-        scroll:SetPoint("BOTTOMRIGHT", self.worldQuestFrame, "TOPRIGHT", 0, 0)
-    else
-        scroll:SetPoint("BOTTOMRIGHT", self.trackerFrame, "BOTTOMRIGHT", -LAYOUT_SIDE, LAYOUT_SIDE)
+    if deferred then
+        self._layoutSignature = nil
+        self:RepaintAfterCombat()
     end
 end
 
 -- Update tracker appearance (colors, fonts, etc.)
 function addon:UpdateTrackerAppearance()
     if not trackerFrame then return end
+
+    -- This sizes, scales and re-anchors the tracker, all blocked in combat while it
+    -- is protected. Settings changed mid-fight are applied once it ends.
+    if self:IsCombatLocked(trackerFrame) then
+        self:AfterCombat("updateTrackerAppearance", self.UpdateTrackerAppearance)
+        return
+    end
 
     local db = self.db
 
