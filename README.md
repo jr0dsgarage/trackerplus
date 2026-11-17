@@ -267,6 +267,7 @@ Background, border, progress bar and font lists include anything other addons ha
 | --- | --- |
 | `/tp` or `/trackerplus` | Open settings |
 | `/tp toggle` | Turn the tracker on or off |
+| `/tp show` / `/tp hide` | Show or hide the tracker, keeping the game's own tracker hidden |
 | `/tp lock` / `/tp unlock` | Lock or unlock the frame |
 | `/tp reset` | Reset all settings to their defaults (asks first, then reloads the UI) |
 | `/tp nameplates` | Open the Nameplates settings page |
@@ -278,6 +279,7 @@ Background, border, progress bar and font lists include anything other addons ha
 - **[FollowTheArrow](https://www.curseforge.com/wow/addons/followthearrow)**: when it's loaded, TrackerPlus can show the current guide step in its own section, between Active Quest and Campaign. Turn it on with the arrow button on the title bar or on the main settings page.
 - **Spoken** (Spoken Quests): when it's loaded, quest rows get Spoken's Play button, at the right end of the title line or on the left under the map pin, and the Active Quest section can get one beside its title. Both are set on the Tracking Panel settings page; buttons only appear on quests a Spoken voice pack covers.
 - **Auctionator**: its crafting search button is moved into the Professions section.
+- **Titan Panel** (or any other LibDataBroker display): TrackerPlus adds a button you can put on the bar. In Titan Panel, right-click the bar and pick it from **Interface → TrackerPlus**. Click the button to show or hide the tracker; Shift-Click opens the settings. Hiding the tracker this way doesn't bring back the game's own tracker, and the tracker stays hidden after a reload until you show it again.
 - **LibSharedMedia** (bundled with many addons): its textures and fonts show up in the Appearance lists.
 
 <!-- SCREENSHOT: docs/screenshots/follow-the-arrow.png
@@ -301,7 +303,7 @@ Settings are saved per account in `TrackerPlusDB`.
 | `Core.lua` | Events, the update loop, Edit Mode handling and slash commands |
 | `Data/` | Collects quests, achievements and other trackables; parses objectives, picks quest colors and sorts trackables |
 | `Render/` | Draws each tracker section; `TrackerRenderer.lua` lays them out |
-| `UI/` | The tracker frame, title bar, button pools, click handling, auto-minimize, panel textures and Match Game Tracker |
+| `UI/` | The tracker frame, title bar, button pools, click handling, auto-minimize, panel textures, Match Game Tracker and the Titan Panel / LibDataBroker button |
 | `Map/` | World map pin colors and the quest area marker |
 | `Nameplates/` | Nameplate highlights, their settings page and debug window |
 | `Settings.lua`, `SettingsWidgets.lua` | The settings pages and their controls |

@@ -458,7 +458,8 @@ function addon:CreateTrackerFrame()
 
     self:CreateTrackerHeader(trackerFrame)
 
-    trackerFrame:Show()
+    -- Starting hidden avoids a flash of the empty frame when it was left hidden.
+    trackerFrame:SetShown(not self.db.hidden)
     self:UpdateTrackerLock()
     self:InitQuestTimerSection()
 

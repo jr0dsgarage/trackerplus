@@ -614,6 +614,13 @@ function addon:UpdateTracker()
         return
     end
 
+    -- Hidden (SetTrackerShown): nothing is collected or drawn until it's shown again,
+    -- which repaints. Dirty sections pile up meanwhile, so that repaint is current.
+    if db.hidden then
+        self:SetTrackerVisible(false)
+        return
+    end
+
     -- In combat, run a minimal layout-only refresh to avoid protected UI mutations.
     if InCombatLockdown() then
         pendingUpdate = true
@@ -677,6 +684,7 @@ function addon:UpdateTracker()
     -- Unlocked, the tracker always shows so it can be dragged into place, with a hint
     -- in the title while it's empty. Locked, Hide When Empty can hide it.
     local isEmpty = #trackables == 0
+    self._trackerEmpty = isEmpty
     local title = self.trackerFrame.title
     if title then
         title:SetText((isEmpty and not db.locked) and "Tracker Plus (Empty - Drag to Move)" or "Tracker Plus")
@@ -801,6 +809,55 @@ function addon:ApplyEnabledState()
     self:RefreshDisplay()
 end
 
+-- True when TrackerPlus is on and not hidden. It may still not be on screen (empty,
+-- in an instance, in combat with Hide in Combat): UpdateTracker decides that.
+function addon:IsTrackerShown()
+    return self.db.enabled and not self.db.hidden
+end
+
+-- Why a shown tracker (IsTrackerShown) is off screen right now, finishing "Hidden
+-- while ..." in the launcher tooltip, or nil when nothing is holding it back. Keep
+-- in step with the checks in UpdateTracker, SetTrackerVisible and PLAYER_REGEN_DISABLED.
+function addon:GetAutoHideReason()
+    local db = self.db
+    if self._hideForEditMode then
+        return "Edit Mode is open"
+    elseif db.hideInInstance and IsInInstance() then
+        return "in instances"
+    elseif db.hideInCombat and InCombatLockdown() then
+        return "in combat"
+    elseif db.locked and db.fadeWhenEmpty and self._trackerEmpty then
+        return "nothing is tracked"
+    end
+end
+
+-- Shows or hides the tracker (the launcher button, /tp show and /tp hide). Unlike
+-- /tp toggle, hiding leaves the game's own tracker suppressed. Showing while
+-- TrackerPlus is turned off turns it back on, since that's the only way to see it.
+function addon:SetTrackerShown(shown)
+    if not self.trackerFrame then return end
+
+    self:SetSetting("hidden", not shown)
+    if shown and not self.db.enabled then
+        self:SetSetting("enabled", true)
+        self:ApplyEnabledState()
+    elseif shown then
+        self:RefreshDisplay()
+    else
+        self:SetTrackerVisible(false)
+    end
+
+    -- Combat holds back showing (UpdateTracker only repaints once it ends), and hiding
+    -- too while the tracker holds secure quest item buttons.
+    if InCombatLockdown() and (shown or self:IsCombatLocked(self.trackerFrame)) then
+        Print(shown and "Tracker will show after combat." or "Tracker will hide after combat.")
+    end
+end
+
+function addon:ToggleTrackerShown()
+    self:SetTrackerShown(not self:IsTrackerShown())
+end
+
 -- Slash commands
 function addon:RegisterSlashCommands()
     SLASH_TRACKERPLUS1 = "/trackerplus"
@@ -815,6 +872,8 @@ function addon:RegisterSlashCommands()
             addon:SetSetting("enabled", not addon.db.enabled)
             addon:ApplyEnabledState()
             Print(addon.db.enabled and "Enabled" or "Disabled")
+        elseif msg == "show" or msg == "hide" then
+            addon:SetTrackerShown(msg == "show")
         elseif msg == "lock" then
             addon:SetSetting("locked", true)
             addon:UpdateTrackerLock()
@@ -833,6 +892,7 @@ function addon:RegisterSlashCommands()
             Print("Commands:")
             Print("  /tp - Open settings")
             Print("  /tp toggle - Toggle tracker on/off")
+            Print("  /tp show/hide - Show or hide the tracker")
             Print("  /tp lock/unlock - Lock/unlock frame position")
             Print("  /tp reset - Reset all settings")
             Print("  /tp nameplates - Nameplate highlight options (/tp nameplates help)")

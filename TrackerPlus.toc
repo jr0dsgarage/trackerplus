@@ -39,6 +39,7 @@ Render/TrackerRenderer.lua
 UI/TrackerFrame.lua
 UI/TrackerHeader.lua
 UI/GameTrackerSync.lua
+UI/DataBroker.lua
 Nameplates/NameplatesClassification.lua
 Nameplates/NameplatesHighlights.lua
 Nameplates/NameplatesDebug.lua

@@ -46,6 +46,9 @@ end
 -- Default settings
 local DEFAULTS = {
     enabled = true,
+    -- Hidden from the launcher button (Titan Panel, ...) or /tp hide. Unlike turning
+    -- `enabled` off, the game's own tracker stays suppressed while hidden.
+    hidden = false,
     locked = false,
 
     -- Frame Position & Size
