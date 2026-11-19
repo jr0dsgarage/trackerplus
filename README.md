@@ -66,10 +66,8 @@ Each type can be turned off under **Settings → Tracking Panel**. A campaign qu
 ![Quest popup](docs/screenshots/quest-popup.png)
 -->
 
-<!-- SCREENSHOT: docs/screenshots/quest-timer.png
-     A Quest Timer row counting down above the quest list.
 ![Quest timer](docs/screenshots/quest-timer.png)
--->
+
 
 ### Quest rows
 
@@ -96,11 +94,6 @@ An optional **row background** can be drawn behind each row (**Settings → Appe
 - **Focused quest.** Keeps its difficulty color. The glow on its map pin button is what marks it as the quest you're focused on.
 - **Other content.** Achievements, professions, monthly activities, endeavors, scenarios and bonus objectives each have their own color, set under **Settings → Appearance → Colors**.
 
-<!-- SCREENSHOT: docs/screenshots/difficulty-colors.png
-     A zone with quests of several difficulties (gray, green, yellow, orange, red), one of them focused (glowing map pin button).
-![Difficulty colors](docs/screenshots/difficulty-colors.png)
--->
-
 ### Quest area marker
 
 While you're inside the shaded area the map draws for a quest, that quest's row is marked. Pick a style and a color under **Settings → Appearance → Quest Area Highlight**:
@@ -112,10 +105,7 @@ While you're inside the shaded area the map draws for a quest, that quest's row 
 - Gradient Fade (Left) or Gradient Fade (Right)
 - Friend Card (Battle.net) or Friend Card (Selected)
 
-<!-- SCREENSHOT: docs/screenshots/quest-area-styles.png
-     A grid of the same quest row in each marker style.
 ![Quest area marker styles](docs/screenshots/quest-area-styles.png)
--->
 
 ### Zone headers and auto-minimize
 
@@ -125,15 +115,7 @@ Quests are grouped under zone headers, and every section has its own header. Cli
 
 The expand/collapse icon's style and side, and the header background, are set under **Settings → Appearance → Header Styling**.
 
-<!-- SCREENSHOT: docs/screenshots/auto-minimize.png
-     Before/after: many zone headers expanded, then auto-minimize on with only the current zone open.
-![Auto-minimize](docs/screenshots/auto-minimize.png)
--->
-
-<!-- SCREENSHOT: docs/screenshots/header-styles.png
-     The header icon styles (Standard, Square, Text, Quest Log) and header backgrounds side by side.
 ![Header styles](docs/screenshots/header-styles.png)
--->
 
 ### Clicking
 
@@ -150,10 +132,7 @@ The expand/collapse icon's style and side, and the header background, are set un
 
 The mouse wheel scrolls the tracker; there's no visible scrollbar.
 
-<!-- SCREENSHOT: docs/screenshots/quest-menu.png
-     The right-click menu on a quest.
 ![Quest right-click menu](docs/screenshots/quest-menu.png)
--->
 
 ### Title bar
 
@@ -167,10 +146,7 @@ From right to left, the title bar buttons are:
 | **A** | Turns [auto-minimize](#zone-headers-and-auto-minimize) on (gold) or off (gray). |
 | **Arrow** | Turns the [Follow the Arrow](#optional-addons) section on (gold) or off (gray). Only shown when FollowTheArrow is loaded. |
 
-<!-- SCREENSHOT: docs/screenshots/title-bar.png
-     Close-up of the title bar with all five buttons, plus the minimized single-button state.
 ![Title bar](docs/screenshots/title-bar.png)
--->
 
 ### Position and size
 
@@ -180,24 +156,13 @@ To place it yourself, unlock the frame, drag the title bar to move it and drag a
 
 The tracker can also be hidden in instances, in combat, or while nothing is tracked.
 
-<!-- SCREENSHOT: docs/screenshots/panel-styles.png
-     The tracker with a few different background and border textures (e.g. Solid, Blizzard Tooltip, Blizzard Dialog Gold, Parchment).
-![Panel styles](docs/screenshots/panel-styles.png)
--->
-
 ## World map pins
 
 The game's own quest pins on the world map get a ring in the same color as that quest's name in the tracker, so the map and the tracker always agree. Choose a soft **Glow** or a solid **Circle**, and set its thickness and, for the glow, its opacity. These are under **Settings → Map Pins**.
 
-<!-- SCREENSHOT: docs/screenshots/map-pins.png
-     The world map with several quest pins ringed in different difficulty colors.
 ![World map pins](docs/screenshots/map-pins.png)
--->
 
-<!-- SCREENSHOT: docs/screenshots/map-pin-styles.png
-     Close-up comparing the Glow and Circle styles on the same pin.
 ![Glow and Circle pin styles](docs/screenshots/map-pin-styles.png)
--->
 
 ## Nameplate highlights
 
@@ -225,15 +190,9 @@ The settings page has a **preview nameplate**. Click the magnifying glass next t
 ![Nameplate highlights in the world](docs/screenshots/nameplates-world.png)
 -->
 
-<!-- SCREENSHOT: docs/screenshots/nameplate-styles.png
-     The same nameplate in each style: Blizzard, Outline, Glow, Rounded.
 ![Nameplate highlight styles](docs/screenshots/nameplate-styles.png)
--->
 
-<!-- SCREENSHOT: docs/screenshots/nameplates-settings.png
-     The Nameplates settings page with the preview nameplate.
-![Nameplates settings](docs/screenshots/nameplates-settings.png)
--->
+![Nameplates settings](docs/screenshots/nameplate-settings.png)
 
 ## Settings
 
