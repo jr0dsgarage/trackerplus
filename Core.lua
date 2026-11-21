@@ -593,6 +593,17 @@ function addon:RequestUpdate(section)
     end
 end
 
+-- Repaints this frame instead of after the update debounce, for direct clicks
+-- (header collapse/expand) where the debounce reads as lag. Sections already
+-- pending are collected now; everything else reuses its cached bucket, rather
+-- than the full re-collect a bare RequestUpdate() would mark.
+function addon:RepaintNow()
+    self._layoutDirty = true
+    updateTimer = 0
+    frame:Hide()
+    self:UpdateTracker()
+end
+
 -- Main update function
 function addon:UpdateTracker()
     if not self.trackerFrame then

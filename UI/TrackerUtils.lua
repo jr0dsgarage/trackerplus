@@ -747,6 +747,7 @@ function addon:ToggleHeader(key, recursive)
 
     -- Collapse state only changes the paint, not the collected data, so this has to
     -- force a repaint: a plain RequestUpdate is skipped when another pending section
-    -- re-collects without changing anything.
-    self:RefreshDisplay()
+    -- re-collects without changing anything. Painted now, not after the debounce,
+    -- so the click responds immediately.
+    self:RepaintNow()
 end
