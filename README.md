@@ -121,7 +121,7 @@ The expand/collapse icon's style and side, and the header background, are set un
 
 | On a… | Click | Shift-click | Right-click |
 | --- | --- | --- | --- |
-| Quest | Open the map to it, scrolling the quest log to it and highlighting it | Link it in chat | Menu: Focus Quest, Stop Tracking, Show in Quest Log, Share Quest (in a group), Link to Chat, Abandon Quest |
+| Quest | Open the map to it, scrolling the quest log to it and highlighting it | Link it in chat | Menu: Focus Quest, Stop Tracking, Show in Quest Log, Share Quest (in a group), Link to Chat, Abandon Quest. Shift-right-click stops tracking it without the menu. |
 | Quest popup | Accept or turn in the quest | — | — |
 | Quest timer | Make it your Active quest | — | — |
 | World quest / bonus objective | — | Link it in chat | — |

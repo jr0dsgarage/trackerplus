@@ -581,7 +581,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
 
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
-            -- Shift+Left: Link to Chat (untracking lives in the right-click menu)
+            -- Shift+Left: Link to Chat (Shift+Right untracks a quest)
             self:LinkTrackableToChat(trackable)
         else
             -- Left click: Focus/navigate to quest
@@ -648,6 +648,14 @@ function addon:OnTrackableClick(trackable, mouseButton)
         if trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" then
             local questID = trackable.id or trackable.questID
             if not questID then return end
+
+            -- Shift+Right: Stop Tracking, skipping the menu
+            if IsShiftKeyDown() then
+                C_QuestLog.RemoveQuestWatch(questID)
+                self:RequestUpdate()
+                return
+            end
+
             MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
                 rootDescription:CreateTitle(trackable.title)
 

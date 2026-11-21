@@ -13,7 +13,7 @@ Here's what it does.
 - **Quest area marker.** When you're standing inside the area the map shades for a quest, that quest's row lights up. There are several styles: stripe, bracket, outline, tint, gradient, or a Battle.net friend card.
 - **Auto-minimize zones.** One button collapses every zone header except the one you're in. Zones open back up when you get there.
 - **Quest timers and popups.** Timed quests get a countdown, and auto-accept and auto-complete popups show up at the top of the tracker.
-- **Click actions you'd expect.** Click to open the map, Shift-click to link, right-click for a menu (focus, untrack, share, abandon and so on). Quest item buttons and Find a Group buttons work like they do on the default tracker.
+- **Click actions you'd expect.** Click to open the map, Shift-click to link, right-click for a menu (focus, untrack, share, abandon and so on), Shift-right-click to untrack a quest straight away. Quest item buttons and Find a Group buttons work like they do on the default tracker.
 
 ## Nameplate highlights
 
