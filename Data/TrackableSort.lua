@@ -10,12 +10,11 @@ local huge = math.huge
 local UnitLevel = UnitLevel
 local C_QuestLog = C_QuestLog
 
--- Distance from the player to a trackable's objective, as a squared value (the
--- game returns squared distance; we never need the real distance, only an
--- ordering, so there's no point taking a square root). Unreachable or unknown
--- objectives return huge so they sort last.
-local function GetSortDistance(item)
-    local questID = item.id or item.questID
+-- Distance from the player to a quest's objective, as a squared value (the game
+-- returns squared distance; we never need the real distance, only an ordering, so
+-- there's no point taking a square root). Unreachable or unknown objectives return
+-- huge so they sort last. Also used by auto-track (Data/AutoTrackQuests.lua).
+local function GetQuestDistanceSq(questID)
     if not questID or not C_QuestLog.GetDistanceSqToQuest then
         return huge
     end
@@ -38,6 +37,11 @@ local function GetSortDistance(item)
     end
 
     return distanceSq
+end
+addon.GetQuestDistanceSq = GetQuestDistanceSq
+
+local function GetSortDistance(item)
+    return GetQuestDistanceSq(item.id or item.questID)
 end
 
 -- How hard a trackable is relative to the player, expressed as a level delta.

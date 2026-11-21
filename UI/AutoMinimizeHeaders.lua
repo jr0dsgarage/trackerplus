@@ -87,6 +87,10 @@ end
 
 function addon:SetAutoMinimize(enabled)
     self.db.autoMinimizeHeaders = enabled and true or false
+    -- Auto-track wants the quests it tracks visible, so the two never run together.
+    if enabled and self.db.autoTrackNearby then
+        self:SetAutoTrack(false)
+    end
     local btn = self.trackerFrame and self.trackerFrame.autoMinBtn
     if btn and btn.UpdateColor then btn.UpdateColor() end
     self:UpdateAutoMinimizeWatcher()

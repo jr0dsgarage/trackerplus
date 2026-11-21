@@ -189,6 +189,9 @@ function addon:Initialize()
     -- Collapse quest zone headers we are not in (header "A" toggle)
     self:UpdateAutoMinimizeWatcher()
 
+    -- Track nearby quests (header toggle / Settings > Quest Tracking)
+    self:UpdateAutoTrackWatcher()
+
     -- Initial update
     self:RequestUpdate()
     self._layoutDirty = true
@@ -700,7 +703,15 @@ function addon:UpdateTracker()
     if title then
         title:SetText((isEmpty and not db.locked) and "Tracker Plus (Empty - Drag to Move)" or "Tracker Plus")
     end
-    self:SetTrackerVisible(not (db.locked and db.fadeWhenEmpty and isEmpty))
+    self:SetTrackerVisible(not (self:IsHideWhenEmptyActive() and isEmpty))
+end
+
+-- Hide When Empty applies only while locked, and never while auto-track is on: in a
+-- zone with nothing nearby the tracker would vanish, taking the auto-track button
+-- with it. The saved setting is left alone, so it comes back when auto-track is off.
+function addon:IsHideWhenEmptyActive()
+    local db = self.db
+    return db.locked and db.fadeWhenEmpty and not db.autoTrackNearby
 end
 
 -- Combat-safe refresh: update top-level frame visibility/size and layout only.
@@ -837,7 +848,7 @@ function addon:GetAutoHideReason()
         return "in instances"
     elseif db.hideInCombat and InCombatLockdown() then
         return "in combat"
-    elseif db.locked and db.fadeWhenEmpty and self._trackerEmpty then
+    elseif self:IsHideWhenEmptyActive() and self._trackerEmpty then
         return "nothing is tracked"
     end
 end

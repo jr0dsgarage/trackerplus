@@ -15,6 +15,7 @@ Works on Retail and on WoW Forever. Features that Forever doesn't have (campaign
   - [Quest colors](#quest-colors)
   - [Quest area marker](#quest-area-marker)
   - [Zone headers and auto-minimize](#zone-headers-and-auto-minimize)
+  - [Auto-track nearby quests](#auto-track-nearby-quests)
   - [Clicking](#clicking)
   - [Title bar](#title-bar)
   - [Position and size](#position-and-size)
@@ -115,6 +116,17 @@ Quests are grouped under zone headers, and every section has its own header. Cli
 
 The expand/collapse icon's style and side, and the header background, are set under **Settings → Appearance → Header Styling**.
 
+### Auto-track nearby quests
+
+**Auto-track** (the **crosshair** button on the title bar, or **Settings → TrackerPlus → Quest Tracking**) tracks the quests around you. It picks quests whose shaded map area you're standing in first, then quests whose map pin is in your current zone, and untracks them again when you leave. The pin is on a quest's objectives, or on the NPC you hand it in to once it's ready, so a quest from another zone that you turn in here is picked up too. Which zone a quest is listed under in the quest log doesn't matter.
+
+Turn on **Auto fill the quest log** as well to use whatever tracking slots are left over for your closest other quests, so the tracker always holds as many quests as the game allows (25).
+
+- Quests you track yourself are never untracked by it.
+- If you untrack a quest it added, it leaves that quest alone until you leave the area or zone, or until you track it again yourself.
+- Turning auto-track off untracks only the quests it added. Everything you tracked yourself stays.
+- Auto-track and auto-minimize don't run together; turning one on turns the other off.
+
 ![Header styles](docs/screenshots/header-styles.png)
 
 ### Clicking
@@ -144,6 +156,7 @@ From right to left, the title bar buttons are:
 | **Settings** (gear) | Opens the settings. |
 | **Lock** (padlock) | Locks or unlocks the frame. |
 | **A** | Turns [auto-minimize](#zone-headers-and-auto-minimize) on (gold) or off (gray). |
+| **Crosshair** | Turns [auto-track nearby quests](#auto-track-nearby-quests) on (color) or off (gray). |
 | **Arrow** | Turns the [Follow the Arrow](#optional-addons) section on (gold) or off (gray). Only shown when FollowTheArrow is loaded. |
 
 ![Title bar](docs/screenshots/title-bar.png)
@@ -200,7 +213,7 @@ Type `/tp`, click the gear on the title bar, or open **Game Menu → Options →
 
 | Page | What's on it |
 | --- | --- |
-| **TrackerPlus** | Turn the tracker on or off, lock it, show tooltips; hide it in instances, in combat or when empty; Campaign in Active Quest and Follow the Arrow; reset all settings. |
+| **TrackerPlus** | Turn the tracker on or off, lock it, show tooltips; hide it in instances, in combat or when empty; auto-track nearby quests and auto fill; Campaign in Active Quest and Follow the Arrow; reset all settings. |
 | **Tracking Panel** | Show quest level, show party members on quest, color by difficulty, sort order, which content types to show, and (with Spoken loaded) the Play buttons. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
 | **Nameplates** | Everything under [Nameplate highlights](#nameplate-highlights). |
 | **Appearance** | Match Game Tracker, anchor, width, height and scale; background and border textures and colors; header icon and background; row background; quest area marker; progress bar border and texture; fonts and sizes for headers, quest names and objectives; colors for text and each content type. |
