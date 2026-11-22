@@ -680,6 +680,7 @@ function addon:UpdateTrackerAppearance()
         and s.borderSize == (db.borderSize or 0)
         and s.borderStyle == db.borderStyle
         and s.backgroundStyle == db.backgroundStyle
+        and s.backgroundTextureAlpha == (db.backgroundTextureAlpha or 1)
         and s.borderR == (db.borderColor and db.borderColor.r or 0)
         and s.borderG == (db.borderColor and db.borderColor.g or 0)
         and s.borderB == (db.borderColor and db.borderColor.b or 0)
@@ -709,6 +710,7 @@ function addon:UpdateTrackerAppearance()
     s.borderSize = db.borderSize or 0
     s.borderStyle = db.borderStyle
     s.backgroundStyle = db.backgroundStyle
+    s.backgroundTextureAlpha = db.backgroundTextureAlpha or 1
     s.borderR = db.borderColor and db.borderColor.r or 0
     s.borderG = db.borderColor and db.borderColor.g or 0
     s.borderB = db.borderColor and db.borderColor.b or 0
@@ -741,12 +743,13 @@ function addon:UpdateTrackerAppearance()
             bg:SetColorTexture(color.r, color.g, color.b, color.a)
         else
             -- Stretched over the whole panel, in the texture's own colors (the Background
-            -- color is only for Solid).
+            -- color is only for Solid), faded by Background Opacity.
+            local alpha = math.max(math.min(tonumber(db.backgroundTextureAlpha) or 1, 1), 0)
             bg:SetTexture(backgroundFile)
             bg:SetHorizTile(false)
             bg:SetVertTile(false)
             bg:SetTexCoord(0, 1, 0, 1)
-            bg:SetVertexColor(1, 1, 1, 1)
+            bg:SetVertexColor(1, 1, 1, alpha)
         end
     end
 

@@ -203,7 +203,7 @@ Type `/tp`, click the gear on the title bar, or open **Game Menu → Options →
 | **TrackerPlus** | Turn the tracker on or off, lock it, show tooltips; hide it in instances, in combat or when empty; Campaign in Active Quest and Follow the Arrow; reset all settings. |
 | **Tracking Panel** | Show quest level, show party members on quest, color by difficulty, sort order, which content types to show, and (with Spoken loaded) the Play buttons. Sort order can be by difficulty (easiest or hardest first), by proximity, or alphabetical. |
 | **Nameplates** | Everything under [Nameplate highlights](#nameplate-highlights). |
-| **Appearance** | Match Game Tracker, anchor, width, height and scale; background and border textures and colors; header icon and background; row background; quest area marker; progress bar border and texture; fonts and sizes for headers, quest names and objectives; colors for text and each content type. |
+| **Appearance** | Match Game Tracker, anchor, width, height and scale; background and border textures and colors, and a textured background's opacity; header icon and background; row background; quest area marker; progress bar border and texture; fonts and sizes for headers, quest names and objectives; colors for text and each content type. |
 | **Layout** | Indents and spacing. |
 | **Map Pins** | Everything under [World map pins](#world-map-pins). |
 | **Debug** | Logging and layout overlays, for troubleshooting. |
