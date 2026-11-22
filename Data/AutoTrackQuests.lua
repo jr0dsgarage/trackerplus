@@ -317,10 +317,6 @@ end
 function addon:UpdateAutoTrackWatcher()
     local enabled = self.db.autoTrackNearby
     if enabled then
-        -- The two never run together: auto-track wants its quests visible.
-        if self.db.autoMinimizeHeaders then
-            self:SetAutoMinimize(false)
-        end
         -- Ledger entries the player untracked while we weren't looking (another
         -- addon, a reload with the feature off) are simply forgotten.
         local ledger = Ledger()
@@ -351,4 +347,34 @@ function addon:SetAutoTrack(enabled)
         ReleaseAll()
     end
     self:RequestUpdate("quests")
+end
+
+-------------------------------------------------------------------------------
+-- Per-quest lock (the padlock on quest rows while auto-track is on)
+-------------------------------------------------------------------------------
+-- Locked means the quest is the player's: auto-track won't untrack it. That's every
+-- quest not on the ledger -- tracked by hand, from the quest log, or by the game on
+-- accept -- so those show locked without anything being stored for them.
+
+function addon:IsQuestAutoTrackLocked(questID)
+    return not Ledger()[questID]
+end
+
+-- Locking hands a quest auto-track added to the player, as if they had tracked it by
+-- hand. Unlocking hands a tracked quest to auto-track, which untracks it on the next
+-- pass if it isn't nearby.
+function addon:SetQuestAutoTrackLocked(questID, locked)
+    if not questID or not self.charDB then return end
+    local ledger = self.charDB.autoTracked
+    if locked then
+        ledger[questID] = nil
+    elseif IsWatched(questID) then
+        ledger[questID] = true
+    end
+    declined[questID] = nil
+
+    self:RefreshDisplay()
+    if not locked then
+        self:RunAutoTrackPass()
+    end
 end

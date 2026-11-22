@@ -123,9 +123,10 @@ The expand/collapse icon's style and side, and the header background, are set un
 Turn on **Auto fill the quest log** as well to use whatever tracking slots are left over for your closest other quests, so the tracker always holds as many quests as the game allows (25).
 
 - Quests you track yourself are never untracked by it.
+- While auto-track is on, each quest row has a **padlock** beside its title. Yellow means the quest is yours and auto-track leaves it alone; quests you tracked yourself, from the quest log or when accepting them, start yellow. Grey means auto-track added it and will untrack it when you leave. Click a grey padlock to keep that quest tracked; click a yellow one to hand the quest to auto-track.
 - If you untrack a quest it added, it leaves that quest alone until you leave the area or zone, or until you track it again yourself.
 - Turning auto-track off untracks only the quests it added. Everything you tracked yourself stays.
-- Auto-track and auto-minimize don't run together; turning one on turns the other off.
+- Auto-track works alongside auto-minimize: turn both on to have nearby quests tracked and every other zone's header collapsed.
 
 ![Header styles](docs/screenshots/header-styles.png)
 
