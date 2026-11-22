@@ -126,7 +126,7 @@ The expand/collapse icon's style and side, and the header background, are set un
 | Quest timer | Make it your Active quest | — | — |
 | World quest / bonus objective | — | Link it in chat | — |
 | Achievement | Open it in the Achievements window | Link it in chat | Menu: Link to Chat, Stop Tracking |
-| Recipe | Open it in your profession window | Link it in chat | Menu: Link to Chat, Stop Tracking |
+| Recipe | Open it in your profession window | Link it in chat | Menu: Link to Chat, Stop Tracking. Shift-right-click stops tracking it without the menu. |
 | Monthly activity | Open the Traveler's Log | Link it in chat | Menu: Link to Chat, Stop Tracking |
 | Endeavor | Open it in the housing window | Link it in chat | Menu: Link to Chat, Stop Tracking |
 

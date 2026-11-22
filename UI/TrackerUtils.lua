@@ -581,7 +581,7 @@ function addon:OnTrackableClick(trackable, mouseButton)
 
     if mouseButton == "LeftButton" then
         if IsShiftKeyDown() then
-            -- Shift+Left: Link to Chat (Shift+Right untracks a quest)
+            -- Shift+Left: Link to Chat (Shift+Right untracks a quest or recipe)
             self:LinkTrackableToChat(trackable)
         else
             -- Left click: Focus/navigate to quest
@@ -698,6 +698,12 @@ function addon:OnTrackableClick(trackable, mouseButton)
             end)
         elseif trackable.type == "achievement" or trackable.type == "profession"
             or trackable.type == "monthly" or trackable.type == "endeavor" then
+            -- Shift+Right on a recipe: Stop Tracking, skipping the menu (as for quests)
+            if trackable.type == "profession" and IsShiftKeyDown() then
+                self:StopTrackingTrackable(trackable)
+                return
+            end
+
             MenuUtil.CreateContextMenu(UIParent, function(owner, rootDescription)
                 rootDescription:CreateTitle(trackable.title)
 
