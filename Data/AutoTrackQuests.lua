@@ -14,9 +14,11 @@ local addonName, addon = ...
 -- and the best of them are watched, up to the game's watch cap less the quests the
 -- player tracked by hand.
 --
--- Ownership: only quests this file watched itself (charDB.autoTracked) are ever
--- unwatched by it. Quests the player tracked by hand -- or the game tracked on accept
--- -- are never touched, and neither is the focused (super-tracked) quest.
+-- Ownership: only quests on the ledger (charDB.autoTracked) are ever unwatched by
+-- it: the ones it watched itself, plus quests accepted while it's on (the game
+-- watches those on accept, but the player didn't choose to track them). Quests the
+-- player tracked by hand, or locked with the padlock, are never touched, and
+-- neither is the focused (super-tracked) quest.
 --
 -- The player's own changes are noticed by comparing the watch list against our
 -- ledger on each pass (not from QUEST_WATCH_LIST_CHANGED, whose payload differs
@@ -89,6 +91,14 @@ end
 local declined = {}
 -- The real zone on the previous pass; changing zone forgets every declined quest.
 local lastZone
+
+-- Quests accepted while auto-track is on: questID -> GetTime() of the accept. The
+-- game watches a new quest from its own QUEST_ACCEPTED handler, which may run
+-- before or after ours, so the next pass adopts it onto the ledger once it's
+-- watched. One the game didn't watch is dropped after ACCEPT_GRACE_SECONDS, so a
+-- later track by hand stays the player's.
+local accepted = {}
+local ACCEPT_GRACE_SECONDS = 5
 
 -- Scratch tables reused each pass.
 local candidates, desired, nearNow, pool = {}, {}, {}, {}
@@ -203,6 +213,20 @@ function addon:RunAutoTrackPass()
         lastZone = realZone
     end
 
+    -- Hand newly accepted quests the game watched to auto-track.
+    local now = GetTime()
+    for questID, acceptedAt in pairs(accepted) do
+        if ledger[questID] or not C_QuestLog.GetLogIndexForQuestID(questID) then
+            accepted[questID] = nil
+        elseif IsWatched(questID) then
+            ledger[questID] = true
+            accepted[questID] = nil
+            changed = true
+        elseif now - acceptedAt > ACCEPT_GRACE_SECONDS then
+            accepted[questID] = nil
+        end
+    end
+
     -- Notice what the player did to the watch list since the last pass.
     for questID in pairs(ledger) do
         if not C_QuestLog.GetLogIndexForQuestID(questID) then
@@ -288,11 +312,23 @@ local function ReleaseAll()
         end
     end
     wipe(declined)
+    wipe(accepted)
     lastZone = nil
     if changed then
         addon:RequestUpdate("quests")
     end
 end
+
+local acceptFrame = CreateFrame("Frame")
+acceptFrame:RegisterEvent("QUEST_ACCEPTED")
+acceptFrame:SetScript("OnEvent", function(_, _, arg1, arg2)
+    if not (addon.db and addon.db.autoTrackNearby and addon.db.enabled) then return end
+    -- Older clients pass (questLogIndex, questID); newer ones just questID.
+    local questID = arg2 or arg1
+    if type(questID) ~= "number" or questID <= 0 then return end
+    if Ledger()[questID] then return end
+    accepted[questID] = GetTime()
+end)
 
 -------------------------------------------------------------------------------
 -- On/off
@@ -353,11 +389,12 @@ end
 -- Per-quest lock (the padlock on quest rows while auto-track is on)
 -------------------------------------------------------------------------------
 -- Locked means the quest is the player's: auto-track won't untrack it. That's every
--- quest not on the ledger -- tracked by hand, from the quest log, or by the game on
--- accept -- so those show locked without anything being stored for them.
+-- quest not on the ledger -- locked with the padlock, tracked by hand, or already
+-- tracked before auto-track was turned on -- so those show locked without anything
+-- being stored for them. A quest just accepted is auto-track's (see `accepted`).
 
 function addon:IsQuestAutoTrackLocked(questID)
-    return not Ledger()[questID]
+    return not (Ledger()[questID] or accepted[questID])
 end
 
 -- Locking hands a quest auto-track added to the player, as if they had tracked it by
@@ -372,6 +409,7 @@ function addon:SetQuestAutoTrackLocked(questID, locked)
         ledger[questID] = true
     end
     declined[questID] = nil
+    accepted[questID] = nil
 
     self:RefreshDisplay()
     if not locked then
