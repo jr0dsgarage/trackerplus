@@ -71,6 +71,8 @@ local DEFAULTS = {
     -- Panel textures, by name (see UI/PanelMedia.lua for the list)
     borderStyle = "Solid",
     backgroundStyle = "Solid",
+    -- 0-1 opacity of a textured background. Solid takes its opacity from backgroundColor.a.
+    backgroundTextureAlpha = 1,
     headerIconStyle = "standard", -- "none", "standard", "square", "text_brackets", "questlog"
     headerIconPosition = "right", -- "left", "right"
     headerBackgroundStyle = "questlog", -- "none", "questlog", "tracker"

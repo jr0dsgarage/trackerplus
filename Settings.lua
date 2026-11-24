@@ -45,6 +45,7 @@ local SETTING_EFFECTS = {
     borderEnabled = UpdateAppearance,
     borderSize = UpdateAppearance,
     backgroundStyle = UpdateAppearance,
+    backgroundTextureAlpha = UpdateAppearance,
     -- borderStyle is added below UpdateSlider, which it needs.
     barBorderSize = UpdateAppearanceAndRepaint,
     barTexture = UpdateAppearanceAndRepaint,
@@ -803,14 +804,16 @@ local function InitUI()
     leftY = CreateSlider(left, "Scale", "frameScale", 0.5, 2.0, 0.1, "Scale of the tracker frame.", leftY)
     AddDependency(function(db) return not db.matchBlizzardTracker end, frameWidthSlider, frameHeightSlider)
 
-    -- The color pickers only apply to Solid; textures are drawn in their own colors.
+    -- The color pickers only apply to Solid; textures are drawn in their own colors, with
+    -- the Background Opacity slider standing in for the alpha the Solid color carries.
     local function IsSolid(kind, name)
         return addon:IsSolidPanelMedia((addon:ResolvePanelMedia(kind, name)))
     end
-    local borderStyleDropdown, borderSizeSlider, borderColorPicker, backgroundColorPicker
+    local borderStyleDropdown, borderSizeSlider, borderColorPicker, backgroundColorPicker, backgroundAlphaSlider
     s, sy = StartColumnSection(appearance, "Panel Styling", y, 2)
     sy = CreateDropdown(s, "Background", "backgroundStyle", GetPanelMediaOptions("background"), "The texture behind the tracker, stretched to fill it: Solid, the game's own backgrounds, or any other addons registered with LibSharedMedia.", sy)
     sy, backgroundColorPicker = CreateColorPicker(s, "Background Color", "backgroundColor", UpdateAppearance, sy, 250)
+    sy, backgroundAlphaSlider = CreateSlider(s, "Background Opacity", "backgroundTextureAlpha", 0.05, 1, 0.05, "How solid a textured background is, where 1 is fully opaque. Solid sets its own opacity in Background Color.", sy)
     sy = CreateCheckbox(s, "Show Border", "borderEnabled", "Show a border around the tracker.", sy)
     sy, borderStyleDropdown = CreateDropdown(s, "Border Style", "borderStyle", GetPanelMediaOptions("border"), "The border drawn around the outside of the tracker: the game's own borders, plus any other addons registered with LibSharedMedia. Picking one sets Border Size to suit it.", sy)
     sy, borderColorPicker = CreateColorPicker(s, "Border Color", "borderColor", UpdateAppearance, sy, 250)
@@ -818,6 +821,7 @@ local function InitUI()
     AddDependency(function(db) return db.borderEnabled end, borderStyleDropdown, borderSizeSlider)
     AddDependency(function(db) return db.borderEnabled and IsSolid("border", db.borderStyle) end, borderColorPicker)
     AddDependency(function(db) return IsSolid("background", db.backgroundStyle) end, backgroundColorPicker)
+    AddDependency(function(db) return not IsSolid("background", db.backgroundStyle) end, backgroundAlphaSlider)
     y = y - EndColumnRow(left, leftY, s, sy)
 
     left, leftY = StartColumnSection(appearance, "Header Styling", y, 1)
