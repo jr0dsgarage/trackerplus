@@ -124,6 +124,8 @@ local DEFAULTS = {
     includeCampaignQuestInActiveQuest = false,
     includeFTAQuests = false,
     autoMinimizeHeaders = false, -- Collapse quest zone headers except the current zone and quest areas we stand in
+    autoTrackNearby = false, -- Track quests in the current zone / quest areas we stand in (Data/AutoTrackQuests.lua)
+    autoTrackFill = false,   -- ...and fill the remaining watch slots with the closest other quests
 
     -- Spoken integration (only offered while Spoken Quests is loaded; see UI/SpokenPlayButton.lua)
     spokenPlayButton = true,             -- Play button on quest rows that a voice pack reads
@@ -238,10 +240,28 @@ function addon:InitDatabase()
 
     -- Create reference to settings
     addon.db = TrackerPlusDB.settings
+
+    -- Per-character state. Watched quests belong to a character, so the quests
+    -- auto-track added (and may take away again) are kept here, not account-wide.
+    if type(TrackerPlusCharDB) ~= "table" then
+        TrackerPlusCharDB = {}
+    end
+    if type(TrackerPlusCharDB.autoTracked) ~= "table" then
+        TrackerPlusCharDB.autoTracked = {}
+    end
+    -- ...and the quests the player claimed from it, with the padlock or by tracking
+    -- them by hand.
+    if type(TrackerPlusCharDB.autoTrackLocked) ~= "table" then
+        TrackerPlusCharDB.autoTrackLocked = {}
+    end
+    addon.charDB = TrackerPlusCharDB
 end
 
 -- Reset settings to defaults
 function addon:ResetDatabase()
+    -- Auto-track defaults to off: hand back the quests it added and stop its timer.
+    addon:SetAutoTrack(false)
+
     TrackerPlusDB.settings = DeepCopy(DEFAULTS)
     ApplyClientRestrictions(TrackerPlusDB.settings)
     addon.db = TrackerPlusDB.settings

@@ -90,10 +90,11 @@ function addon:CreateTrackerHeader(trackerFrame)
     trackerFrame.title:SetText("Tracker Plus")
 
     -- Chrome buttons, right to left from the minimize button: settings (-34),
-    -- lock (-54), auto-minimize (-74), Follow the Arrow (-94).
+    -- lock (-54), auto-minimize (-74), auto-track (-94), Follow the Arrow (-114).
+    -- Follow the Arrow is leftmost, so hiding it leaves no gap.
 
     -- FTA Toggle Button (arrow icon). Gold when enabled, grey when disabled.
-    local ftaBtn = CreateChromeButton(trackerFrame, -94, function()
+    local ftaBtn = CreateChromeButton(trackerFrame, -114, function()
         return addon.db.includeFTAQuests and "Disable Follow the Arrow" or "Enable Follow the Arrow"
     end)
     trackerFrame.ftaToggleBtn = ftaBtn
@@ -113,6 +114,31 @@ function addon:CreateTrackerHeader(trackerFrame)
         addon.db.includeFTAQuests = not addon.db.includeFTAQuests
         ftaBtn.UpdateColor()
         addon:RequestUpdate()
+    end)
+
+    -- Auto-track Toggle Button (crosshair). Full color when on, greyed out when off.
+    local autoTrackBtn = CreateChromeButton(trackerFrame, -94, function()
+        return addon.db.autoTrackNearby and "Auto-track Nearby Quests: On" or "Auto-track Nearby Quests: Off",
+            "Tracks the quests whose map pins are in your current zone, and any quest area you're standing in. Turning it off untracks only the quests it added; quests you tracked yourself stay."
+    end)
+    trackerFrame.autoTrackBtn = autoTrackBtn
+    local autoTrackTex = autoTrackBtn:CreateTexture(nil, "ARTWORK")
+    autoTrackTex:SetAllPoints()
+    autoTrackTex:SetTexture("Interface\\Cursor\\Crosshairs")
+    autoTrackBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    autoTrackBtn.UpdateColor = function()
+        if addon.db.autoTrackNearby then
+            autoTrackTex:SetDesaturated(false)
+            autoTrackTex:SetVertexColor(1, 1, 1, 1)
+        else
+            autoTrackTex:SetDesaturated(true)
+            autoTrackTex:SetVertexColor(0.5, 0.5, 0.5, 1)
+        end
+    end
+    autoTrackBtn.UpdateColor()
+    autoTrackBtn:SetScript("OnClick", function(self)
+        addon:SetAutoTrack(not addon.db.autoTrackNearby)
+        RefreshTooltip(self)
     end)
 
     -- Auto-minimize Toggle Button ("A"). Gold when on, grey when off -- including
@@ -185,6 +211,7 @@ function addon:CreateTrackerHeader(trackerFrame)
     local chromeLevel = trackerFrame:GetFrameLevel() + 50
     trackerFrame.ftaToggleBtn:SetFrameLevel(chromeLevel)
     trackerFrame.autoMinBtn:SetFrameLevel(chromeLevel)
+    trackerFrame.autoTrackBtn:SetFrameLevel(chromeLevel)
     trackerFrame.lockBtn:SetFrameLevel(chromeLevel)
     trackerFrame.settingsBtn:SetFrameLevel(chromeLevel)
     trackerFrame.minMaxBtn:SetFrameLevel(chromeLevel)
@@ -247,6 +274,7 @@ function addon:CreateTrackerHeader(trackerFrame)
             trackerFrame.settingsBtn:Hide()
             trackerFrame.lockBtn:Hide()
             trackerFrame.autoMinBtn:Hide()
+            trackerFrame.autoTrackBtn:Hide()
             trackerFrame.ftaToggleBtn:Hide()
             trackerFrame.title:Hide()
             trackerFrame.headerBg:Hide()
@@ -292,6 +320,7 @@ function addon:CreateTrackerHeader(trackerFrame)
             trackerFrame.settingsBtn:Show()
             trackerFrame.lockBtn:Show()
             trackerFrame.autoMinBtn:Show()
+            trackerFrame.autoTrackBtn:Show()
             -- Stays hidden when FollowTheArrow isn't loaded.
             addon:UpdateFTAToggleVisibility()
             trackerFrame.title:Show()

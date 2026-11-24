@@ -88,6 +88,8 @@ local SETTING_EFFECTS = {
     mapPOIGlowOpacity = RefreshMapPins,
     -- Starts or stops the area watcher; the highlight is an overlay on existing rows.
     highlightQuestsInArea = function() addon:UpdateQuestAreaWatcher() end,
+    autoTrackNearby = function(enabled) addon:SetAutoTrack(enabled) end,
+    autoTrackFill = function() addon:RunAutoTrackPass() end,
     questAreaHighlightStyle = function() addon:RefreshQuestAreaHighlights(true) end,
 
     debugEnabled = function(enabled)
@@ -645,7 +647,9 @@ local function InitUI()
     s, sy = StartColumnSection(panel, "Visibility", y, 2)
     sy = CreateCheckbox(s, "Hide in Instances", "hideInInstance", "Hide the tracker inside dungeons and raids.", sy)
     sy = CreateCheckbox(s, "Hide in Combat", "hideInCombat", "Hide the tracker during combat.", sy)
-    sy = CreateCheckbox(s, "Hide When Empty", "fadeWhenEmpty", "Hide the tracker while nothing is tracked (only while it's locked).", sy)
+    local hideWhenEmptyCheck
+    sy, hideWhenEmptyCheck = CreateCheckbox(s, "Hide When Empty", "fadeWhenEmpty", "Hide the tracker while nothing is tracked (only while it's locked). Not available while Auto-track nearby quests is on, so the tracker stays up in zones with nothing nearby.", sy)
+    AddDependency(function(db) return not db.autoTrackNearby end, hideWhenEmptyCheck)
     y = y - EndColumnRow(left, leftY, s, sy)
 
     -- Built only from what applies here: campaigns are retail-only, and Follow the
@@ -662,6 +666,13 @@ local function InitUI()
         end
         y = y - EndSection(s, sy)
     end
+
+    s, sy = StartSection(panel, "Quest Tracking", y)
+    local autoTrackCheck, autoFillCheck
+    sy, autoTrackCheck = CreateCheckbox(s, "Auto-track nearby quests", "autoTrackNearby", "Track the quests whose map pins are in your current zone, and any quest area you're standing in, and untrack them again when you leave. In a dungeon or raid, its quests are tracked too. Quests you tracked yourself are never untracked. Turning this off untracks only the quests it added. Also on the tracker's title bar.", sy)
+    sy, autoFillCheck = CreateCheckbox(s, "Auto fill the quest log", "autoTrackFill", "Also use any tracking slots left over for your closest other quests, so the tracker always shows as many quests as the game allows.", sy)
+    AddDependency(function(db) return db.autoTrackNearby end, autoFillCheck)
+    y = y - EndSection(s, sy)
 
     local overview = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     overview:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, y)

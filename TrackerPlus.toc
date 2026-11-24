@@ -5,6 +5,7 @@
 ## Version: @project-version@
 ## Category-enUS: j__r0d's garage
 ## SavedVariables: TrackerPlusDB
+## SavedVariablesPerCharacter: TrackerPlusCharDB
 ## IconTexture: Interface\Icons\INV_Misc_Map_01
 ## X-Curse-Project-ID: 1803301
 
@@ -17,6 +18,7 @@ Data/QuestCollectors.lua
 Data/ActivityCollectors.lua
 Data/QuestColors.lua
 Data/TrackableSort.lua
+Data/AutoTrackQuests.lua
 UI/TrackerUtils.lua
 UI/SpokenPlayButton.lua
 UI/PanelMedia.lua

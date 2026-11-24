@@ -49,6 +49,48 @@ local ROW_BG_TOP_INSET = 2
 -- Space between the POI button and a Spoken Play button placed under it.
 local SPOKEN_POI_GAP = 3
 
+-- Auto-track's per-quest padlock (see Data/AutoTrackQuests.lua): yellow when the quest
+-- is the player's (auto-track leaves it alone), grey when auto-track manages it.
+local AUTO_TRACK_LOCK_SIZE = 14
+local AUTO_TRACK_LOCK_TEXTURE = "Interface\\PetBattles\\PetBattle-LockIcon"
+
+local function OnAutoTrackLockClick(self)
+    local questID = self.questID
+    if not questID then return end
+    addon:SetQuestAutoTrackLocked(questID, not addon:IsQuestAutoTrackLocked(questID))
+    if self:IsMouseOver() then self:GetScript("OnEnter")(self) end
+end
+
+local function OnAutoTrackLockEnter(self)
+    local tooltip = addon:AcquireTooltip(self, "ANCHOR_RIGHT")
+    if addon:IsQuestAutoTrackLocked(self.questID) then
+        tooltip:SetText("Locked")
+        tooltip:AddLine("Auto-track won't untrack this quest. Click to let auto-track manage it; it will be untracked once it's no longer nearby.", 1, 1, 1, true)
+    else
+        tooltip:SetText("Auto-tracked")
+        tooltip:AddLine("Auto-track will untrack this quest when you leave. Click to lock it, keeping it tracked as if you had tracked it yourself.", 1, 1, 1, true)
+    end
+    tooltip:Show()
+end
+
+local function GetAutoTrackLock(button)
+    local lock = button.autoTrackLock
+    if not lock then
+        lock = CreateFrame("Button", nil, button)
+        lock:SetSize(AUTO_TRACK_LOCK_SIZE, AUTO_TRACK_LOCK_SIZE)
+        lock:SetHitRectInsets(-2, -2, -2, -2)
+        lock.icon = lock:CreateTexture(nil, "ARTWORK")
+        lock.icon:SetAllPoints()
+        lock.icon:SetTexture(AUTO_TRACK_LOCK_TEXTURE)
+        lock:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+        lock:SetScript("OnClick", OnAutoTrackLockClick)
+        lock:SetScript("OnEnter", OnAutoTrackLockEnter)
+        lock:SetScript("OnLeave", function() addon:HideSharedTooltip() end)
+        button.autoTrackLock = lock
+    end
+    return lock
+end
+
 -- Shared with the quest-area highlight's card styles, which overlay this background.
 function addon:AnchorRowCard(tex, button)
     tex:SetPoint("TOPLEFT", button, "TOPLEFT", ROW_BG_LEFT, ROW_BG_PAD)
@@ -482,6 +524,29 @@ function addon:RenderTrackableItem(parent, item, yOffset, indent)
                 spokenButton:SetPoint("TOPLEFT", button, "TOPLEFT", 0, -lineTop)
             end
         end
+    end
+
+    -- Auto-track's padlock, left of a right-hand Play button (or at the right edge).
+    -- Only on the game's own quests: world quests and bonus objectives aren't watched.
+    if db.autoTrackNearby and (item.type == "quest" or item.type == "campaign")
+        and not item.isWorldQuest and parent ~= self.activeQuestFrame then
+        local lock = GetAutoTrackLock(button)
+        lock.questID = item.id
+        lock:SetFrameLevel(button:GetFrameLevel() + 3)
+        lock:ClearAllPoints()
+        local lineTop = 2 + topInset + max(0, (db.fontSize - AUTO_TRACK_LOCK_SIZE) / 2)
+        lock:SetPoint("TOPRIGHT", button, "TOPRIGHT", rightPadding, -lineTop)
+        rightPadding = rightPadding - AUTO_TRACK_LOCK_SIZE - 4
+        if self:IsQuestAutoTrackLocked(item.id) then
+            lock.icon:SetDesaturated(false)
+            lock.icon:SetVertexColor(1, 0.82, 0, 1)
+        else
+            lock.icon:SetDesaturated(true)
+            lock.icon:SetVertexColor(0.5, 0.5, 0.5, 1)
+        end
+        lock:Show()
+    elseif button.autoTrackLock then
+        button.autoTrackLock:Hide()
     end
 
     button.text:ClearAllPoints()

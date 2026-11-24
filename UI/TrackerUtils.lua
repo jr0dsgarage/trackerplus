@@ -279,6 +279,8 @@ function addon:GetOrCreateButton(parent)
     if btn._ftaCounter then btn._ftaCounter:Hide() end
     -- Only trackable rows draw a row background (RenderTrackableItem re-shows it).
     if btn.rowBg then btn.rowBg:Hide() end
+    -- Auto-track's quest padlock; the quest renderer re-shows it.
+    if btn.autoTrackLock then btn.autoTrackLock:Hide() end
     -- The quest-area highlight belongs to whichever quest last used this button; the
     -- quest renderer re-applies it, every other renderer must not inherit it.
     if btn._areaLit or btn._areaQuestID then addon:ApplyQuestAreaHighlight(btn, nil) end
