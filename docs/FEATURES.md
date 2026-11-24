@@ -11,7 +11,7 @@ Here's what it does.
 - **Sorting.** Sort quests by difficulty (easiest or hardest first), by proximity, or alphabetically.
 - **Quest level and party count.** Each quest can show its level, like `[28+]` for a group quest, and `(+2)` when two party members are also on it. Hover it to see who, in class colors.
 - **Quest area marker.** When you're standing inside the area the map shades for a quest, that quest's row lights up. There are several styles: stripe, bracket, outline, tint, gradient, or a Battle.net friend card.
-- **Auto-track nearby quests.** One button tracks the quests whose map pins are in your zone, plus the quest areas you're standing in, and untracks them when you leave. Optionally fills the rest of your tracking slots with your closest quests. Quests you tracked yourself are never touched.
+- **Auto-track nearby quests.** One button tracks the quests whose map pins are in your zone, plus the quest areas you're standing in (or, in a dungeon or raid, that instance's quests), and untracks them when you leave. Optionally fills the rest of your tracking slots with your closest quests. Quests you tracked yourself are never touched.
 - **Auto-minimize zones.** One button collapses every zone header except the one you're in. Zones open back up when you get there.
 - **Quest timers and popups.** Timed quests get a countdown, and auto-accept and auto-complete popups show up at the top of the tracker.
 - **Click actions you'd expect.** Click to open the map, Shift-click to link, right-click for a menu (focus, untrack, share, abandon and so on), Shift-right-click to untrack a quest straight away. Quest item buttons and Find a Group buttons work like they do on the default tracker.

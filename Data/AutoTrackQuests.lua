@@ -5,11 +5,13 @@ local addonName, addon = ...
 --
 -- While on (title bar button, or Settings > Quest Tracking), every TICK_SECONDS the
 -- quest log is ranked:
---   1. quests whose shaded map area (quest blob) the player is standing in
+--   1. quests whose shaded map area (quest blob) the player is standing in, and in a
+--      dungeon or raid, the quests filed under that instance's quest log header (many
+--      instances have no map, so their quests can't be placed by pin)
 --   2. quests whose map pin (objectives, or the turn-in NPC once the quest is ready
---      to hand in) is in the player's current zone. The quest log's zone headers are
---      deliberately ignored: a quest is filed under the zone it came from, which says
---      nothing about where it's done.
+--      to hand in) is in the player's current zone. Outside instances the quest log's
+--      zone headers are deliberately ignored: a quest is filed under the zone it came
+--      from, which says nothing about where it's done.
 --   3. with "Auto fill the quest log" on: every other quest with a location, nearest first
 -- and the best of them are watched, up to the game's watch cap less the quests the
 -- player tracked by hand.
@@ -43,6 +45,24 @@ local INCUMBENT_FACTOR = 0.75 * 0.75
 local IsInsideQuestBlob = C_Minimap and C_Minimap.IsInsideQuestBlob
 
 local EMPTY = {}
+
+-- Instance types whose quests are tracked by quest log header: dungeons and raids.
+local HEADER_INSTANCE_TYPES = { party = true, raid = true }
+local instanceHeaders = {}
+
+-- In a dungeon or raid, the quest log header titles its quests are filed under (the
+-- instance's name, and the zone text in case it differs); nil anywhere else.
+local function GetInstanceHeaders()
+    if not GetInstanceInfo then return nil end
+    local name, instanceType = GetInstanceInfo()
+    if not HEADER_INSTANCE_TYPES[instanceType] then return nil end
+    wipe(instanceHeaders)
+    if name and name ~= "" then instanceHeaders[name] = true end
+    local zone = GetRealZoneText()
+    if zone and zone ~= "" then instanceHeaders[zone] = true end
+    if next(instanceHeaders) == nil then return nil end
+    return instanceHeaders
+end
 
 -- The zone-level map a map belongs to: maps below zone level (a city district with
 -- its own map, a cave, a building) count as the zone they sit in. Cached, since map
@@ -146,22 +166,27 @@ local function CompareCandidates(a, b)
 end
 
 -- Fills `candidates` with every quest in the log auto-track may watch, each with its
--- tier and a ranking distance. Quests on no tier are left out.
-local function CollectCandidates(fill, ledger)
+-- tier and a ranking distance. Quests on no tier are left out. `headers` is
+-- GetInstanceHeaders()'s answer.
+local function CollectCandidates(fill, ledger, headers)
     ReleaseCandidates()
     local numEntries = C_QuestLog.GetNumQuestLogEntries()
     local playerZoneMapID = GetZoneMapID(C_Map.GetBestMapForUnit("player"))
+    local underInstanceHeader = false
 
     for i = 1, numEntries do
         local info = C_QuestLog.GetInfo(i)
         if info then
-            if not info.isHeader and not info.isHidden and info.questID and info.questID > 0
+            if info.isHeader then
+                underInstanceHeader = headers ~= nil and info.title ~= nil and headers[info.title] == true
+            elseif not info.isHidden and info.questID and info.questID > 0
                 and not info.isBounty
                 and not C_QuestLog.IsWorldQuest(info.questID)
                 and not C_QuestLog.IsQuestTask(info.questID) then
                 local questID = info.questID
                 local tier
-                if IsInsideQuestBlob and IsInsideQuestBlob(questID) == true then
+                if underInstanceHeader
+                    or (IsInsideQuestBlob and IsInsideQuestBlob(questID) == true) then
                     tier = 1
                 elseif playerZoneMapID and GetQuestZoneMapID(questID) == playerZoneMapID then
                     tier = 2
@@ -198,8 +223,10 @@ end
 -- One ranking pass: works out which quests should be watched and makes it so.
 function addon:RunAutoTrackPass()
     if not (self.db and self.db.autoTrackNearby and self.db.enabled) then return end
-    -- Nothing reliable to rank against during a loading screen.
-    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")) then return end
+    -- Nothing reliable to rank against during a loading screen. Dungeons and raids
+    -- often have no map at all, but their quests are found by header instead.
+    local headers = GetInstanceHeaders()
+    if not (headers or (C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player"))) then return end
     -- Leave the tracker alone mid-fight; the next tick after combat catches up.
     if InCombatLockdown() then return end
 
@@ -242,7 +269,7 @@ function addon:RunAutoTrackPass()
         end
     end
 
-    CollectCandidates(self.db.autoTrackFill, ledger)
+    CollectCandidates(self.db.autoTrackFill, ledger, headers)
     sort(candidates, CompareCandidates)
 
     -- Slots: the cap less everything watched that isn't ours.

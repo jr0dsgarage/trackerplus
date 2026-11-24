@@ -668,7 +668,7 @@ local function InitUI()
 
     s, sy = StartSection(panel, "Quest Tracking", y)
     local autoTrackCheck, autoFillCheck
-    sy, autoTrackCheck = CreateCheckbox(s, "Auto-track nearby quests", "autoTrackNearby", "Track the quests whose map pins are in your current zone, and any quest area you're standing in, and untrack them again when you leave. Quests you tracked yourself are never untracked. Turning this off untracks only the quests it added. Also on the tracker's title bar.", sy)
+    sy, autoTrackCheck = CreateCheckbox(s, "Auto-track nearby quests", "autoTrackNearby", "Track the quests whose map pins are in your current zone, and any quest area you're standing in, and untrack them again when you leave. In a dungeon or raid, its quests are tracked too. Quests you tracked yourself are never untracked. Turning this off untracks only the quests it added. Also on the tracker's title bar.", sy)
     sy, autoFillCheck = CreateCheckbox(s, "Auto fill the quest log", "autoTrackFill", "Also use any tracking slots left over for your closest other quests, so the tracker always shows as many quests as the game allows.", sy)
     AddDependency(function(db) return db.autoTrackNearby end, autoFillCheck)
     y = y - EndSection(s, sy)

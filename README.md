@@ -118,7 +118,7 @@ The expand/collapse icon's style and side, and the header background, are set un
 
 ### Auto-track nearby quests
 
-**Auto-track** (the **crosshair** button on the title bar, or **Settings → TrackerPlus → Quest Tracking**) tracks the quests around you. It picks quests whose shaded map area you're standing in first, then quests whose map pin is in your current zone, and untracks them again when you leave. The pin is on a quest's objectives, or on the NPC you hand it in to once it's ready, so a quest from another zone that you turn in here is picked up too. Which zone a quest is listed under in the quest log doesn't matter.
+**Auto-track** (the **crosshair** button on the title bar, or **Settings → TrackerPlus → Quest Tracking**) tracks the quests around you. It picks quests whose shaded map area you're standing in first, then quests whose map pin is in your current zone, and untracks them again when you leave. The pin is on a quest's objectives, or on the NPC you hand it in to once it's ready, so a quest from another zone that you turn in here is picked up too. Which zone a quest is listed under in the quest log doesn't matter, except in a dungeon or raid: there it tracks every quest listed under that dungeon or raid in your quest log, since most have no map to place quests on.
 
 Turn on **Auto fill the quest log** as well to use whatever tracking slots are left over for your closest other quests, so the tracker always holds as many quests as the game allows (25).
 
