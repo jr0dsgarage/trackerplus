@@ -123,9 +123,9 @@ The expand/collapse icon's style and side, and the header background, are set un
 Turn on **Auto fill the quest log** as well to use whatever tracking slots are left over for your closest other quests, so the tracker always holds as many quests as the game allows (25).
 
 - Quests you track yourself are never untracked by it.
-- While auto-track is on, each quest row has a **padlock** beside its title. Yellow means the quest is yours and auto-track leaves it alone; quests you track yourself from the quest log or map, and quests you were already tracking before turning auto-track on, start yellow. Grey means auto-track manages it and will untrack it when you leave; that includes quests you accept while auto-track is on. Click a grey padlock to keep that quest tracked; click a yellow one to hand the quest to auto-track.
-- If you untrack a quest it added, it leaves that quest alone until you leave the area or zone, or until you track it again yourself.
-- Turning auto-track off untracks only the quests it added. Everything you tracked yourself stays.
+- While auto-track is on, each quest row has a **padlock** beside its title. Yellow means the quest is yours and auto-track leaves it alone. A quest only turns yellow when you click its padlock or track it yourself from the quest log or map (including quests you tracked yourself before turning auto-track on). Grey means auto-track manages it and will untrack it when you leave; that includes every quest the game tracks for you, such as the quests you accept, whenever the game gets round to tracking them. Click a grey padlock to keep that quest tracked; click a yellow one to hand the quest to auto-track.
+- If you untrack a quest, auto-track leaves it alone until you leave the area or zone. Track it again yourself and it's yours.
+- Turning auto-track off untracks only the quests it added. Everything you tracked yourself stays, and so do quests the game tracked for you.
 - Auto-track works alongside auto-minimize: turn both on to have nearby quests tracked and every other zone's header collapsed.
 
 ![Header styles](docs/screenshots/header-styles.png)

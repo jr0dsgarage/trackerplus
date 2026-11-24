@@ -247,6 +247,11 @@ function addon:InitDatabase()
     if type(TrackerPlusCharDB.autoTracked) ~= "table" then
         TrackerPlusCharDB.autoTracked = {}
     end
+    -- ...and the quests the player claimed from it, with the padlock or by tracking
+    -- them by hand.
+    if type(TrackerPlusCharDB.autoTrackLocked) ~= "table" then
+        TrackerPlusCharDB.autoTrackLocked = {}
+    end
     addon.charDB = TrackerPlusCharDB
 end
 
