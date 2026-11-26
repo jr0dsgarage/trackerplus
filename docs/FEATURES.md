@@ -14,7 +14,7 @@ Here's what it does.
 - **Auto-track nearby quests.** One button tracks the quests whose map pins are in your zone, plus the quest areas you're standing in (or, in a dungeon or raid, that instance's quests), and untracks them when you leave. Optionally fills the rest of your tracking slots with your closest quests. Quests you tracked yourself are never touched.
 - **Auto-minimize zones.** One button collapses every zone header except the one you're in. Zones open back up when you get there.
 - **Quest timers and popups.** Timed quests get a countdown, and auto-accept and auto-complete popups show up at the top of the tracker.
-- **Click actions you'd expect.** Click to open the map, Shift-click to link, right-click for a menu (focus, untrack, share, abandon and so on), Shift-right-click to untrack a quest or recipe straight away. Quest item buttons and Find a Group buttons work like they do on the default tracker.
+- **Click actions you'd expect.** Click to open the quest log, Shift-click to link, right-click for a menu (focus, untrack, share, abandon and so on), Shift-right-click to untrack a quest or recipe straight away. Quest item buttons and Find a Group buttons work like they do on the default tracker.
 
 ## Nameplate highlights
 

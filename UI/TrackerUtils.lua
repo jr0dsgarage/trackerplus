@@ -443,39 +443,34 @@ function addon:StopTrackingTrackable(trackable)
     return true
 end
 
--- Open the world map on a quest's zone. Super-tracking is left to the quest's POI
--- button, so a plain click never changes which quest is focused.
+-- Open the quest log on a quest's details, as the game's own tracker does. In Forever
+-- (and Retail) the quest log is the world map's side panel, and L opens the map in its
+-- small "Map & Quest Log" layout, so this opens the map too. Super-tracking is left to
+-- the quest's POI button, so a plain click never changes which quest is focused.
 --
--- Deliberately does not open the quest's details pane. Any map work done from addon
--- code taints it, and the map's quest pins then hit a blocked SetPassThroughButtons
--- call when Blizzard refreshes them:
---   * ToggleWorldMap() acquires pins under our taint, and Blizzard reuses them later
+-- This knowingly runs map code as us, which taints it, and the map's quest pins can
+-- then hit a blocked SetPassThroughButtons call when Blizzard refreshes them in combat:
+--   * Opening the map acquires pins under our taint, and Blizzard reuses them later
 --     even on a plain M-key open.
 --   * QuestMapFrame_ShowQuestDetails() stores the quest in DetailsFrame.questID, which
 --     every quest-pin refresh reads (QuestMapFrame_GetFocusedQuestID), so even a
 --     secure QUEST_LOG_UPDATE refresh turns tainted while that pane is up.
--- C_Map.OpenWorldMap fires WORLD_MAP_OPEN for Blizzard's own handler to answer, so
--- the map opens without running any map code as us.
+-- The taint-free route, C_Map.OpenWorldMap, can only open the map as M does: it keeps
+-- the map's last size, so a map last closed full screen comes back without the quest
+-- log. Opening the quest log was judged worth the risk of those errors.
 --
--- In place of the details pane, the clicked quest is scrolled into view in the map's
--- quest list and given a glow (see the quest list focus section below). Both stay
--- clear of anything the pins read.
-function addon:OpenMapToQuest(questID)
+-- The quest is also given the quest list focus (see the section below), so it is
+-- scrolled to and highlighted if the player goes back from its details to the list.
+function addon:OpenQuestLogToQuest(questID)
     if not questID then return end
 
     self:SetQuestLogFocus(questID)
 
-    if WorldMapFrame and WorldMapFrame:IsShown() then
-        -- The list is already built, so no rebuild is coming to apply the focus.
-        self:ApplyQuestLogFocus()
-        return
-    end
-
-    if C_Map and C_Map.OpenWorldMap then
-        local mapID = GetQuestUiMapID and GetQuestUiMapID(questID)
-        C_Map.OpenWorldMap(mapID and mapID > 0 and mapID or nil)
+    if QuestMapFrame_OpenToQuestDetails then
+        QuestMapFrame_OpenToQuestDetails(questID)
+    elseif OpenQuestLog then
+        OpenQuestLog()
     else
-        -- No taint-free route on this client; opening the map is still worth it.
         ToggleWorldMap()
     end
 
@@ -595,11 +590,17 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 end
             elseif trackable.type == "quest" or trackable.type == "campaign" or trackable.type == "supertrack" then
                 local questID = trackable.id or trackable.questID
-                -- Show on map, unless its details are already open there.
-                local alreadyShown = QuestMapFrame and QuestMapFrame.GetDetailQuestID
-                    and QuestMapFrame:GetDetailQuestID() == questID and QuestMapFrame:IsVisible()
+                -- Open its details in the quest log, unless they're already showing there.
+                -- Forever has only the global getter; the method is kept for other clients.
+                local detailQuestID
+                if QuestMapFrame_GetDetailQuestID then
+                    detailQuestID = QuestMapFrame_GetDetailQuestID()
+                elseif QuestMapFrame and QuestMapFrame.GetDetailQuestID then
+                    detailQuestID = QuestMapFrame:GetDetailQuestID()
+                end
+                local alreadyShown = detailQuestID and detailQuestID == questID and QuestMapFrame:IsVisible()
                 if questID and not alreadyShown then
-                    self:OpenMapToQuest(questID)
+                    self:OpenQuestLogToQuest(questID)
                 end
             elseif trackable.type == "achievement" then
                 -- Open achievement UI
@@ -672,9 +673,8 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     addon:RequestUpdate()
                 end)
 
-                -- Open Quest Log (Show in Map)
                 rootDescription:CreateButton("Show in Quest Log", function()
-                    addon:OpenMapToQuest(questID)
+                    addon:OpenQuestLogToQuest(questID)
                 end)
 
                 -- Share (as the game's quest log offers it: in a group, for a shareable quest)
