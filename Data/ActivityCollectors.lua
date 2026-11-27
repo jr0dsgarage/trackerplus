@@ -306,6 +306,7 @@ local function AddTrackedRecipes(trackables, isRecraft, color)
                 level = 0, -- Recipes don't really have levels like quests
                 zone = professionInfo and professionInfo.professionName or "Professions",
                 isRecraft = isRecraft,
+                outputItemID = schematic.outputItemID, -- nil for enchants and other no-item recipes
                 objectives = BuildRecipeObjectives(schematic),
                 color = color,
             }

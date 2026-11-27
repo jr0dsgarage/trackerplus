@@ -134,14 +134,16 @@ Turn on **Auto fill the quest log** as well to use whatever tracking slots are l
 
 | On a… | Click | Shift-click | Right-click |
 | --- | --- | --- | --- |
-| Quest | Open the quest log on its details, as the default tracker does | Link it in chat | Menu: Focus Quest, Stop Tracking, Show in Quest Log, Share Quest (in a group), Link to Chat, Abandon Quest. Shift-right-click stops tracking it without the menu. |
+| Quest | Open the quest log on its details, as the default tracker does | Link it in chat | Menu: Focus Quest, Stop Tracking, Show in Quest Log, Share Quest (in a group), Link to Chat, Copy Wowhead Link, Abandon Quest. Shift-right-click stops tracking it without the menu. |
 | Quest popup | Accept or turn in the quest | — | — |
 | Quest timer | Make it your Active quest | — | — |
 | World quest / bonus objective | — | Link it in chat | — |
 | Achievement | Open it in the Achievements window | Link it in chat | Menu: Link to Chat, Stop Tracking |
-| Recipe | Open it in your profession window | Link it in chat | Menu: Link to Chat, Stop Tracking. Shift-right-click stops tracking it without the menu. |
+| Recipe | Open it in your profession window | Link it in chat | Menu: Link to Chat, Copy Wowhead Link, Stop Tracking. Shift-right-click stops tracking it without the menu. |
 | Monthly activity | Open the Traveler's Log | Link it in chat | Menu: Link to Chat, Stop Tracking |
 | Endeavor | Open it in the housing window | Link it in chat | Menu: Link to Chat, Stop Tracking |
+
+**Copy Wowhead Link** shows the Wowhead page address for a quest or a recipe, already selected, for you to copy with Ctrl+C (Cmd+C on a Mac) and paste into your browser. Addons can't open a browser themselves. A recipe links to the item it makes, or to the recipe's own spell page if it makes no item, as enchants don't. The link goes to the database for the game you're playing: `wowhead.com/forever/` in Forever and `wowhead.com/` in Retail.
 
 The mouse wheel scrolls the tracker; there's no visible scrollbar.
 

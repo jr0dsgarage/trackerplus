@@ -415,6 +415,73 @@ function addon:LinkTrackableToChat(trackable)
     InsertChatLink(GetTrackableLink(trackable))
 end
 
+-- Wowhead keeps each game's database under its own path: /forever/ for Forever,
+-- /beta/ and /ptr/ for Retail's test clients, and none for live Retail.
+local function GetWowheadBaseURL()
+    if addon.IsForever then
+        return "https://www.wowhead.com/forever/"
+    elseif IsBetaBuild and IsBetaBuild() then
+        return "https://www.wowhead.com/beta/"
+    elseif IsPublicTestClient and IsPublicTestClient() then
+        return "https://www.wowhead.com/ptr/"
+    end
+    return "https://www.wowhead.com/"
+end
+
+-- An addon can't open a web page, so the link is shown selected in a box for the
+-- player to copy. Shown with (title, copy keys) as text and the URL as data.
+StaticPopupDialogs["TRACKERPLUS_WOWHEAD_LINK"] = {
+    text = "%s\n\nPress %s to copy the Wowhead link.",
+    button1 = CLOSE,
+    hasEditBox = true,
+    editBoxWidth = 350,
+    maxLetters = 255,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    OnShow = function(dialog, url)
+        local editBox = dialog:GetEditBox()
+        editBox:SetText(url)
+        editBox:SetFocus()
+        editBox:HighlightText()
+    end,
+    -- Typing in the box puts the link back, so a stray key can't spoil the copy.
+    -- Not while hidden: the popup empties its box on hide, and it must stay empty
+    -- for the next popup that uses the same frame.
+    EditBoxOnTextChanged = function(editBox, url)
+        if editBox:IsVisible() and editBox:GetText() ~= url then
+            editBox:SetText(url)
+            editBox:HighlightText()
+        end
+    end,
+    EditBoxOnEnterPressed = function(editBox)
+        editBox:GetParent():Hide()
+    end,
+    EditBoxOnEscapePressed = function(editBox)
+        editBox:GetParent():Hide()
+    end,
+}
+
+-- kind is Wowhead's page type ("quest", "item", "spell"). The page's name part of
+-- the address is left off: Wowhead finds the page by ID alone, and a non-English
+-- client's names would make the wrong one.
+function addon:ShowWowheadLink(kind, id, title)
+    if not id then return end
+    local url = GetWowheadBaseURL() .. kind .. "=" .. id
+    StaticPopup_Show("TRACKERPLUS_WOWHEAD_LINK", title or url, IsMacClient() and "Cmd+C" or "Ctrl+C", url)
+end
+
+-- A recipe links to the item it makes, or to its own spell page when it makes none
+-- (enchants, for one). A recipe ID is its spell ID.
+function addon:ShowWowheadRecipeLink(trackable)
+    if trackable.outputItemID then
+        self:ShowWowheadLink("item", trackable.outputItemID, trackable.title)
+    else
+        self:ShowWowheadLink("spell", trackable.id, trackable.title)
+    end
+end
+
 -- Untrack a non-quest trackable. Returns true when the type supports it.
 function addon:StopTrackingTrackable(trackable)
     local t, id = trackable.type, trackable.id
@@ -690,6 +757,10 @@ function addon:OnTrackableClick(trackable, mouseButton)
                     addon:LinkQuestToChat(questID)
                 end)
 
+                rootDescription:CreateButton("Copy Wowhead Link", function()
+                    addon:ShowWowheadLink("quest", questID, trackable.title)
+                end)
+
                 -- Abandon (Cautious)
                 rootDescription:CreateButton("Abandon Quest", function()
                     C_QuestLog.SetSelectedQuest(questID)
@@ -712,6 +783,12 @@ function addon:OnTrackableClick(trackable, mouseButton)
                 rootDescription:CreateButton("Link to Chat", function()
                     addon:LinkTrackableToChat(trackable)
                 end)
+
+                if trackable.type == "profession" then
+                    rootDescription:CreateButton("Copy Wowhead Link", function()
+                        addon:ShowWowheadRecipeLink(trackable)
+                    end)
+                end
 
                 rootDescription:CreateButton("Stop Tracking", function()
                     addon:StopTrackingTrackable(trackable)
